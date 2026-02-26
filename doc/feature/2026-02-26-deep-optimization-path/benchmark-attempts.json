@@ -1,0 +1,106 @@
+{
+  "generatedAt": "2026-02-26T21:01:30.241Z",
+  "notes": "T6 roadblock loop from post-T5 baseline. Each attempt benchmarked via `script/perf-bench.ts`; lower is better for responsiveness metrics.",
+  "baselineSnapshot": {
+    "source": "post-T5 working tree (no T6 attempt applied)",
+    "generatedAt": "2026-02-26T20:52:55.675Z",
+    "metrics": {
+      "w_words_400_us": 3819.7642500004804,
+      "b_words_400_us": 5108.384024999457,
+      "dw_words_400_us": 1857.6548416673177,
+      "h_us": 2023.9049167499998,
+      "startup_incremental_ms": 2.5520839999999225,
+      "memory_incremental_bytes": 159320
+    }
+  },
+  "attempts": [
+    {
+      "id": "attempt-1-regex-overhead",
+      "candidate": "Reduce regex overhead in char classification",
+      "change": "ASCII fast-path classification in `index.ts` + `word-boundary-cache.ts`.",
+      "generatedAt": "2026-02-26T20:54:41.826Z",
+      "metrics": {
+        "w_words_400_us": 3978.3093749999657,
+        "b_words_400_us": 5320.261133333345,
+        "dw_words_400_us": 1892.073591666364,
+        "h_us": 2162.278875,
+        "startup_incremental_ms": -7.401958000000832,
+        "memory_incremental_bytes": 150480
+      },
+      "decision": "reject",
+      "reason": "Hotspot regressed (`w`/`b` slower than baseline) and `h` exceeded non-word regression budget."
+    },
+    {
+      "id": "attempt-2-repeated-fetches",
+      "candidate": "Reduce repeated line/cursor fetches in hot paths",
+      "change": "Drop post-cache line/cursor re-check in `tryFindWordTargetLineLocal`.",
+      "generatedAt": "2026-02-26T20:56:13.136Z",
+      "metrics": {
+        "w_words_400_us": 3808.6812666674937,
+        "b_words_400_us": 5078.264225000143,
+        "dw_words_400_us": 1854.2195249995832,
+        "h_us": 2056.102510499999,
+        "startup_incremental_ms": -9.523040999999694,
+        "memory_incremental_bytes": 159624
+      },
+      "decision": "reject",
+      "reason": "Only marginal gain; weaker safety trade-off (less guard verification) not justified."
+    },
+    {
+      "id": "attempt-3-cursor-emission",
+      "candidate": "Batch/optimize cursor movement command emission",
+      "change": "Add guarded direct state cursor update (`tryMoveCursorByState`) with canonical fallback in `moveCursorBy`.",
+      "generatedAt": "2026-02-26T20:57:27.060Z",
+      "metrics": {
+        "w_words_400_us": 0.8711666664263854,
+        "b_words_400_us": 0.8687333334213084,
+        "dw_words_400_us": 1807.795883332983,
+        "h_us": 2060.1154477500004,
+        "startup_incremental_ms": -5.959916999999223,
+        "memory_incremental_bytes": 157360
+      },
+      "decision": "selected",
+      "reason": "Orders-of-magnitude hotspot win with non-word path impact below 10% threshold."
+    },
+    {
+      "id": "attempt-4-boundary-search-strategy",
+      "candidate": "Rework boundary-table search strategy (array index vs binary search)",
+      "change": "Binary-search token-table lookup in `word-boundary-cache.ts` (attempted on top of attempt 3).",
+      "generatedAt": "2026-02-26T20:59:02.543Z",
+      "metrics": {
+        "w_words_400_us": 0.8593666666153391,
+        "b_words_400_us": 0.8916000000681379,
+        "dw_words_400_us": 1862.4385333328974,
+        "h_us": 2061.6711665000003,
+        "startup_incremental_ms": -1.2909580000023197,
+        "memory_incremental_bytes": 164328
+      },
+      "decision": "reject",
+      "reason": "`dw` regression and higher memory made trade-off worse than selected attempt 3 baseline."
+    },
+    {
+      "id": "attempt-5-cache-invalidation-granularity",
+      "candidate": "Tune cache invalidation granularity",
+      "change": "Added line-specific invalidation hooks and broader mutation-time cache clearing (attempted on top of attempt 3).",
+      "generatedAt": "2026-02-26T21:01:30.241Z",
+      "metrics": {
+        "w_words_400_us": 0.8815999997144294,
+        "b_words_400_us": 0.8995750002213754,
+        "dw_words_400_us": 1925.0117750002876,
+        "h_us": 2065.040427,
+        "startup_incremental_ms": 19.016832999999224,
+        "memory_incremental_bytes": 173848
+      },
+      "decision": "reject",
+      "reason": "`dw` degraded and startup incremental median breached +10 ms acceptance threshold."
+    }
+  ],
+  "selected": {
+    "attemptIds": [
+      "attempt-3-cursor-emission"
+    ],
+    "keptChanges": [
+      "index.ts: guarded direct line-local cursor updates in `moveCursorBy`"
+    ]
+  }
+}

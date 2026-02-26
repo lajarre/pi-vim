@@ -511,7 +511,39 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private tryMoveCursorByState(delta: number): boolean {
+    if (delta === 0) return true;
+
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number;
+      tui?: { requestRender?: () => void };
+    };
+
+    const state = editor.state;
+    if (!state || !Array.isArray(state.lines)) return false;
+    if (!Number.isInteger(state.cursorLine) || !Number.isInteger(state.cursorCol)) return false;
+
+    const cursorLine = state.cursorLine as number;
+    const cursorCol = state.cursorCol as number;
+    const line = state.lines[cursorLine] ?? "";
+    const target = cursorCol + delta;
+
+    // Only short-circuit line-local movement; preserve canonical key replay for
+    // any potential cross-line traversal semantics.
+    if (target < 0 || target > line.length) return false;
+
+    state.cursorCol = target;
+    editor.preferredVisualCol = target;
+    editor.tui?.requestRender?.();
+    return true;
+  }
+
   private moveCursorBy(delta: number): void {
+    if (delta === 0) return;
+
+    if (this.tryMoveCursorByState(delta)) return;
+
     const seq = delta > 0 ? ESC_RIGHT : ESC_LEFT;
     for (let i = 0; i < Math.abs(delta); i++) {
       super.handleInput(seq);
