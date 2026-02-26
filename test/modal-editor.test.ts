@@ -101,6 +101,20 @@ describe("mode transitions", () => {
     assert.equal(editor.getText(), "abc");
     assert.equal(editor.getMode(), "normal");
   });
+
+  it("normal mode ignores bracketed paste payload", () => {
+    const { editor } = createEditorWithSpy("abc");
+    sendKeys(editor, ["\x1b[200~PASTE\x1b[201~"]);
+    assert.equal(editor.getText(), "abc");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("insert mode keeps bracketed paste payload text", () => {
+    const { editor } = createEditorWithSpy("abc");
+    sendKeys(editor, ["i", "\x1b[200~PASTE\x1b[201~"]);
+    assert.equal(editor.getText(), "PASTEabc");
+    assert.equal(editor.getMode(), "insert");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -699,6 +713,42 @@ describe("operator cancellation", () => {
     // After d f, pasted printable chunks should cancel the wait and be ignored.
     // If operator stays sticky or text is inserted, final state differs.
     sendKeys(editor, ["d", "f", "ab", "w", "x"]);
+
+    assert.equal(editor.getText(), "foo ar");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("bracketed paste chunk cancels df target wait", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+
+    sendKeys(editor, ["d", "f", "\x1b[200~PASTE\x1b[201~", "w", "x"]);
+
+    assert.equal(editor.getText(), "foo ar");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("split bracketed paste cancels df target wait", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+
+    sendKeys(editor, ["d", "f", "\x1b[200~", "PASTE", "\x1b[201~", "w", "x"]);
+
+    assert.equal(editor.getText(), "foo ar");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("double-escape recovers from unterminated bracketed paste discard mode", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+
+    sendKeys(editor, ["\x1b[200~", "\x1b", "\x1b", "w", "x"]);
+
+    assert.equal(editor.getText(), "foo ar");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("split bracketed paste end marker closes discard state", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+
+    sendKeys(editor, ["\x1b[200~", "PASTE", "\x1b", "[201~", "w", "x"]);
 
     assert.equal(editor.getText(), "foo ar");
     assert.equal(editor.getRegister(), "b");

@@ -79,12 +79,18 @@ import {
   findCharMotionTarget,
 } from "./motions.js";
 
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
+const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
+
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
   private pendingTextObject: "i" | "a" | null = null;
   private pendingOperator: PendingOperator = null;
   private lastCharMotion: LastCharMotion | null = null;
+  private discardingBracketedPasteInNormalMode: boolean = false;
+  private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -99,7 +105,82 @@ export class ModalEditor extends CustomEditor {
   getMode(): Mode { return this.mode; }
   getText(): string { return this.getLines().join("\n"); }
 
+  private clearPendingState(): void {
+    this.pendingMotion = null;
+    this.pendingTextObject = null;
+    this.pendingOperator = null;
+  }
+
+  private stripBracketedPasteInNormalMode(data: string): { filtered: string | null; stripped: boolean } {
+    let chunk = data;
+    let stripped = false;
+
+    while (true) {
+      if (this.discardingBracketedPasteInNormalMode) {
+        stripped = true;
+        const end = chunk.indexOf(BRACKETED_PASTE_END);
+        if (end === -1) {
+          return { filtered: null, stripped };
+        }
+        this.discardingBracketedPasteInNormalMode = false;
+        this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
+        chunk = chunk.slice(end + BRACKETED_PASTE_END.length);
+        if (!chunk) return { filtered: null, stripped };
+      }
+
+      const start = chunk.indexOf(BRACKETED_PASTE_START);
+      if (start === -1) {
+        return { filtered: chunk, stripped };
+      }
+
+      stripped = true;
+      const end = chunk.indexOf(BRACKETED_PASTE_END, start + BRACKETED_PASTE_START.length);
+      if (end === -1) {
+        this.discardingBracketedPasteInNormalMode = true;
+        const leading = chunk.slice(0, start);
+        return { filtered: leading.length > 0 ? leading : null, stripped };
+      }
+
+      chunk = chunk.slice(0, start) + chunk.slice(end + BRACKETED_PASTE_END.length);
+      if (!chunk) return { filtered: null, stripped };
+    }
+  }
+
   handleInput(data: string): void {
+    if (this.mode !== "insert") {
+      if (this.discardingBracketedPasteInNormalMode) {
+        if (data === "\x1b") {
+          if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
+            this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
+            this.discardingBracketedPasteInNormalMode = false;
+          } else {
+            this.pendingEscWhileDiscardingBracketedPasteInNormalMode = true;
+            this.clearPendingState();
+            return;
+          }
+        } else if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
+          if (data.startsWith(BRACKETED_PASTE_END_TAIL)) {
+            this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
+            this.discardingBracketedPasteInNormalMode = false;
+            data = data.slice(BRACKETED_PASTE_END_TAIL.length);
+            if (data.length === 0) {
+              this.clearPendingState();
+              return;
+            }
+          } else {
+            this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
+          }
+        }
+      }
+
+      const { filtered, stripped } = this.stripBracketedPasteInNormalMode(data);
+      if (stripped) {
+        this.clearPendingState();
+      }
+      if (filtered === null) return;
+      data = filtered;
+    }
+
     if (matchesKey(data, "escape")) {
       return this.handleEscape();
     }
@@ -155,9 +236,7 @@ export class ModalEditor extends CustomEditor {
 
   private handleEscape(): void {
     if (this.pendingMotion || this.pendingTextObject || this.pendingOperator) {
-      this.pendingMotion = null;
-      this.pendingTextObject = null;
-      this.pendingOperator = null;
+      this.clearPendingState();
       return;
     }
     if (this.mode === "insert") {
