@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { findWordMotionTarget, findCharMotionTarget } from "../motions.js";
+import { WordBoundaryCache } from "../word-boundary-cache.js";
 
 // ---------------------------------------------------------------------------
 // findWordMotionTarget
@@ -66,6 +67,44 @@ describe("findWordMotionTarget — backward/start (b)", () => {
   it("b skips trailing spaces before the previous word", () => {
     // "foo   bar", col=6 ('b') → b skips '   ', lands on 'f' at 0
     assert.equal(findWordMotionTarget("foo   bar", 6, "backward", "start"), 0);
+  });
+});
+
+describe("WordBoundaryCache", () => {
+  it("keys entries by exact line content", () => {
+    const cache = new WordBoundaryCache();
+
+    const first = cache.get("alpha beta");
+    const second = cache.get("alpha beta");
+    const third = cache.get("alpha  beta");
+
+    assert.equal(first, second);
+    assert.notEqual(first, third);
+  });
+
+  it("returns precomputed targets equivalent to canonical line scanner", () => {
+    const cache = new WordBoundaryCache();
+    const line = "foo_bar -- baz";
+
+    assert.equal(
+      cache.tryFindTarget(line, 0, "forward", "start"),
+      findWordMotionTarget(line, 0, "forward", "start"),
+    );
+    assert.equal(
+      cache.tryFindTarget(line, 0, "forward", "end"),
+      findWordMotionTarget(line, 0, "forward", "end"),
+    );
+    assert.equal(
+      cache.tryFindTarget(line, 11, "backward", "start"),
+      findWordMotionTarget(line, 11, "backward", "start"),
+    );
+  });
+
+  it("returns null for uncertain cursor inputs", () => {
+    const cache = new WordBoundaryCache();
+
+    assert.equal(cache.tryFindTarget("abc", -1, "forward", "start"), null);
+    assert.equal(cache.tryFindTarget("abc", Number.NaN, "forward", "start"), null);
   });
 });
 

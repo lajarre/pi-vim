@@ -77,8 +77,12 @@ import {
 import {
   reverseCharMotion,
   findCharMotionTarget,
-  findWordMotionTarget,
 } from "./motions.js";
+import {
+  WordBoundaryCache,
+  type WordMotionDirection,
+  type WordMotionTarget,
+} from "./word-boundary-cache.js";
 
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
@@ -92,6 +96,7 @@ export class ModalEditor extends CustomEditor {
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
+  private readonly wordBoundaryCache = new WordBoundaryCache();
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -576,29 +581,64 @@ export class ModalEditor extends CustomEditor {
     return i;
   }
 
+  private tryFindWordTargetLineLocal(
+    direction: WordMotionDirection,
+    target: WordMotionTarget,
+    allowSameColumn: boolean = false,
+  ): number | null {
+    const cursor = this.getCursor();
+    const lineIndex = cursor.line;
+    const col = cursor.col;
+    const lineSnapshot = this.getLines()[lineIndex] ?? "";
+
+    if (lineSnapshot.length === 0) return null;
+    if (col < 0 || col > lineSnapshot.length) return null;
+
+    if (direction === "forward") {
+      if (col >= lineSnapshot.length) return null;
+    } else {
+      if (col <= 0) return null;
+      if (!/\S/.test(lineSnapshot.slice(0, col))) return null;
+    }
+
+    const targetCol = this.wordBoundaryCache.tryFindTarget(
+      lineSnapshot,
+      col,
+      direction,
+      target,
+    );
+    if (targetCol === null) return null;
+
+    const liveLine = this.getLines()[lineIndex] ?? "";
+    const liveCol = this.getCursor().col;
+    if (liveLine !== lineSnapshot || liveCol !== col) return null;
+
+    if (direction === "forward") {
+      if (targetCol >= lineSnapshot.length) return null;
+      if (allowSameColumn) {
+        if (targetCol < col) return null;
+      } else if (targetCol <= col) {
+        return null;
+      }
+      return targetCol;
+    }
+
+    if (allowSameColumn) {
+      if (targetCol > col) return null;
+    } else if (targetCol >= col) {
+      return null;
+    }
+
+    return targetCol;
+  }
+
   private tryMoveWordLineLocal(
     direction: "forward" | "backward",
     target: "start" | "end",
   ): boolean {
-    const cursor = this.getCursor();
-    const line = this.getLines()[cursor.line] ?? "";
-    const col = cursor.col;
-
-    if (line.length === 0) return false;
-
-    if (direction === "forward") {
-      if (col >= line.length) return false;
-      const targetCol = findWordMotionTarget(line, col, direction, target);
-      if (targetCol <= col || targetCol >= line.length) return false;
-      this.moveCursorBy(targetCol - col);
-      return true;
-    }
-
-    if (col <= 0) return false;
-    if (!/\S/.test(line.slice(0, col))) return false;
-
-    const targetCol = findWordMotionTarget(line, col, direction, target);
-    if (targetCol >= col) return false;
+    const col = this.getCursor().col;
+    const targetCol = this.tryFindWordTargetLineLocal(direction, target);
+    if (targetCol === null || targetCol === col) return false;
 
     this.moveCursorBy(targetCol - col);
     return true;

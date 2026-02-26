@@ -429,6 +429,24 @@ describe("word motion path selection", () => {
     assert.equal(calls, 0);
   });
 
+  it("cache uncertainty falls back to canonical absolute scanner", () => {
+    const { editor } = createEditorWithSpy("alpha beta");
+
+    const raw = editor as any;
+    const original = raw.findWordTargetInText.bind(raw);
+    let calls = 0;
+
+    raw.findWordTargetInText = (...args: unknown[]) => {
+      calls++;
+      return original(...args);
+    };
+
+    raw.wordBoundaryCache.tryFindTarget = () => null;
+
+    sendKeys(editor, ["w"]);
+    assert.ok(calls > 0);
+  });
+
   it("w at EOL falls back to canonical absolute scanner", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
     sendKeys(editor, ["$"]);
