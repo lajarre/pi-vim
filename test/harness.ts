@@ -32,8 +32,7 @@ export function sendKeys(editor: ModalEditor, keys: string[]): void {
 
 /**
  * Create a ModalEditor pre-loaded with `initialText`, positioned in NORMAL
- * mode with cursor at line start.  Returns the editor plus helpers for
- * observing register writes.
+ * mode with cursor at line start. Returns the editor plus clipboard spy data.
  *
  * Flow:
  *   1. Type initialText in INSERT mode (editor starts in insert).
@@ -42,7 +41,6 @@ export function sendKeys(editor: ModalEditor, keys: string[]): void {
  */
 export function createEditorWithSpy(initialText: string): {
   editor: ModalEditor;
-  getRegister: () => string;
   clipboardWrites: string[];
 } {
   const clipboardWrites: string[] = [];
@@ -59,7 +57,7 @@ export function createEditorWithSpy(initialText: string): {
   editor.handleInput("\x1b");
   editor.handleInput("0");
 
-  return { editor, getRegister: () => editor.getRegister(), clipboardWrites };
+  return { editor, clipboardWrites };
 }
 
 /**

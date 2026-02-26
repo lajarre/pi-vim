@@ -55,6 +55,9 @@ function chkMode(
 describe("mode transitions", () => {
   it("escape enters normal mode", () => {
     const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["i"]);
+    assert.equal(editor.getMode(), "insert");
+    sendKeys(editor, ["\x1b"]);
     assert.equal(editor.getMode(), "normal");
   });
 
@@ -68,6 +71,13 @@ describe("mode transitions", () => {
     const { editor } = createEditorWithSpy("hello");
     sendKeys(editor, ["\x1b"]);
     assert.equal(editor.getMode(), "normal");
+  });
+
+  it("a at EOL on non-last line appends on same line", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    sendKeys(editor, ["$", "a", "X"]);
+    assert.equal(editor.getText(), "fooX\nbar");
+    assert.equal(editor.getMode(), "insert");
   });
 });
 
@@ -473,6 +483,13 @@ describe("put — character-wise", () => {
     sendKeys(editor, ["p"]);
     assert.equal(editor.getText(), "hhelloello");
   });
+
+  it("p at EOL on non-last line inserts before newline", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    editor.setRegister("X");
+    sendKeys(editor, ["$", "p"]);
+    assert.equal(editor.getText(), "fooX\nbar");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -652,6 +669,29 @@ describe("operator cancellation", () => {
     sendKeys(editor, ["c", "z", "w"]);
     assert.equal(editor.getText(), before);
     assert.equal(editor.getMode(), "normal");
+  });
+
+  it("non-printable input cancels df target wait without stickiness", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    const before = editor.getText();
+
+    // After d f, a non-printable key must cancel the pending operator+motion.
+    // If it stays sticky, the next w would delete.
+    sendKeys(editor, ["d", "f", "\x1b[C", "w"]);
+
+    assert.equal(editor.getText(), before);
+    assert.equal(editor.getRegister(), "");
+  });
+
+  it("non-printable invalid motion is passed through after cancel", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    // d + RightArrow should cancel d and still move right.
+    // Then x should delete 'b' (not 'a').
+    sendKeys(editor, ["d", "\x1b[C", "x"]);
+
+    assert.equal(editor.getText(), "ac");
+    assert.equal(editor.getRegister(), "b");
   });
 });
 

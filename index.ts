@@ -1,7 +1,7 @@
 /**
- * Modal Editor - vim-like modal editing example
+ * Modal Editor - vim-like modal editing extension
  *
- * Usage: pi --extension ./examples/extensions/modal-editor.ts
+ * Usage: pi --extension ./index.ts
  *
  * - Escape: insert → normal mode (in normal mode, aborts agent)
  * - i: normal → insert mode (at cursor)
@@ -167,29 +167,45 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private handlePendingMotion(data: string): void {
-    if (data.length === 1 && data.charCodeAt(0) >= 32) {
-      if (this.pendingOperator === "d") {
-        this.deleteWithCharMotion(this.pendingMotion!, data);
-        this.pendingOperator = null;
-      } else if (this.pendingOperator === "c") {
-        this.deleteWithCharMotion(this.pendingMotion!, data);
-        this.pendingOperator = null;
-        this.mode = "insert";
-      } else if (this.pendingOperator === "y") {
-        this.yankWithCharMotion(this.pendingMotion!, data);
-        this.pendingOperator = null;
-      } else {
-        this.executeCharMotion(this.pendingMotion!, data);
-      }
+  private isPrintableInput(data: string): boolean {
+    return data.length === 1 && data.charCodeAt(0) >= 32;
+  }
+
+  private cancelPendingOperator(data: string): void {
+    this.pendingOperator = null;
+    if (!this.isPrintableInput(data)) {
+      super.handleInput(data);
     }
+  }
+
+  private handlePendingMotion(data: string): void {
+    if (!this.isPrintableInput(data)) {
+      this.pendingMotion = null;
+      this.cancelPendingOperator(data);
+      return;
+    }
+
+    if (this.pendingOperator === "d") {
+      this.deleteWithCharMotion(this.pendingMotion!, data);
+      this.pendingOperator = null;
+    } else if (this.pendingOperator === "c") {
+      this.deleteWithCharMotion(this.pendingMotion!, data);
+      this.pendingOperator = null;
+      this.mode = "insert";
+    } else if (this.pendingOperator === "y") {
+      this.yankWithCharMotion(this.pendingMotion!, data);
+      this.pendingOperator = null;
+    } else {
+      this.executeCharMotion(this.pendingMotion!, data);
+    }
+
     this.pendingMotion = null;
   }
 
   private handlePendingTextObject(data: string): void {
     if (data !== "w") {
       this.pendingTextObject = null;
-      this.pendingOperator = null;
+      this.cancelPendingOperator(data);
       return;
     }
 
@@ -243,7 +259,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     // Invalid motion: cancel operator to avoid sticky surprising deletes.
-    this.pendingOperator = null;
+    this.cancelPendingOperator(data);
   }
 
   private handlePendingChange(data: string): void {
@@ -268,7 +284,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     // Invalid motion: cancel operator to avoid sticky surprising changes.
-    this.pendingOperator = null;
+    this.cancelPendingOperator(data);
   }
 
   private handleNormalMode(data: string): void {
@@ -341,7 +357,9 @@ export class ModalEditor extends CustomEditor {
         break;
       case "a":
         this.mode = "insert";
-        super.handleInput(ESC_RIGHT);
+        if (!this.isCursorAtOrPastEol()) {
+          super.handleInput(ESC_RIGHT);
+        }
         break;
       case "A":
         this.mode = "insert";
@@ -490,6 +508,11 @@ export class ModalEditor extends CustomEditor {
     return { line, col };
   }
 
+  private isCursorAtOrPastEol(): boolean {
+    const { line, col } = this.getCurrentLineAndCol();
+    return col >= line.length;
+  }
+
   private cutCharUnderCursor(): void {
     const { line, col } = this.getCurrentLineAndCol();
     if (line.length === 0) return; // Don't merge empty lines with x
@@ -591,7 +614,7 @@ export class ModalEditor extends CustomEditor {
     if (this.yankWithMotion(data)) {
       this.pendingOperator = null;
     } else {
-      this.pendingOperator = null; // cancel on unrecognised motion
+      this.cancelPendingOperator(data); // cancel on unrecognised motion
     }
   }
 
@@ -742,7 +765,9 @@ export class ModalEditor extends CustomEditor {
       }
     } else {
       // Character-wise: insert after cursor
-      super.handleInput(ESC_RIGHT);
+      if (!this.isCursorAtOrPastEol()) {
+        super.handleInput(ESC_RIGHT);
+      }
       for (const char of text) {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
