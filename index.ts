@@ -644,6 +644,23 @@ export class ModalEditor extends CustomEditor {
     return true;
   }
 
+  private tryWordMotionLineLocalRange(
+    motion: "w" | "e" | "b",
+  ): { col: number; targetCol: number; inclusive: boolean } | null {
+    const col = this.getCursor().col;
+    const direction: WordMotionDirection = motion === "b" ? "backward" : "forward";
+    const target: WordMotionTarget = motion === "e" ? "end" : "start";
+    const targetCol = this.tryFindWordTargetLineLocal(direction, target, motion === "e");
+
+    if (targetCol === null) return null;
+
+    return {
+      col,
+      targetCol,
+      inclusive: motion === "e",
+    };
+  }
+
   private moveWord(direction: "forward" | "backward", target: "start" | "end"): void {
     if (this.tryMoveWordLineLocal(direction, target)) return;
 
@@ -728,6 +745,16 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (motion === "w" || motion === "e" || motion === "b") {
+      const lineLocalRange = this.tryWordMotionLineLocalRange(motion);
+      if (lineLocalRange) {
+        this.deleteRange(
+          lineLocalRange.col,
+          lineLocalRange.targetCol,
+          lineLocalRange.inclusive,
+        );
+        return true;
+      }
+
       const text = this.getText();
       const currentAbs = this.getAbsoluteIndex(cursor.line, col);
       const targetAbs = this.findWordTargetInText(
@@ -793,6 +820,16 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (motion === "w" || motion === "e" || motion === "b") {
+      const lineLocalRange = this.tryWordMotionLineLocalRange(motion);
+      if (lineLocalRange) {
+        this.yankRange(
+          lineLocalRange.col,
+          lineLocalRange.targetCol,
+          lineLocalRange.inclusive,
+        );
+        return true;
+      }
+
       const text = this.getText();
       const currentAbs = this.getAbsoluteIndex(cursor.line, col);
       const targetAbs = this.findWordTargetInText(

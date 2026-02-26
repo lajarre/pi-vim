@@ -500,6 +500,67 @@ describe("word motion path selection", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Operator word-motion path selection
+// ---------------------------------------------------------------------------
+
+describe("operator word-motion path selection", () => {
+  it("line-local d/c/y + w/e/b avoid canonical absolute scanner", () => {
+    const scenarios: Array<{ name: string; initial: string; keys: string[] }> = [
+      { name: "dw", initial: "alpha beta", keys: ["d", "w"] },
+      { name: "de", initial: "alpha beta", keys: ["d", "e"] },
+      { name: "db", initial: "alpha beta", keys: ["w", "d", "b"] },
+      { name: "cw", initial: "alpha beta", keys: ["c", "w"] },
+      { name: "ce", initial: "alpha beta", keys: ["c", "e"] },
+      { name: "cb", initial: "alpha beta", keys: ["w", "c", "b"] },
+      { name: "yw", initial: "alpha beta", keys: ["y", "w"] },
+      { name: "ye", initial: "alpha beta", keys: ["y", "e"] },
+      { name: "yb", initial: "alpha beta", keys: ["w", "y", "b"] },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy(scenario.initial);
+      const raw = editor as any;
+      const original = raw.findWordTargetInText.bind(raw);
+      let calls = 0;
+
+      raw.findWordTargetInText = (...args: unknown[]) => {
+        calls++;
+        return original(...args);
+      };
+
+      sendKeys(editor, scenario.keys);
+      assert.equal(calls, 0, `${scenario.name} should stay line-local`);
+    }
+  });
+
+  it("cross-line operator word motions fall back to canonical scanner", () => {
+    const scenarios: Array<{ name: string; initial: string; keys: string[] }> = [
+      { name: "dw@EOL", initial: "foo\nbar", keys: ["$", "d", "w"] },
+      { name: "cw@EOL", initial: "foo\nbar", keys: ["$", "c", "w"] },
+      { name: "yw@EOL", initial: "foo\nbar", keys: ["$", "y", "w"] },
+      { name: "db@BOL", initial: "foo\nbar", keys: ["j", "0", "d", "b"] },
+      { name: "cb@BOL", initial: "foo\nbar", keys: ["j", "0", "c", "b"] },
+      { name: "yb@BOL", initial: "foo\nbar", keys: ["j", "0", "y", "b"] },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createMultiLineEditor(scenario.initial);
+      const raw = editor as any;
+      const original = raw.findWordTargetInText.bind(raw);
+      let calls = 0;
+
+      raw.findWordTargetInText = (...args: unknown[]) => {
+        calls++;
+        return original(...args);
+      };
+
+      sendKeys(editor, scenario.keys);
+      assert.ok(calls > 0, `${scenario.name} should fall back`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cross-line word motions (w / e / b and operator forms)
 // ---------------------------------------------------------------------------
 
