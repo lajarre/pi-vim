@@ -1,0 +1,26 @@
+{
+  "name": "pi-extension-vim-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "build": "echo 'nothing to build'",
+    "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
+    "check": "npm run test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}
