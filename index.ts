@@ -159,6 +159,8 @@ export class ModalEditor extends CustomEditor {
           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
             this.discardingBracketedPasteInNormalMode = false;
+            this.clearPendingState();
+            return;
           } else {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = true;
             this.clearPendingState();
@@ -240,12 +242,31 @@ export class ModalEditor extends CustomEditor {
     this.handleNormalMode(data);
   }
 
+  private clearUnderlyingPasteStateIfActive(): void {
+    const editor = this as unknown as {
+      isInPaste?: boolean;
+      pasteBuffer?: string;
+      pasteCounter?: number;
+    };
+
+    if (!editor.isInPaste) return;
+
+    editor.isInPaste = false;
+    if (typeof editor.pasteBuffer === "string") {
+      editor.pasteBuffer = "";
+    }
+    if (typeof editor.pasteCounter === "number") {
+      editor.pasteCounter = 0;
+    }
+  }
+
   private handleEscape(): void {
     if (this.pendingMotion || this.pendingTextObject || this.pendingOperator) {
       this.clearPendingState();
       return;
     }
     if (this.mode === "insert") {
+      this.clearUnderlyingPasteStateIfActive();
       this.mode = "normal";
     } else {
       super.handleInput("\x1b"); // pass escape to abort agent

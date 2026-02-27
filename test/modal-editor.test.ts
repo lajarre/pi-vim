@@ -85,7 +85,13 @@ function runScenario(
   initial: string,
   keys: string[],
   mode: "fast" | "canonical",
-): { text: string; register: string; editorMode: "normal" | "insert" } {
+): {
+  text: string;
+  register: string;
+  editorMode: "normal" | "insert";
+  cursorLine: number;
+  cursorCol: number;
+} {
   const { editor } = initial.includes("\n")
     ? createMultiLineEditor(initial)
     : createEditorWithSpy(initial);
@@ -96,10 +102,14 @@ function runScenario(
 
   sendKeys(editor, keys);
 
+  const cursor = editor.getCursor();
+
   return {
     text: editor.getText(),
     register: editor.getRegister(),
     editorMode: editor.getMode(),
+    cursorLine: cursor.line,
+    cursorCol: cursor.col,
   };
 }
 
@@ -169,6 +179,16 @@ describe("mode transitions", () => {
     sendKeys(editor, ["i", "\x1b[200~PASTE\x1b[201~"]);
     assert.equal(editor.getText(), "PASTEabc");
     assert.equal(editor.getMode(), "insert");
+  });
+
+  it("escape from insert clears unterminated bracketed paste state", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["i", "\x1b[200~", "\x1b", "l", "x"]);
+
+    assert.equal(editor.getMode(), "normal");
+    assert.equal(editor.getText(), "ac");
+    assert.equal(editor.getRegister(), "b");
   });
 });
 
@@ -1049,6 +1069,26 @@ describe("operator cancellation", () => {
 
     assert.equal(editor.getText(), "foo ar");
     assert.equal(editor.getRegister(), "b");
+  });
+
+  it("double-escape recovery does not forward escape upward", () => {
+    const { editor } = createEditorWithSpy("foo bar");
+
+    const customEditorProto = Object.getPrototypeOf(Object.getPrototypeOf(editor));
+    const originalHandleInput = customEditorProto.handleInput;
+    let forwardedEscapeCount = 0;
+
+    customEditorProto.handleInput = function (this: unknown, data: string): unknown {
+      if (data === "\x1b") forwardedEscapeCount++;
+      return originalHandleInput.call(this, data);
+    };
+
+    try {
+      sendKeys(editor, ["\x1b[200~", "\x1b", "\x1b"]);
+      assert.equal(forwardedEscapeCount, 0);
+    } finally {
+      customEditorProto.handleInput = originalHandleInput;
+    }
   });
 
   it("split bracketed paste end marker closes discard state", () => {

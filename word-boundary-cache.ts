@@ -14,10 +14,7 @@ enum CharType {
 }
 
 export interface WordBoundaryData {
-  readonly line: string;
   readonly length: number;
-  readonly tokenStarts: readonly number[];
-  readonly tokenEnds: readonly number[];
   readonly charTypes: Uint8Array;
   readonly runStartByIndex: Int32Array;
   readonly runEndByIndex: Int32Array;
@@ -46,9 +43,6 @@ function buildWordBoundaryData(line: string): WordBoundaryData {
     charTypes[i] = getCharType(line[i]);
   }
 
-  const tokenStarts: number[] = [];
-  const tokenEnds: number[] = [];
-
   for (let runStart = 0; runStart < len;) {
     const runType = charTypes[runStart]!;
     let runEnd = runStart;
@@ -59,11 +53,6 @@ function buildWordBoundaryData(line: string): WordBoundaryData {
     for (let i = runStart; i <= runEnd; i++) {
       runStartByIndex[i] = runStart;
       runEndByIndex[i] = runEnd;
-    }
-
-    if (runType !== CharType.Space) {
-      tokenStarts.push(runStart);
-      tokenEnds.push(runEnd);
     }
 
     runStart = runEnd + 1;
@@ -86,10 +75,7 @@ function buildWordBoundaryData(line: string): WordBoundaryData {
   }
 
   return {
-    line,
     length: len,
-    tokenStarts,
-    tokenEnds,
     charTypes,
     runStartByIndex,
     runEndByIndex,
@@ -151,20 +137,33 @@ function findTargetInLine(
   return data.runStartByIndex[i]!;
 }
 
+const DEFAULT_MAX_CACHE_ENTRIES = 256;
+
 export class WordBoundaryCache {
   private readonly entries = new Map<string, WordBoundaryData>();
+  private readonly maxEntries: number;
+
+  constructor(maxEntries: number = DEFAULT_MAX_CACHE_ENTRIES) {
+    this.maxEntries = Number.isInteger(maxEntries) && maxEntries > 0
+      ? maxEntries
+      : DEFAULT_MAX_CACHE_ENTRIES;
+  }
 
   get(line: string): WordBoundaryData {
     const cached = this.entries.get(line);
     if (cached) return cached;
 
     const built = buildWordBoundaryData(line);
+
+    if (this.entries.size >= this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.entries.delete(oldestKey);
+      }
+    }
+
     this.entries.set(line, built);
     return built;
-  }
-
-  clear(): void {
-    this.entries.clear();
   }
 
   tryFindTarget(
@@ -176,10 +175,6 @@ export class WordBoundaryCache {
     if (!Number.isInteger(col) || col < 0) return null;
 
     const boundaries = this.get(line);
-    if (boundaries.line !== line || boundaries.length !== line.length) {
-      return null;
-    }
-
     return findTargetInLine(boundaries, col, direction, target);
   }
 }

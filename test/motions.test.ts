@@ -115,6 +115,31 @@ describe("WordBoundaryCache", () => {
     assert.notEqual(first, third);
   });
 
+  it("evicts oldest entries when cache size is exceeded", () => {
+    const cache = new WordBoundaryCache(2);
+
+    const first = cache.get("first");
+    const second = cache.get("second");
+    cache.get("third");
+
+    // "second" survives right after first eviction.
+    assert.equal(cache.get("second"), second);
+
+    // "first" should be evicted first (FIFO eviction).
+    const firstReloaded = cache.get("first");
+    assert.notEqual(firstReloaded, first);
+  });
+
+  it("falls back to default capacity for invalid maxEntries", () => {
+    const cache = new WordBoundaryCache(0);
+
+    // Should not thrash every insertion: same key remains cached.
+    const first = cache.get("stable");
+    const second = cache.get("stable");
+
+    assert.equal(first, second);
+  });
+
   it("returns precomputed targets equivalent to canonical line scanner", () => {
     const cache = new WordBoundaryCache();
     const line = "foo_bar -- baz";
