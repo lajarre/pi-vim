@@ -1301,3 +1301,39 @@ describe("regression — delete handler recursion", () => {
     assert.ok(editor.getText().length >= 0);
   });
 });
+
+describe("additional count combinations", () => {
+  it("d2k deletes current line and two above", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc\nd\ne");
+    sendKeys(editor, ["j", "j", "j", "d", "2", "k"]);
+    assert.equal(editor.getText(), "a\ne");
+    assert.equal(editor.getRegister(), "b\nc\nd\n");
+  });
+
+  it("d2j from middle of line deletes properly", () => {
+    const { editor } = createMultiLineEditor("abc\ndef\nghi\njkl");
+    sendKeys(editor, ["l", "d", "2", "j"]);
+    assert.equal(editor.getText(), "jkl");
+  });
+
+  it("d2d deletes two lines just like 2dd", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc");
+    sendKeys(editor, ["d", "2", "d"]);
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getRegister(), "a\nb\n");
+  });
+
+  it("2j executes j once and discards count (unsupported)", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc\nd");
+    sendKeys(editor, ["2", "j", "x"]);
+    assert.equal(editor.getText(), "a\n\nc\nd");
+  });
+
+  it("2dG cancels cleanly and swallows G because it is printable", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc");
+    sendKeys(editor, ["2", "d", "G", "x"]);
+    // Since 2dG is canceled, G is swallowed, and we just execute x on line 0
+    assert.equal(editor.getText(), "\nb\nc");
+    assert.equal(editor.getRegister(), "a");
+  });
+});

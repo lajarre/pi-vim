@@ -1372,10 +1372,14 @@ export class ModalEditor extends CustomEditor {
     const count = this.pendingCount;
 
     if (this.pendingOperator && this.pendingMotion) {
-      return ` NORMAL ${this.pendingOperator}${count}${this.pendingMotion}_ `;
+      const prefix = this.pendingCountKind === "prefix" ? count : "";
+      const opCount = this.pendingCountKind === "operator" ? count : "";
+      return ` NORMAL ${prefix}${this.pendingOperator}${opCount}${this.pendingMotion}_ `;
     }
     if (this.pendingOperator) {
-      return ` NORMAL ${count}${this.pendingOperator}_ `;
+      const prefix = this.pendingCountKind === "prefix" ? count : "";
+      const opCount = this.pendingCountKind === "operator" ? count : "";
+      return ` NORMAL ${prefix}${this.pendingOperator}${opCount}_ `;
     }
     if (this.pendingMotion) return ` NORMAL ${this.pendingMotion}_ `;
     if (this.pendingG) return " NORMAL g_ ";
