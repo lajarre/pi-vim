@@ -88,14 +88,15 @@ import {
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
+const MAX_COUNT = 9999;
 
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
   private pendingTextObject: "i" | "a" | null = null;
   private pendingOperator: PendingOperator = null;
-  private pendingCount: string = "";
-  private pendingCountKind: "prefix" | "operator" | null = null;
+  private prefixCount: string = "";
+  private operatorCount: string = "";
   private pendingG: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
@@ -119,8 +120,8 @@ export class ModalEditor extends CustomEditor {
     this.pendingMotion = null;
     this.pendingTextObject = null;
     this.pendingOperator = null;
-    this.pendingCount = "";
-    this.pendingCountKind = null;
+    this.prefixCount = "";
+    this.operatorCount = "";
     this.pendingG = false;
   }
 
@@ -272,7 +273,8 @@ export class ModalEditor extends CustomEditor {
       this.pendingMotion
       || this.pendingTextObject
       || this.pendingOperator
-      || this.pendingCount
+      || this.prefixCount
+      || this.operatorCount
       || this.pendingG
     ) {
       this.clearPendingState();
@@ -307,21 +309,38 @@ export class ModalEditor extends CustomEditor {
     return data.length === 1 && data >= "1" && data <= "9";
   }
 
-  private takePendingCount(defaultValue: number = 1): number {
-    if (!this.pendingCount) return defaultValue;
+  private takeTotalCount(defaultValue: number = 1): number {
+    const prefixRaw = this.prefixCount;
+    const operatorRaw = this.operatorCount;
+    this.prefixCount = "";
+    this.operatorCount = "";
 
-    const parsed = Number.parseInt(this.pendingCount, 10);
-    this.pendingCount = "";
-    this.pendingCountKind = null;
+    if (!prefixRaw && !operatorRaw) return defaultValue;
 
-    if (!Number.isFinite(parsed) || parsed <= 0) return defaultValue;
-    return parsed;
+    const parse = (raw: string): number | null => {
+      if (!raw) return null;
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) return null;
+      return parsed;
+    };
+
+    const prefix = parse(prefixRaw);
+    const operator = parse(operatorRaw);
+
+    if (prefix === null && operator === null) return defaultValue;
+
+    const total = prefix !== null && operator !== null
+      ? prefix * operator
+      : prefix ?? operator ?? defaultValue;
+
+    if (!Number.isFinite(total) || total <= 0) return defaultValue;
+    return Math.min(MAX_COUNT, total);
   }
 
   private cancelPendingOperator(data: string): void {
     this.pendingOperator = null;
-    this.pendingCount = "";
-    this.pendingCountKind = null;
+    this.prefixCount = "";
+    this.operatorCount = "";
     if (!this.isPrintableChunk(data)) {
       super.handleInput(data);
     }
@@ -390,43 +409,35 @@ export class ModalEditor extends CustomEditor {
 
   private handlePendingDelete(data: string): void {
     if (this.isDigit(data)) {
-      if (this.pendingCount.length === 0) {
+      if (this.operatorCount.length === 0) {
         if (data !== "0") {
-          this.pendingCount = data;
-          this.pendingCountKind = "operator";
+          this.operatorCount = data;
           return;
         }
-      } else if (this.pendingCountKind === "operator") {
-        this.pendingCount += data;
-        return;
       } else {
-        // Dual counts like 2d3j are out of scope; fail closed.
-        this.cancelPendingOperator(data);
+        this.operatorCount += data;
         return;
       }
     }
 
     if (data === "d") {
-      const count = this.takePendingCount(1);
+      const count = this.takeTotalCount(1);
       this.deleteLinewiseByDelta(count - 1);
       this.pendingOperator = null;
       return;
     }
 
     if (data === "j" || data === "k") {
-      if (this.pendingCountKind === "prefix") {
-        this.cancelPendingOperator(data);
-        return;
-      }
-
-      const count = this.takePendingCount(1);
-      this.deleteLinewiseByDelta(data === "j" ? count : -count);
+      const hasDualCount = this.prefixCount.length > 0 && this.operatorCount.length > 0;
+      const count = this.takeTotalCount(1);
+      const delta = hasDualCount ? Math.max(0, count - 1) : count;
+      this.deleteLinewiseByDelta(data === "j" ? delta : -delta);
       this.pendingOperator = null;
       return;
     }
 
     if (data === "G") {
-      if (this.pendingCount.length > 0) {
+      if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
         this.cancelPendingOperator(data);
         return;
       }
@@ -436,7 +447,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (this.pendingCount.length > 0) {
+    if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
       // Counted forms beyond dd and d{count}j/k are intentionally out of scope.
       this.cancelPendingOperator(data);
       return;
@@ -461,10 +472,31 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handlePendingChange(data: string): void {
+    if (this.isDigit(data)) {
+      if (this.operatorCount.length === 0) {
+        if (data !== "0") {
+          this.operatorCount = data;
+          return;
+        }
+      } else {
+        this.operatorCount += data;
+        return;
+      }
+    }
+
     if (data === "c") {
+      if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
+        this.cancelPendingOperator(data);
+        return;
+      }
+
       this.cutLine();
       this.pendingOperator = null;
       this.mode = "insert";
+      return;
+    }
+    if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
+      this.cancelPendingOperator(data);
       return;
     }
     if (data === "i" || data === "a") {
@@ -495,23 +527,28 @@ export class ModalEditor extends CustomEditor {
       // Unsupported g-prefix command: discard prefix and keep processing input.
     }
 
-    if (this.pendingCount.length > 0) {
-      if (this.isDigit(data) && this.pendingCountKind === "prefix") {
-        this.pendingCount += data;
+    if (this.prefixCount.length > 0) {
+      if (this.isDigit(data)) {
+        this.prefixCount += data;
         return;
       }
 
-      if ((data === "d" || data === "y") && this.pendingCountKind === "prefix") {
+      if (data === "d" || data === "y") {
         this.pendingOperator = data;
         return;
       }
 
-      // Count prefixes are currently supported for dd/yy only.
-      this.pendingCount = "";
-      this.pendingCountKind = null;
+      if (data === "x") {
+        const count = this.takeTotalCount(1);
+        this.cutCharUnderCursor(count);
+        return;
+      }
+
+      // Unsupported prefixed forms: drop count and keep processing this key.
+      this.prefixCount = "";
+      this.operatorCount = "";
     } else if (this.isCountStarter(data)) {
-      this.pendingCount = data;
-      this.pendingCountKind = "prefix";
+      this.prefixCount = data;
       return;
     }
 
@@ -897,14 +934,13 @@ export class ModalEditor extends CustomEditor {
     return col >= line.length;
   }
 
-  private cutCharUnderCursor(): void {
+  private cutCharUnderCursor(count: number = 1): void {
     const { line, col } = this.getCurrentLineAndCol();
     if (line.length === 0) return; // Don't merge empty lines with x
     if (col >= line.length) return; // Don't delete past end of line
 
-    const deleted = line.slice(col, col + 1);
-    this.writeToRegister(deleted);
-    super.handleInput(ESC_DELETE);
+    const boundedCount = Math.max(1, Math.min(MAX_COUNT, count));
+    this.deleteRange(col, col + boundedCount, false);
   }
 
   private cutToEndOfLine(): void {
@@ -1078,43 +1114,35 @@ export class ModalEditor extends CustomEditor {
 
   private handlePendingYank(data: string): void {
     if (this.isDigit(data)) {
-      if (this.pendingCount.length === 0) {
+      if (this.operatorCount.length === 0) {
         if (data !== "0") {
-          this.pendingCount = data;
-          this.pendingCountKind = "operator";
+          this.operatorCount = data;
           return;
         }
-      } else if (this.pendingCountKind === "operator") {
-        this.pendingCount += data;
-        return;
       } else {
-        // Dual counts like 2y3k are out of scope; fail closed.
-        this.cancelPendingOperator(data);
+        this.operatorCount += data;
         return;
       }
     }
 
     if (data === "y") {
-      const count = this.takePendingCount(1);
+      const count = this.takeTotalCount(1);
       this.yankLinewiseByDelta(count - 1);
       this.pendingOperator = null;
       return;
     }
 
     if (data === "j" || data === "k") {
-      if (this.pendingCountKind === "prefix") {
-        this.cancelPendingOperator(data);
-        return;
-      }
-
-      const count = this.takePendingCount(1);
-      this.yankLinewiseByDelta(data === "j" ? count : -count);
+      const hasDualCount = this.prefixCount.length > 0 && this.operatorCount.length > 0;
+      const count = this.takeTotalCount(1);
+      const delta = hasDualCount ? Math.max(0, count - 1) : count;
+      this.yankLinewiseByDelta(data === "j" ? delta : -delta);
       this.pendingOperator = null;
       return;
     }
 
     if (data === "G") {
-      if (this.pendingCount.length > 0) {
+      if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
         this.cancelPendingOperator(data);
         return;
       }
@@ -1124,7 +1152,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (this.pendingCount.length > 0) {
+    if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
       // Counted forms beyond yy and y{count}j/k are intentionally out of scope.
       this.cancelPendingOperator(data);
       return;
@@ -1369,20 +1397,19 @@ export class ModalEditor extends CustomEditor {
   private getModeLabel(): string {
     if (this.mode === "insert") return " INSERT ";
 
-    const count = this.pendingCount;
+    const prefixCount = this.prefixCount;
+    const operatorCount = this.operatorCount;
 
     if (this.pendingOperator && this.pendingMotion) {
-      const prefix = this.pendingCountKind === "prefix" ? count : "";
-      const opCount = this.pendingCountKind === "operator" ? count : "";
-      return ` NORMAL ${prefix}${this.pendingOperator}${opCount}${this.pendingMotion}_ `;
+      return ` NORMAL ${prefixCount}${this.pendingOperator}${operatorCount}${this.pendingMotion}_ `;
     }
     if (this.pendingOperator) {
-      const prefix = this.pendingCountKind === "prefix" ? count : "";
-      const opCount = this.pendingCountKind === "operator" ? count : "";
-      return ` NORMAL ${prefix}${this.pendingOperator}${opCount}_ `;
+      return ` NORMAL ${prefixCount}${this.pendingOperator}${operatorCount}_ `;
     }
     if (this.pendingMotion) return ` NORMAL ${this.pendingMotion}_ `;
     if (this.pendingG) return " NORMAL g_ ";
+
+    const count = `${prefixCount}${operatorCount}`;
     if (count) return ` NORMAL ${count}_ `;
     return " NORMAL ";
   }

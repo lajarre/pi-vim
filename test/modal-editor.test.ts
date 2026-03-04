@@ -346,15 +346,6 @@ describe("linewise operators and counts", () => {
     assert.equal(editor.getRegister(), "b");
   });
 
-  it("rejects dual-count delete forms like 2d3j", () => {
-    const { editor } = createMultiLineEditor("a\nb\nc\nd");
-
-    sendKeys(editor, ["2", "d", "3", "j", "x"]);
-
-    assert.equal(editor.getText(), "a\n\nc\nd");
-    assert.equal(editor.getRegister(), "b");
-  });
-
   it("counted unsupported delete motion d2w cancels instead of deleting", () => {
     const { editor } = createEditorWithSpy("foo bar");
 
@@ -380,6 +371,40 @@ describe("linewise operators and counts", () => {
 
     assert.equal(editor.getText(), "oo bar");
     assert.equal(editor.getRegister(), "f");
+  });
+});
+
+describe("Universal Counts State & Bounds", () => {
+  it("2d3j multiplies prefix and operator counts", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc\nd\ne\nf\ng\nh");
+
+    sendKeys(editor, ["2", "d", "3", "j"]);
+
+    assert.equal(editor.getText(), "g\nh");
+  });
+
+  it("99999x is bounded and deletes only available text", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["9", "9", "9", "9", "9", "x"]);
+
+    assert.equal(editor.getText(), "");
+  });
+
+  it("2d3<Esc>x clears pending count/operator state", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["2", "d", "3", "\x1b", "x"]);
+
+    assert.equal(editor.getText(), "bc");
+  });
+
+  it("bracketed paste in normal mode clears state and keeps x working", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["2", "d", "\x1b[200~paste\x1b[201~", "x"]);
+
+    assert.equal(editor.getText(), "bc");
   });
 });
 
