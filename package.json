@@ -23,7 +23,9 @@
   "scripts": {
     "build": "echo 'nothing to build'",
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
-    "check": "npm run test"
+    "check": "npm run test",
+    "pack:check": "node --import tsx/esm script/pack-check.ts",
+    "prepublishOnly": "npm run pack:check && npm test"
   },
   "pi": {
     "extensions": [
