@@ -40,26 +40,35 @@ export function findCharMotionTarget(
   motion: CharMotion,
   targetChar: string,
   isRepeat: boolean = false,
+  count: number = 1,
 ): number | null {
   const isForward = motion === "f" || motion === "t";
   const isTill = motion === "t" || motion === "T";
+  const steps = Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
 
-  // For till repeats (;/,), we need extra offset to skip past the character we stopped before/after
-  const tillRepeatOffset = isTill && isRepeat ? 1 : 0;
+  let currentPos = col;
 
-  if (isForward) {
-    const searchStart = col + 1 + tillRepeatOffset;
-    const idx = line.indexOf(targetChar, searchStart);
-    if (idx !== -1) {
-      return isTill ? idx - 1 : idx;
+  for (let i = 0; i < steps; i++) {
+    const isFirst = i === 0;
+    const isFinal = i === steps - 1;
+    const tillRepeatOffset = isFirst && isTill && isRepeat ? 1 : 0;
+
+    if (isForward) {
+      const searchStart = currentPos + 1 + tillRepeatOffset;
+      const idx = line.indexOf(targetChar, searchStart);
+      if (idx === -1) return null;
+      if (isFinal) return isTill ? idx - 1 : idx;
+      currentPos = idx;
+      continue;
     }
-  } else {
-    const searchStart = col - 1 - tillRepeatOffset;
+
+    const searchStart = currentPos - 1 - tillRepeatOffset;
     const idx = line.lastIndexOf(targetChar, searchStart);
-    if (idx !== -1) {
-      return isTill ? idx + 1 : idx;
-    }
+    if (idx === -1) return null;
+    if (isFinal) return isTill ? idx + 1 : idx;
+    currentPos = idx;
   }
+
   return null;
 }
 

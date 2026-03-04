@@ -447,18 +447,19 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (CHAR_MOTION_KEYS.has(data)) {
+      this.pendingMotion = data as PendingMotion;
+      return;
+    }
+
     if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-      // Counted forms beyond dd and d{count}j/k are intentionally out of scope.
+      // Counted forms beyond dd, d{count}j/k, and d{count}{f/F/t/T} are out of scope.
       this.cancelPendingOperator(data);
       return;
     }
 
     if (data === "i" || data === "a") {
       this.pendingTextObject = data;
-      return;
-    }
-    if (CHAR_MOTION_KEYS.has(data)) {
-      this.pendingMotion = data as PendingMotion;
       return;
     }
 
@@ -495,16 +496,16 @@ export class ModalEditor extends CustomEditor {
       this.mode = "insert";
       return;
     }
+    if (CHAR_MOTION_KEYS.has(data)) {
+      this.pendingMotion = data as PendingMotion;
+      return;
+    }
     if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
       this.cancelPendingOperator(data);
       return;
     }
     if (data === "i" || data === "a") {
       this.pendingTextObject = data;
-      return;
-    }
-    if (CHAR_MOTION_KEYS.has(data)) {
-      this.pendingMotion = data as PendingMotion;
       return;
     }
     if (this.deleteWithMotion(data)) {
@@ -547,8 +548,13 @@ export class ModalEditor extends CustomEditor {
         || data === "p"
         || data === "P"
       );
+      const supportsCountedCharMotion = (
+        CHAR_MOTION_KEYS.has(data)
+        || data === ";"
+        || data === ","
+      );
 
-      if (!supportsCountedStandaloneEdit) {
+      if (!supportsCountedStandaloneEdit && !supportsCountedCharMotion) {
         // Unsupported prefixed forms: drop count and keep processing this key.
         this.prefixCount = "";
         this.operatorCount = "";
@@ -689,7 +695,8 @@ export class ModalEditor extends CustomEditor {
   private executeCharMotion(motion: CharMotion, targetChar: string, saveMotion: boolean = true): void {
     const line = this.getLines()[this.getCursor().line] ?? "";
     const col = this.getCursor().col;
-    const targetCol = findCharMotionTarget(line, col, motion, targetChar, !saveMotion);
+    const count = this.takeTotalCount(1);
+    const targetCol = findCharMotionTarget(line, col, motion, targetChar, !saveMotion, count);
 
     if (targetCol !== null && saveMotion) {
       this.lastCharMotion = { motion, char: targetChar };
@@ -1114,7 +1121,8 @@ export class ModalEditor extends CustomEditor {
   private deleteWithCharMotion(motion: CharMotion, targetChar: string): void {
     const line = this.getLines()[this.getCursor().line] ?? "";
     const col = this.getCursor().col;
-    const targetCol = findCharMotionTarget(line, col, motion, targetChar);
+    const count = this.takeTotalCount(1);
+    const targetCol = findCharMotionTarget(line, col, motion, targetChar, false, count);
 
     if (targetCol === null) return;
 
@@ -1162,18 +1170,19 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (CHAR_MOTION_KEYS.has(data)) {
+      this.pendingMotion = data as PendingMotion;
+      return;
+    }
+
     if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-      // Counted forms beyond yy and y{count}j/k are intentionally out of scope.
+      // Counted forms beyond yy, y{count}j/k, and y{count}{f/F/t/T} are out of scope.
       this.cancelPendingOperator(data);
       return;
     }
 
     if (data === "i" || data === "a") {
       this.pendingTextObject = data;
-      return;
-    }
-    if (CHAR_MOTION_KEYS.has(data)) {
-      this.pendingMotion = data as PendingMotion;
       return;
     }
 
@@ -1228,7 +1237,8 @@ export class ModalEditor extends CustomEditor {
   private yankWithCharMotion(motion: CharMotion, targetChar: string): void {
     const line = this.getLines()[this.getCursor().line] ?? "";
     const col = this.getCursor().col;
-    const targetCol = findCharMotionTarget(line, col, motion, targetChar);
+    const count = this.takeTotalCount(1);
+    const targetCol = findCharMotionTarget(line, col, motion, targetChar, false, count);
 
     if (targetCol === null) return;
 

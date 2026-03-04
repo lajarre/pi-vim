@@ -658,6 +658,58 @@ describe("Universal Counts: Edits and Put", () => {
   });
 });
 
+describe("Universal Counts: Char Motions", () => {
+  it("3fx moves to the third forward match", () => {
+    const { editor } = createEditorWithSpy("axbxcxd");
+
+    sendKeys(editor, ["3", "f", "x"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("3Fx moves to the third backward match", () => {
+    const { editor } = createEditorWithSpy("dxcxbxa");
+
+    sendKeys(editor, ["$", "3", "F", "x"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("3tx moves to one before the third forward match", () => {
+    const { editor } = createEditorWithSpy("axbxcxd");
+
+    sendKeys(editor, ["3", "t", "x"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+
+  it("d2tx deletes through the char before the second forward match", () => {
+    const { editor } = createEditorWithSpy("axbxcxd");
+
+    sendKeys(editor, ["d", "2", "t", "x"]);
+
+    assert.equal(editor.getText(), "xcxd");
+    assert.equal(editor.getRegister(), "axb");
+  });
+
+  it("3TX moves backward one before the third backward match", () => {
+    const { editor } = createEditorWithSpy("dxcxbxa");
+
+    sendKeys(editor, ["$", "3", "T", "x"]);
+
+    // 3rd x from right is at col 1, T stops one after = col 2
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("2; repeats the last char-find motion twice", () => {
+    const { editor } = createEditorWithSpy("axbxcxd");
+
+    sendKeys(editor, ["f", "x", "2", ";"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // EOL / newline edge cases  (Task 7)
 // ---------------------------------------------------------------------------
