@@ -538,15 +538,21 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
-      if (data === "x") {
-        const count = this.takeTotalCount(1);
-        this.cutCharUnderCursor(count);
-        return;
-      }
+      const supportsCountedStandaloneEdit = (
+        data === "x"
+        || data === "s"
+        || data === "S"
+        || data === "D"
+        || data === "C"
+        || data === "p"
+        || data === "P"
+      );
 
-      // Unsupported prefixed forms: drop count and keep processing this key.
-      this.prefixCount = "";
-      this.operatorCount = "";
+      if (!supportsCountedStandaloneEdit) {
+        // Unsupported prefixed forms: drop count and keep processing this key.
+        this.prefixCount = "";
+        this.operatorCount = "";
+      }
     } else if (this.isCountStarter(data)) {
       this.prefixCount = data;
       return;
@@ -655,13 +661,16 @@ export class ModalEditor extends CustomEditor {
         this.mode = "insert";
         break;
       case "D":
+        this.takeTotalCount(1);
         this.cutToEndOfLine();
         break;
       case "C":
+        this.takeTotalCount(1);
         this.cutToEndOfLine();
         this.mode = "insert";
         break;
       case "S":
+        this.takeTotalCount(1);
         this.cutCurrentLineContent();
         this.mode = "insert";
         break;
@@ -934,7 +943,8 @@ export class ModalEditor extends CustomEditor {
     return col >= line.length;
   }
 
-  private cutCharUnderCursor(count: number = 1): void {
+  private cutCharUnderCursor(): void {
+    const count = this.takeTotalCount(1);
     const { line, col } = this.getCurrentLineAndCol();
     if (line.length === 0) return; // Don't merge empty lines with x
     if (col >= line.length) return; // Don't delete past end of line
@@ -1317,23 +1327,32 @@ export class ModalEditor extends CustomEditor {
     };
   }
 
+  private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
+
   private putAfter(): void {
+    const count = this.takeTotalCount(1);
     const text = this.unnamedRegister;
     if (!text) return;
+    const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
     if (text.endsWith("\n")) {
-      // Line-wise: insert new line below and fill it
-      super.handleInput(CTRL_E);
-      super.handleInput(NEWLINE);
       const content = text.slice(0, -1);
-      for (const char of content) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
+      for (let i = 0; i < safeCount; i++) {
+        // Line-wise: insert new line below and fill it
+        super.handleInput(CTRL_E);
+        super.handleInput(NEWLINE);
+        for (const char of content) {
+          super.handleInput(char === "\n" ? NEWLINE : char);
+        }
       }
-    } else {
-      // Character-wise: insert after cursor
-      if (!this.isCursorAtOrPastEol()) {
-        super.handleInput(ESC_RIGHT);
-      }
+      return;
+    }
+
+    // Character-wise: insert after cursor
+    if (!this.isCursorAtOrPastEol()) {
+      super.handleInput(ESC_RIGHT);
+    }
+    for (let i = 0; i < safeCount; i++) {
       for (const char of text) {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
@@ -1341,20 +1360,27 @@ export class ModalEditor extends CustomEditor {
   }
 
   private putBefore(): void {
+    const count = this.takeTotalCount(1);
     const text = this.unnamedRegister;
     if (!text) return;
+    const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
     if (text.endsWith("\n")) {
-      // Line-wise: insert new line above and fill it
-      super.handleInput(CTRL_A);
-      super.handleInput(NEWLINE);
-      super.handleInput(ESC_UP);
       const content = text.slice(0, -1);
-      for (const char of content) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
+      for (let i = 0; i < safeCount; i++) {
+        // Line-wise: insert new line above and fill it
+        super.handleInput(CTRL_A);
+        super.handleInput(NEWLINE);
+        super.handleInput(ESC_UP);
+        for (const char of content) {
+          super.handleInput(char === "\n" ? NEWLINE : char);
+        }
       }
-    } else {
-      // Character-wise: insert before cursor (just type it)
+      return;
+    }
+
+    // Character-wise: insert before cursor (just type it)
+    for (let i = 0; i < safeCount; i++) {
       for (const char of text) {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }

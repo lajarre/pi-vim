@@ -581,6 +581,83 @@ describe("single-key edits — x / s / S / D / C", () => {
   });
 });
 
+describe("Universal Counts: Edits and Put", () => {
+  it("3x deletes three chars under cursor", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["3", "x"]);
+
+    assert.equal(editor.getText(), "def");
+    assert.equal(editor.getRegister(), "abc");
+  });
+
+  it("2x near EOL deletes only available chars", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["l", "l", "l", "l", "2", "x"]);
+
+    assert.equal(editor.getText(), "abcd");
+    assert.equal(editor.getRegister(), "ef");
+  });
+
+  it("3p pastes register text three times after cursor", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("ab");
+
+    sendKeys(editor, ["3", "p"]);
+
+    assert.equal(editor.getText(), "Xababab");
+  });
+
+  it("3P pastes register text three times before cursor", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("ab");
+
+    sendKeys(editor, ["3", "P"]);
+
+    assert.equal(editor.getText(), "abababX");
+  });
+
+  it("2s deletes two chars and enters insert mode", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "s"]);
+
+    assert.equal(editor.getText(), "cdef");
+    assert.equal(editor.getRegister(), "ab");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("2S clears line once and enters insert mode", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "S"]);
+
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getRegister(), "abcdef");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("2D deletes to EOL once", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "D"]);
+
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getRegister(), "abcdef");
+  });
+
+  it("2C deletes to EOL and enters insert mode", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "C"]);
+
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getRegister(), "abcdef");
+    assert.equal(editor.getMode(), "insert");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // EOL / newline edge cases  (Task 7)
 // ---------------------------------------------------------------------------
