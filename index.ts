@@ -81,6 +81,7 @@ import {
 import {
   reverseCharMotion,
   findCharMotionTarget,
+  findParagraphMotionTarget,
   type WordMotionClass,
 } from "./motions.js";
 import {
@@ -630,6 +631,7 @@ export class ModalEditor extends CustomEditor {
         || data === "E"
         || data === "B"
       );
+      const supportsCountedParagraphMotion = data === "{" || data === "}";
       const supportsCountedNav = (
         data === "h"
         || data === "j"
@@ -659,7 +661,17 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
-      if (!supportsCountedStandaloneEdit && !supportsCountedCharMotion && !supportsCountedWordMotion) {
+      if (supportsCountedParagraphMotion) {
+        this.executeParagraphMotion(data === "}" ? "forward" : "backward");
+        return;
+      }
+
+      if (
+        !supportsCountedStandaloneEdit
+        && !supportsCountedCharMotion
+        && !supportsCountedWordMotion
+        && !supportsCountedParagraphMotion
+      ) {
         // Unsupported prefixed forms: drop count and keep processing this key.
         this.prefixCount = "";
         this.operatorCount = "";
@@ -730,6 +742,11 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "u") {
       super.handleInput(CTRL_UNDERSCORE); // ctrl+_ — readline undo
+      return;
+    }
+
+    if (data === "}" || data === "{") {
+      this.executeParagraphMotion(data === "}" ? "forward" : "backward");
       return;
     }
 
@@ -822,6 +839,14 @@ export class ModalEditor extends CustomEditor {
     if (targetCol !== null && targetCol !== col) {
       this.moveCursorBy(targetCol - col);
     }
+  }
+
+  private executeParagraphMotion(direction: "forward" | "backward"): void {
+    const lines = this.getLines();
+    const fromLine = this.getCursor().line;
+    const count = this.takeTotalCount(1);
+    const targetLine = findParagraphMotionTarget(lines, fromLine, direction, count);
+    this.moveCursorToLineStart(targetLine);
   }
 
   private tryMoveCursorByState(delta: number): boolean {

@@ -508,6 +508,81 @@ describe("buffer motions — gg / G", () => {
   });
 });
 
+describe("paragraph motions — { / }", () => {
+  const paragraphFixture = "alpha one\nalpha two\n\n   \nbeta one\nbeta two\n\ngamma one\n\n   ";
+
+  it("} moves to next paragraph start at column 0", () => {
+    const { editor } = createMultiLineEditor(paragraphFixture);
+
+    sendKeys(editor, ["}"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 4, col: 0 });
+  });
+
+  it("{ moves to previous paragraph start at column 0", () => {
+    const { editor } = createMultiLineEditor(paragraphFixture);
+
+    sendKeys(editor, ["}", "{"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("paragraph motions from blank-line runs jump to surrounding paragraph starts", () => {
+    const { editor } = createMultiLineEditor(paragraphFixture);
+
+    sendKeys(editor, ["j", "j", "}"]);
+    assert.deepEqual(editor.getCursor(), { line: 4, col: 0 });
+
+    sendKeys(editor, ["j", "j", "{"]);
+    assert.deepEqual(editor.getCursor(), { line: 4, col: 0 });
+  });
+
+  it("supports counted paragraph motions 2} and 2{", () => {
+    const { editor } = createMultiLineEditor(paragraphFixture);
+
+    sendKeys(editor, ["2", "}"]);
+    assert.deepEqual(editor.getCursor(), { line: 7, col: 0 });
+
+    sendKeys(editor, ["2", "{"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("paragraph motions clamp at BOF/EOF", () => {
+    const { editor } = createMultiLineEditor(paragraphFixture);
+
+    sendKeys(editor, ["{"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+
+    sendKeys(editor, ["G", "}"]);
+    assert.deepEqual(editor.getCursor(), { line: 9, col: 0 });
+  });
+
+  it("paragraph motions keep register/clipboard unchanged", () => {
+    const { editor, clipboardWrites } = createMultiLineEditor(paragraphFixture);
+    const before = editor.getText();
+    editor.setRegister("untouched");
+
+    sendKeys(editor, ["}", "{", "2", "}", "2", "{"]);
+
+    assert.equal(editor.getText(), before);
+    assert.equal(editor.getRegister(), "untouched");
+    assert.deepEqual(clipboardWrites, []);
+  });
+
+  it("paragraph integration keeps representative w/b/e behavior", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["w"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+
+    sendKeys(editor, ["e"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 6 });
+
+    sendKeys(editor, ["b"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+});
+
 describe("J — join lines", () => {
   it("J joins current line with next, inserts separator space", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
