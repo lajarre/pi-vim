@@ -458,12 +458,19 @@ export class ModalEditor extends CustomEditor {
     }
 
     const hasCount = this.prefixCount.length > 0 || this.operatorCount.length > 0;
-    const supportsCountedWordMotion = data === "w" || data === "e" || data === "b";
+    const supportsCountedWordMotion = (
+      data === "w"
+      || data === "e"
+      || data === "b"
+      || data === "W"
+      || data === "E"
+      || data === "B"
+    );
     const supportsCountedTextObject = data === "i" || data === "a";
 
     if (hasCount && !supportsCountedWordMotion && !supportsCountedTextObject) {
       // Counted forms beyond dd, d{count}j/k, d{count}{f/F/t/T}, and
-      // d{count}{w/e/b}/{i/a}w are out of scope.
+      // d{count}{w/e/b/W/E/B}/{i/a}w are out of scope.
       this.cancelPendingOperator(data);
       return;
     }
@@ -513,7 +520,14 @@ export class ModalEditor extends CustomEditor {
     }
 
     const hasCount = this.prefixCount.length > 0 || this.operatorCount.length > 0;
-    const supportsCountedWordMotion = data === "w" || data === "e" || data === "b";
+    const supportsCountedWordMotion = (
+      data === "w"
+      || data === "e"
+      || data === "b"
+      || data === "W"
+      || data === "E"
+      || data === "B"
+    );
     const supportsCountedTextObject = data === "i" || data === "a";
 
     if (hasCount && !supportsCountedWordMotion && !supportsCountedTextObject) {
@@ -527,7 +541,10 @@ export class ModalEditor extends CustomEditor {
     }
 
     const motionCount = supportsCountedWordMotion ? this.takeTotalCount(1) : 1;
-    if (this.deleteWithMotion(data, motionCount)) {
+    const effectiveMotion = data === "W" && this.isCursorOnNonWhitespace()
+      ? "E"
+      : data;
+    if (this.deleteWithMotion(effectiveMotion, motionCount)) {
       this.pendingOperator = null;
       this.mode = "insert";
       return;
@@ -934,6 +951,21 @@ export class ModalEditor extends CustomEditor {
     return "other";
   }
 
+  private resolveWordMotion(
+    motion: string,
+  ): { motion: "w" | "e" | "b"; semanticClass: WordMotionClass } | null {
+    if (motion === "w" || motion === "e" || motion === "b") {
+      return { motion, semanticClass: "word" };
+    }
+
+    if (motion === "W" || motion === "E" || motion === "B") {
+      const normalizedMotion = motion.toLowerCase() as "w" | "e" | "b";
+      return { motion: normalizedMotion, semanticClass: "WORD" };
+    }
+
+    return null;
+  }
+
   private getAbsoluteIndex(line: number, col: number): number {
     const lines = this.getLines();
     let idx = 0;
@@ -1089,6 +1121,7 @@ export class ModalEditor extends CustomEditor {
   private tryWordMotionLineLocalRange(
     motion: "w" | "e" | "b",
     count: number = 1,
+    semanticClass: WordMotionClass = "word",
   ): { col: number; targetCol: number; inclusive: boolean } | null {
     const cursor = this.getCursor();
     const lineIndex = cursor.line;
@@ -1106,6 +1139,7 @@ export class ModalEditor extends CustomEditor {
         direction,
         target,
         motion === "e",
+        semanticClass,
       );
       if (nextCol === null) return null;
       if (nextCol === currentCol && step < steps - 1) return null;
@@ -1164,6 +1198,12 @@ export class ModalEditor extends CustomEditor {
     const line = this.getLines()[this.getCursor().line] ?? "";
     const col = this.getCursor().col;
     return { line, col };
+  }
+
+  private isCursorOnNonWhitespace(): boolean {
+    const { line, col } = this.getCurrentLineAndCol();
+    const ch = line[col];
+    return ch !== undefined && !/\s/.test(ch);
   }
 
   private isCursorAtOrPastEol(): boolean {
@@ -1312,8 +1352,13 @@ export class ModalEditor extends CustomEditor {
       return true;
     }
 
-    if (motion === "w" || motion === "e" || motion === "b") {
-      const lineLocalRange = this.tryWordMotionLineLocalRange(motion, count);
+    const wordMotion = this.resolveWordMotion(motion);
+    if (wordMotion) {
+      const lineLocalRange = this.tryWordMotionLineLocalRange(
+        wordMotion.motion,
+        count,
+        wordMotion.semanticClass,
+      );
       if (lineLocalRange) {
         this.deleteRange(
           lineLocalRange.col,
@@ -1328,11 +1373,12 @@ export class ModalEditor extends CustomEditor {
       const targetAbs = this.findWordTargetInText(
         text,
         currentAbs,
-        motion === "b" ? "backward" : "forward",
-        motion === "e" ? "end" : "start",
+        wordMotion.motion === "b" ? "backward" : "forward",
+        wordMotion.motion === "e" ? "end" : "start",
         count,
+        wordMotion.semanticClass,
       );
-      this.deleteRangeByAbsolute(currentAbs, targetAbs, motion === "e");
+      this.deleteRangeByAbsolute(currentAbs, targetAbs, wordMotion.motion === "e");
       return true;
     }
 
@@ -1429,8 +1475,13 @@ export class ModalEditor extends CustomEditor {
       return true;
     }
 
-    if (motion === "w" || motion === "e" || motion === "b") {
-      const lineLocalRange = this.tryWordMotionLineLocalRange(motion);
+    const wordMotion = this.resolveWordMotion(motion);
+    if (wordMotion) {
+      const lineLocalRange = this.tryWordMotionLineLocalRange(
+        wordMotion.motion,
+        1,
+        wordMotion.semanticClass,
+      );
       if (lineLocalRange) {
         this.yankRange(
           lineLocalRange.col,
@@ -1445,10 +1496,12 @@ export class ModalEditor extends CustomEditor {
       const targetAbs = this.findWordTargetInText(
         text,
         currentAbs,
-        motion === "b" ? "backward" : "forward",
-        motion === "e" ? "end" : "start",
+        wordMotion.motion === "b" ? "backward" : "forward",
+        wordMotion.motion === "e" ? "end" : "start",
+        1,
+        wordMotion.semanticClass,
       );
-      this.yankRangeByAbsolute(currentAbs, targetAbs, motion === "e");
+      this.yankRangeByAbsolute(currentAbs, targetAbs, wordMotion.motion === "e");
       return true;
     }
 

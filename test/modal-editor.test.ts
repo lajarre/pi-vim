@@ -244,6 +244,20 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
   });
 });
 
+describe("delete operator — WORD motions (dW / dE / dB)", () => {
+  it("dW deletes to next WORD start", () => {
+    chk("foo-bar   baz", ["d", "W"], "baz", "foo-bar   ");
+  });
+
+  it("dE deletes to end of current WORD (inclusive)", () => {
+    chk("foo-bar   baz", ["d", "E"], "   baz", "foo-bar");
+  });
+
+  it("dB deletes backward by WORD", () => {
+    chk("foo-bar baz", ["W", "d", "B"], "baz", "foo-bar ");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Linewise operators, counts, and whole-buffer flows
 // ---------------------------------------------------------------------------
@@ -355,6 +369,35 @@ describe("linewise operators and counts", () => {
     assert.equal(editor.getRegister(), "foo bar ");
   });
 
+  it("counted delete motion d2W deletes two WORDs", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz qux");
+
+    sendKeys(editor, ["d", "2", "W"]);
+
+    assert.equal(editor.getText(), "qux");
+    assert.equal(editor.getRegister(), "foo-bar   baz ");
+  });
+
+  it("counted change motion c2E works for WORD semantics", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz qux");
+
+    sendKeys(editor, ["c", "2", "E"]);
+
+    assert.equal(editor.getText(), " qux");
+    assert.equal(editor.getRegister(), "foo-bar   baz");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("counted change motion c2B works for WORD semantics", () => {
+    const { editor } = createEditorWithSpy("one two three");
+
+    sendKeys(editor, ["W", "W", "c", "2", "B"]);
+
+    assert.equal(editor.getText(), "three");
+    assert.equal(editor.getRegister(), "one two ");
+    assert.equal(editor.getMode(), "insert");
+  });
+
   it("counted unsupported yank motion y2w cancels instead of yanking", () => {
     const { editor } = createEditorWithSpy("foo bar");
 
@@ -362,6 +405,24 @@ describe("linewise operators and counts", () => {
 
     assert.equal(editor.getText(), "foo bar");
     assert.equal(editor.getRegister(), "");
+  });
+
+  it("counted unsupported yank motion y2W cancels instead of yanking", () => {
+    const { editor } = createEditorWithSpy("foo-bar baz");
+
+    sendKeys(editor, ["y", "2", "W"]);
+
+    assert.equal(editor.getText(), "foo-bar baz");
+    assert.equal(editor.getRegister(), "");
+  });
+
+  it("counted unsupported yank motion y2E cancels and does not stay sticky", () => {
+    const { editor } = createEditorWithSpy("foo-bar baz");
+
+    sendKeys(editor, ["y", "2", "E", "x"]);
+
+    assert.equal(editor.getText(), "oo-bar baz");
+    assert.equal(editor.getRegister(), "f");
   });
 
   it("2d0 does not swallow 0 as a second count", () => {
@@ -662,6 +723,38 @@ describe("change operator — cw / ce / cb / c$ / c0 / cc", () => {
     sendKeys(editor, ["c", "c"]);
     assert.equal(editor.getRegister(), "hello world");
     assert.equal(editor.getText(), "");
+    assert.equal(editor.getMode(), "insert");
+  });
+});
+
+describe("change operator — WORD motions (cW / cE / cB)", () => {
+  it("cW on non-whitespace matches cE (Vim parity)", () => {
+    const { editor } = createEditorWithSpy("foo   bar");
+
+    sendKeys(editor, ["c", "W"]);
+
+    assert.equal(editor.getText(), "   bar");
+    assert.equal(editor.getRegister(), "foo");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("cE deletes to end of WORD inclusively", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz");
+
+    sendKeys(editor, ["c", "E"]);
+
+    assert.equal(editor.getText(), "   baz");
+    assert.equal(editor.getRegister(), "foo-bar");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("cB deletes backward by WORD", () => {
+    const { editor } = createEditorWithSpy("foo-bar baz");
+
+    sendKeys(editor, ["W", "c", "B"]);
+
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "foo-bar ");
     assert.equal(editor.getMode(), "insert");
   });
 });
@@ -1249,6 +1342,15 @@ describe("operator word-motion path selection", () => {
       { name: "yw", initial: "alpha beta", keys: ["y", "w"] },
       { name: "ye", initial: "alpha beta", keys: ["y", "e"] },
       { name: "yb", initial: "alpha beta", keys: ["w", "y", "b"] },
+      { name: "dW", initial: "alpha-beta gamma", keys: ["d", "W"] },
+      { name: "dE", initial: "alpha-beta gamma", keys: ["d", "E"] },
+      { name: "dB", initial: "alpha-beta gamma", keys: ["W", "d", "B"] },
+      { name: "cW", initial: "alpha-beta gamma", keys: ["c", "W"] },
+      { name: "cE", initial: "alpha-beta gamma", keys: ["c", "E"] },
+      { name: "cB", initial: "alpha-beta gamma", keys: ["W", "c", "B"] },
+      { name: "yW", initial: "alpha-beta gamma", keys: ["y", "W"] },
+      { name: "yE", initial: "alpha-beta gamma", keys: ["y", "E"] },
+      { name: "yB", initial: "alpha-beta gamma", keys: ["W", "y", "B"] },
     ];
 
     for (const scenario of scenarios) {
@@ -1275,6 +1377,12 @@ describe("operator word-motion path selection", () => {
       { name: "db@BOL", initial: "foo\nbar", keys: ["j", "0", "d", "b"] },
       { name: "cb@BOL", initial: "foo\nbar", keys: ["j", "0", "c", "b"] },
       { name: "yb@BOL", initial: "foo\nbar", keys: ["j", "0", "y", "b"] },
+      { name: "dW@EOL", initial: "foo\nbar", keys: ["$", "d", "W"] },
+      { name: "cW@EOL", initial: "foo\nbar", keys: ["$", "c", "W"] },
+      { name: "yW@EOL", initial: "foo\nbar", keys: ["$", "y", "W"] },
+      { name: "dB@BOL", initial: "foo\nbar", keys: ["j", "0", "d", "B"] },
+      { name: "cB@BOL", initial: "foo\nbar", keys: ["j", "0", "c", "B"] },
+      { name: "yB@BOL", initial: "foo\nbar", keys: ["j", "0", "y", "B"] },
     ];
 
     for (const scenario of scenarios) {
@@ -1316,6 +1424,18 @@ describe("word-motion fast path differential", () => {
       { name: "yw", keys: ["y", "w"] },
       { name: "ye", keys: ["y", "e"] },
       { name: "w,yb", keys: ["w", "y", "b"] },
+      { name: "W+x", keys: ["W", "x"] },
+      { name: "E+x", keys: ["E", "x"] },
+      { name: "W,B,x", keys: ["W", "B", "x"] },
+      { name: "dW", keys: ["d", "W"] },
+      { name: "dE", keys: ["d", "E"] },
+      { name: "W,dB", keys: ["W", "d", "B"] },
+      { name: "cW", keys: ["c", "W"] },
+      { name: "cE", keys: ["c", "E"] },
+      { name: "W,cB", keys: ["W", "c", "B"] },
+      { name: "yW", keys: ["y", "W"] },
+      { name: "yE", keys: ["y", "E"] },
+      { name: "W,yB", keys: ["W", "y", "B"] },
     ];
 
     for (const line of fixtures) {
@@ -1453,6 +1573,36 @@ describe("yank operator — yy / yw / ye / yb / y$ / y0", () => {
     const before = editor.getText();
     sendKeys(editor, ["w", "y", "0"]); // navigate to col 4, yank to start
     assert.equal(editor.getRegister(), "foo ");
+    assert.equal(editor.getText(), before);
+  });
+
+  it("yW yanks to next WORD start without mutation", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz");
+    const before = editor.getText();
+
+    sendKeys(editor, ["y", "W"]);
+
+    assert.equal(editor.getRegister(), "foo-bar   ");
+    assert.equal(editor.getText(), before);
+  });
+
+  it("yE yanks to end of WORD inclusively", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz");
+    const before = editor.getText();
+
+    sendKeys(editor, ["y", "E"]);
+
+    assert.equal(editor.getRegister(), "foo-bar");
+    assert.equal(editor.getText(), before);
+  });
+
+  it("yB yanks backward by WORD", () => {
+    const { editor } = createEditorWithSpy("foo-bar baz");
+    const before = editor.getText();
+
+    sendKeys(editor, ["W", "y", "B"]);
+
+    assert.equal(editor.getRegister(), "foo-bar ");
     assert.equal(editor.getText(), before);
   });
 
