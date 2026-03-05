@@ -78,6 +78,7 @@ import {
 import {
   reverseCharMotion,
   findCharMotionTarget,
+  type WordMotionClass,
 } from "./motions.js";
 import {
   WordBoundaryCache,
@@ -605,6 +606,9 @@ export class ModalEditor extends CustomEditor {
         data === "w"
         || data === "e"
         || data === "b"
+        || data === "W"
+        || data === "E"
+        || data === "B"
       );
       const supportsCountedNav = (
         data === "h"
@@ -711,10 +715,13 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "w") {
       const count = this.takeTotalCount(1);
-      return this.moveWord("forward", "start", count);
+      return this.moveWord("forward", "start", count, "word");
     }
-    if (data === "b") return this.moveWord("backward", "start", this.takeTotalCount(1));
-    if (data === "e") return this.moveWord("forward", "end", this.takeTotalCount(1));
+    if (data === "b") return this.moveWord("backward", "start", this.takeTotalCount(1), "word");
+    if (data === "e") return this.moveWord("forward", "end", this.takeTotalCount(1), "word");
+    if (data === "W") return this.moveWord("forward", "start", this.takeTotalCount(1), "WORD");
+    if (data === "B") return this.moveWord("backward", "start", this.takeTotalCount(1), "WORD");
+    if (data === "E") return this.moveWord("forward", "end", this.takeTotalCount(1), "WORD");
 
     if (Object.hasOwn(NORMAL_KEYS, data)) {
       return this.handleMappedKey(data);
@@ -917,8 +924,12 @@ export class ModalEditor extends CustomEditor {
     return /\w/.test(ch);
   }
 
-  private charType(ch: string | undefined): "space" | "word" | "other" {
+  private charType(
+    ch: string | undefined,
+    semanticClass: WordMotionClass = "word",
+  ): "space" | "word" | "other" {
     if (!ch || /\s/.test(ch)) return "space";
+    if (semanticClass === "WORD") return "word";
     if (this.isWordChar(ch)) return "word";
     return "other";
   }
@@ -943,6 +954,7 @@ export class ModalEditor extends CustomEditor {
     direction: "forward" | "backward",
     target: "start" | "end",
     count: number = 1,
+    semanticClass: WordMotionClass = "word",
   ): number {
     const len = text.length;
     if (len === 0) return 0;
@@ -957,27 +969,27 @@ export class ModalEditor extends CustomEditor {
         if (next >= len) {
           next = len;
         } else if (target === "start") {
-          const startType = this.charType(text[next]);
+          const startType = this.charType(text[next], semanticClass);
           if (startType !== "space") {
-            while (next < len && this.charType(text[next]) === startType) next++;
+            while (next < len && this.charType(text[next], semanticClass) === startType) next++;
           }
-          while (next < len && this.charType(text[next]) === "space") next++;
+          while (next < len && this.charType(text[next], semanticClass) === "space") next++;
         } else {
           if (next < len - 1) next++;
-          while (next < len && this.charType(text[next]) === "space") next++;
+          while (next < len && this.charType(text[next], semanticClass) === "space") next++;
           if (next >= len) {
             next = len;
           } else {
-            const t = this.charType(text[next]);
-            while (next < len - 1 && this.charType(text[next + 1]) === t) next++;
+            const t = this.charType(text[next], semanticClass);
+            while (next < len - 1 && this.charType(text[next + 1], semanticClass) === t) next++;
           }
         }
       } else {
         if (next >= len) next = len - 1;
         if (next > 0) next--;
-        while (next > 0 && this.charType(text[next]) === "space") next--;
-        const t = this.charType(text[next]);
-        while (next > 0 && this.charType(text[next - 1]) === t) next--;
+        while (next > 0 && this.charType(text[next], semanticClass) === "space") next--;
+        const t = this.charType(text[next], semanticClass);
+        while (next > 0 && this.charType(text[next - 1], semanticClass) === t) next--;
       }
 
       if (next === i) break;
@@ -993,6 +1005,7 @@ export class ModalEditor extends CustomEditor {
     direction: WordMotionDirection,
     target: WordMotionTarget,
     allowSameColumn: boolean = false,
+    semanticClass: WordMotionClass = "word",
   ): number | null {
     if (line.length === 0) return null;
     if (col < 0 || col > line.length) return null;
@@ -1004,7 +1017,13 @@ export class ModalEditor extends CustomEditor {
       if (!/\S/.test(line.slice(0, col))) return null;
     }
 
-    const targetCol = this.wordBoundaryCache.tryFindTarget(line, col, direction, target);
+    const targetCol = this.wordBoundaryCache.tryFindTarget(
+      line,
+      col,
+      direction,
+      target,
+      semanticClass,
+    );
     if (targetCol === null) return null;
 
     if (direction === "forward") {
@@ -1030,6 +1049,7 @@ export class ModalEditor extends CustomEditor {
     direction: WordMotionDirection,
     target: WordMotionTarget,
     allowSameColumn: boolean = false,
+    semanticClass: WordMotionClass = "word",
   ): number | null {
     const cursor = this.getCursor();
     const lineIndex = cursor.line;
@@ -1042,6 +1062,7 @@ export class ModalEditor extends CustomEditor {
       direction,
       target,
       allowSameColumn,
+      semanticClass,
     );
     if (targetCol === null) return null;
 
@@ -1055,9 +1076,10 @@ export class ModalEditor extends CustomEditor {
   private tryMoveWordLineLocal(
     direction: "forward" | "backward",
     target: "start" | "end",
+    semanticClass: WordMotionClass = "word",
   ): boolean {
     const col = this.getCursor().col;
-    const targetCol = this.tryFindWordTargetLineLocal(direction, target);
+    const targetCol = this.tryFindWordTargetLineLocal(direction, target, false, semanticClass);
     if (targetCol === null || targetCol === col) return false;
 
     this.moveCursorBy(targetCol - col);
@@ -1105,18 +1127,26 @@ export class ModalEditor extends CustomEditor {
     direction: "forward" | "backward",
     target: "start" | "end",
     count: number = 1,
+    semanticClass: WordMotionClass = "word",
   ): void {
     let remaining = Math.max(1, Math.min(MAX_COUNT, count));
 
     while (remaining > 0) {
-      if (this.tryMoveWordLineLocal(direction, target)) {
+      if (this.tryMoveWordLineLocal(direction, target, semanticClass)) {
         remaining--;
         continue;
       }
 
       const text = this.getText();
       const currentAbs = this.getAbsoluteIndexFromCursor();
-      const targetAbs = this.findWordTargetInText(text, currentAbs, direction, target, remaining);
+      const targetAbs = this.findWordTargetInText(
+        text,
+        currentAbs,
+        direction,
+        target,
+        remaining,
+        semanticClass,
+      );
       if (targetAbs !== currentAbs) {
         this.moveCursorBy(targetAbs - currentAbs);
       }

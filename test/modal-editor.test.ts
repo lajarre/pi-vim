@@ -922,6 +922,54 @@ describe("Universal Counts: Word Motions", () => {
     assert.deepEqual(editor.getCursor(), { line: 0, col: 6 });
   });
 
+  it("WORD standalone motions W/B/E use whitespace-delimited semantics", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz");
+
+    sendKeys(editor, ["W"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 10 });
+
+    sendKeys(editor, ["B"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+
+    sendKeys(editor, ["E"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 6 });
+  });
+
+  it("2W moves by WORD tokens (counted standalone)", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz qux");
+
+    sendKeys(editor, ["2", "W"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 14 });
+  });
+
+  it("3B from EOL walks backward across WORD tokens", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz qux");
+
+    sendKeys(editor, ["$", "3", "B"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("2E lands on end of second WORD token", () => {
+    const { editor } = createEditorWithSpy("foo-bar   baz qux");
+
+    sendKeys(editor, ["2", "E"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 12 });
+  });
+
+  it("lowercase w keeps word-class behavior next to punctuation", () => {
+    const { editor: lowercase } = createEditorWithSpy("foo-bar baz");
+    const { editor: uppercase } = createEditorWithSpy("foo-bar baz");
+
+    sendKeys(lowercase, ["w"]);
+    sendKeys(uppercase, ["W"]);
+
+    assert.deepEqual(lowercase.getCursor(), { line: 0, col: 3 });
+    assert.deepEqual(uppercase.getCursor(), { line: 0, col: 8 });
+  });
+
   it("d2w deletes foo bar and leaves baz", () => {
     const { editor } = createEditorWithSpy("foo bar baz");
 
@@ -1097,6 +1145,22 @@ describe("word motion path selection", () => {
 
     sendKeys(editor, ["b"]);
     assert.equal(calls, 0);
+  });
+
+  it("line-local W threads WORD semantic class through cache lookup", () => {
+    const { editor } = createEditorWithSpy("foo-bar baz");
+
+    const raw = editor as any;
+    const original = raw.wordBoundaryCache.tryFindTarget.bind(raw.wordBoundaryCache);
+    let seenSemanticClass: string | null = null;
+
+    raw.wordBoundaryCache.tryFindTarget = (...args: unknown[]) => {
+      seenSemanticClass = String(args[4] ?? "");
+      return original(...args);
+    };
+
+    sendKeys(editor, ["W"]);
+    assert.equal(seenSemanticClass, "WORD");
   });
 
   it("cache uncertainty falls back to canonical absolute scanner", () => {
