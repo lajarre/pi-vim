@@ -1,8 +1,10 @@
 /**
  * Line-local cache for Vim word motion boundaries.
  *
- * Keyed by exact line content to avoid stale boundary reuse.
+ * Keyed by semantic class + exact line content to avoid stale boundary reuse.
  */
+
+import type { WordMotionClass } from "./motions.js";
 
 export type WordMotionDirection = "forward" | "backward";
 export type WordMotionTarget = "start" | "end";
@@ -22,13 +24,20 @@ export interface WordBoundaryData {
   readonly prevNonSpaceAtOrBefore: Int32Array;
 }
 
-function getCharType(ch: string | undefined): CharType {
+function getCharType(
+  ch: string | undefined,
+  semanticClass: WordMotionClass = "word",
+): CharType {
   if (!ch || /\s/.test(ch)) return CharType.Space;
+  if (semanticClass === "WORD") return CharType.Word;
   if (/\w/.test(ch)) return CharType.Word;
   return CharType.Other;
 }
 
-function buildWordBoundaryData(line: string): WordBoundaryData {
+function buildWordBoundaryData(
+  line: string,
+  semanticClass: WordMotionClass = "word",
+): WordBoundaryData {
   const len = line.length;
   const charTypes = new Uint8Array(len);
   const runStartByIndex = new Int32Array(len);
@@ -40,7 +49,7 @@ function buildWordBoundaryData(line: string): WordBoundaryData {
   prevNonSpaceAtOrBefore.fill(-1);
 
   for (let i = 0; i < len; i++) {
-    charTypes[i] = getCharType(line[i]);
+    charTypes[i] = getCharType(line[i], semanticClass);
   }
 
   for (let runStart = 0; runStart < len;) {
@@ -149,11 +158,16 @@ export class WordBoundaryCache {
       : DEFAULT_MAX_CACHE_ENTRIES;
   }
 
-  get(line: string): WordBoundaryData {
-    const cached = this.entries.get(line);
+  private makeCacheKey(line: string, semanticClass: WordMotionClass): string {
+    return `${semanticClass}\u0000${line}`;
+  }
+
+  get(line: string, semanticClass: WordMotionClass = "word"): WordBoundaryData {
+    const key = this.makeCacheKey(line, semanticClass);
+    const cached = this.entries.get(key);
     if (cached) return cached;
 
-    const built = buildWordBoundaryData(line);
+    const built = buildWordBoundaryData(line, semanticClass);
 
     if (this.entries.size >= this.maxEntries) {
       const oldestKey = this.entries.keys().next().value;
@@ -162,7 +176,7 @@ export class WordBoundaryCache {
       }
     }
 
-    this.entries.set(line, built);
+    this.entries.set(key, built);
     return built;
   }
 
@@ -171,10 +185,11 @@ export class WordBoundaryCache {
     col: number,
     direction: WordMotionDirection,
     target: WordMotionTarget,
+    semanticClass: WordMotionClass = "word",
   ): number | null {
     if (!Number.isInteger(col) || col < 0) return null;
 
-    const boundaries = this.get(line);
+    const boundaries = this.get(line, semanticClass);
     return findTargetInLine(boundaries, col, direction, target);
   }
 }

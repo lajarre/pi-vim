@@ -103,6 +103,40 @@ describe("findWordMotionTarget — backward/start (b)", () => {
   });
 });
 
+describe("findWordMotionTarget — WORD semantics", () => {
+  it("treats punctuation-joined tokens as one WORD for W/E/B", () => {
+    assert.equal(
+      findWordMotionTarget("foo-bar baz", 0, "forward", "start", "WORD"),
+      8,
+    );
+    assert.equal(
+      findWordMotionTarget("foo-bar baz", 0, "forward", "end", "WORD"),
+      6,
+    );
+    assert.equal(
+      findWordMotionTarget("foo-bar baz", 8, "backward", "start", "WORD"),
+      0,
+    );
+  });
+
+  it("uses whitespace-only delimiting transitions", () => {
+    assert.equal(
+      findWordMotionTarget("foo-bar   baz", 7, "forward", "start", "WORD"),
+      10,
+    );
+    assert.equal(
+      findWordMotionTarget("foo-bar   baz", 7, "forward", "end", "WORD"),
+      12,
+    );
+  });
+
+  it("keeps empty-line behavior", () => {
+    assert.equal(findWordMotionTarget("", 0, "forward", "start", "WORD"), 0);
+    assert.equal(findWordMotionTarget("", 0, "forward", "end", "WORD"), 0);
+    assert.equal(findWordMotionTarget("", 0, "backward", "start", "WORD"), 0);
+  });
+});
+
 describe("WordBoundaryCache", () => {
   it("keys entries by exact line content", () => {
     const cache = new WordBoundaryCache();
@@ -113,6 +147,19 @@ describe("WordBoundaryCache", () => {
 
     assert.equal(first, second);
     assert.notEqual(first, third);
+  });
+
+  it("separates cache entries by semantic class", () => {
+    const cache = new WordBoundaryCache();
+
+    const word = cache.get("foo-bar baz", "word");
+    const wordAgain = cache.get("foo-bar baz", "word");
+    const WORD = cache.get("foo-bar baz", "WORD");
+    const WORDAgain = cache.get("foo-bar baz", "WORD");
+
+    assert.equal(word, wordAgain);
+    assert.equal(WORD, WORDAgain);
+    assert.notEqual(word, WORD);
   });
 
   it("evicts oldest entries when cache size is exceeded", () => {
@@ -144,18 +191,29 @@ describe("WordBoundaryCache", () => {
     const cache = new WordBoundaryCache();
     const line = "foo_bar -- baz";
 
-    assert.equal(
-      cache.tryFindTarget(line, 0, "forward", "start"),
-      findWordMotionTarget(line, 0, "forward", "start"),
-    );
-    assert.equal(
-      cache.tryFindTarget(line, 0, "forward", "end"),
-      findWordMotionTarget(line, 0, "forward", "end"),
-    );
-    assert.equal(
-      cache.tryFindTarget(line, 11, "backward", "start"),
-      findWordMotionTarget(line, 11, "backward", "start"),
-    );
+    for (const semanticClass of ["word", "WORD"] as const) {
+      assert.equal(
+        cache.tryFindTarget(line, 0, "forward", "start", semanticClass),
+        findWordMotionTarget(line, 0, "forward", "start", semanticClass),
+      );
+      assert.equal(
+        cache.tryFindTarget(line, 0, "forward", "end", semanticClass),
+        findWordMotionTarget(line, 0, "forward", "end", semanticClass),
+      );
+      assert.equal(
+        cache.tryFindTarget(line, 11, "backward", "start", semanticClass),
+        findWordMotionTarget(line, 11, "backward", "start", semanticClass),
+      );
+    }
+  });
+
+  it("supports WORD semantics in cache lookups", () => {
+    const cache = new WordBoundaryCache();
+    const line = "foo-bar baz";
+
+    assert.equal(cache.tryFindTarget(line, 0, "forward", "start", "WORD"), 8);
+    assert.equal(cache.tryFindTarget(line, 0, "forward", "end", "WORD"), 6);
+    assert.equal(cache.tryFindTarget(line, 8, "backward", "start", "WORD"), 0);
   });
 
   it("returns null for uncertain cursor inputs", () => {
@@ -183,14 +241,22 @@ describe("WordBoundaryCache differential", () => {
         ];
 
         for (const [direction, target] of cases) {
-          const fast = cache.tryFindTarget(line, col, direction, target);
-          const canonical = findWordMotionTarget(line, col, direction, target);
+          for (const semanticClass of ["word", "WORD"] as const) {
+            const fast = cache.tryFindTarget(line, col, direction, target, semanticClass);
+            const canonical = findWordMotionTarget(
+              line,
+              col,
+              direction,
+              target,
+              semanticClass,
+            );
 
-          assert.equal(
-            fast,
-            canonical,
-            `line=${JSON.stringify(line)} col=${col} ${direction}/${target}`,
-          );
+            assert.equal(
+              fast,
+              canonical,
+              `class=${semanticClass} line=${JSON.stringify(line)} col=${col} ${direction}/${target}`,
+            );
+          }
         }
       }
     }

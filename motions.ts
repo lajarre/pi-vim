@@ -5,14 +5,20 @@
 import type { CharMotion } from "./types.js";
 
 // Character types for word boundary detection
+export type WordMotionClass = "word" | "WORD";
+
 enum CharType {
   Space = 0,
-  Keyword = 1, // alphanumeric + underscore
+  Keyword = 1, // alphanumeric + underscore (or all non-space in WORD mode)
   Other = 2, // punctuation/symbols
 }
 
-function getCharType(c: string | undefined): CharType {
+function getCharType(
+  c: string | undefined,
+  semanticClass: WordMotionClass = "word",
+): CharType {
   if (!c || /\s/.test(c)) return CharType.Space;
+  if (semanticClass === "WORD") return CharType.Keyword;
   if (/\w/.test(c)) return CharType.Keyword;
   return CharType.Other;
 }
@@ -80,6 +86,7 @@ export function findWordMotionTarget(
   col: number,
   direction: "forward" | "backward",
   target: "start" | "end",
+  semanticClass: WordMotionClass = "word",
 ): number {
   const len = line.length;
   if (len === 0) return 0;
@@ -91,15 +98,15 @@ export function findWordMotionTarget(
 
     if (target === "start") {
       // w: move to start of next word
-      const startType = getCharType(line[i]);
+      const startType = getCharType(line[i], semanticClass);
 
       // Skip current word/punct block
       if (startType !== CharType.Space) {
-        while (i < len && getCharType(line[i]) === startType) i++;
+        while (i < len && getCharType(line[i], semanticClass) === startType) i++;
       }
 
       // Skip whitespace
-      while (i < len && getCharType(line[i]) === CharType.Space) i++;
+      while (i < len && getCharType(line[i], semanticClass) === CharType.Space) i++;
 
       return i;
     }
@@ -108,13 +115,13 @@ export function findWordMotionTarget(
     if (i < len - 1) i++;
 
     // Skip whitespace forward
-    while (i < len && getCharType(line[i]) === CharType.Space) i++;
+    while (i < len && getCharType(line[i], semanticClass) === CharType.Space) i++;
 
     // Now at start of next word (or end of line). Find end.
     if (i >= len) return len;
 
-    const type = getCharType(line[i]);
-    while (i < len - 1 && getCharType(line[i + 1]) === type) i++;
+    const type = getCharType(line[i], semanticClass);
+    while (i < len - 1 && getCharType(line[i + 1], semanticClass) === type) i++;
 
     return i;
   }
@@ -124,11 +131,11 @@ export function findWordMotionTarget(
   if (i > 0) i--;
 
   // Skip whitespace backward
-  while (i > 0 && getCharType(line[i]) === CharType.Space) i--;
+  while (i > 0 && getCharType(line[i], semanticClass) === CharType.Space) i--;
 
   // Now at end of prev word (or start of line). Find start.
-  const type = getCharType(line[i]);
-  while (i > 0 && getCharType(line[i - 1]) === type) i--;
+  const type = getCharType(line[i], semanticClass);
+  while (i > 0 && getCharType(line[i - 1], semanticClass) === type) i--;
 
   return i;
 }
