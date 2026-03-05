@@ -1,28 +1,80 @@
-# vim-bindings — Pi REPL Vim Mode
+# pi-vim — Vim Mode for Pi REPL
 
-A modal vim-like editing extension for Pi's REPL prompt, covering the
-high-frequency ("90%") command surface without trying to clone full Vim.
+Modal vim-like editing for Pi's REPL prompt.
+Focus: the high-frequency 90% command surface, not full Vim.
 
-## Loading
+## TL;DR
 
+- Problem: REPL editing is slow with only linear cursor movement.
+- Solution: modal editing (`INSERT`/`NORMAL`) with Vim-style motions,
+  operators, counts, and repeatable workflows.
+- Install: `pi install npm:pi-vim`
+
+## Install
+
+```bash
+pi install npm:pi-vim
 ```
-pi --extension /path/to/vim-bindings/index.ts
+
+Restart Pi after install.
+
+### Local loading (dev)
+
+```bash
+pi --extension /path/to/pi-vim/index.ts
 ```
 
 Or add to `.pi/settings.json`:
 
 ```json
 {
-  "extensions": ["./pi-extensions/vim-bindings/index.ts"]
+  "extensions": ["./pi-extensions/pi-vim/index.ts"]
 }
 ```
 
-The mode indicator (`INSERT` / `NORMAL`) is shown in the bottom-right corner
-of the prompt.
+## 30-second quickstart
+
+Try on multi-line input:
+
+```text
+Esc        # NORMAL mode
+3gg        # jump to absolute line 3
+2dw        # delete two words
+u          # undo
+2}         # jump two paragraphs forward
+```
+
+Mode indicator (`INSERT` / `NORMAL`) appears at bottom-right.
+
+## Why pi-vim
+
+- Fast modal editing without leaving Pi.
+- Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
+- Strong REPL-focused defaults; safe out-of-scope boundaries documented.
+- Clipboard/register behavior is explicit and tested.
+
+## For you / not for you
+
+Use pi-vim if you want fast Vim muscle-memory in Pi prompts.
+Skip it if you need full Vim feature parity (visual mode, macros, search,
+ex-commands, etc.).
+
+## Common recipes
+
+| Goal | Keys |
+|------|------|
+| Jump to exact line 25 | `25gg` (or `25G`) |
+| Delete two words | `2dw` |
+| Change to end of line | `C` |
+| Delete current + 2 lines below | `d2j` |
+| Yank 3 lines | `3yy` |
+| Join 3 lines with spacing | `3J` |
+| Jump 2 paragraphs forward | `2}` |
+| Undo last edit | `u` |
 
 ---
 
-## Supported command surface
+## Full reference
 
 ### Mode switching
 
@@ -295,6 +347,6 @@ These are **explicitly deferred** and not planned for this feature:
 Run tests:
 
 ```
-cd vim-bindings
+cd pi-vim
 npm test
 ```
