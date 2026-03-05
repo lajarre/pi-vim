@@ -21,8 +21,8 @@ jobs:
       - name: Check npm version availability
         id: version_check
         run: |
-          PACKAGE_NAME="$(node -p \"require('./package.json').name\")"
-          PACKAGE_VERSION="$(node -p \"require('./package.json').version\")"
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
 
           if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "${PACKAGE_NAME}@${PACKAGE_VERSION} already published; skipping publish."
