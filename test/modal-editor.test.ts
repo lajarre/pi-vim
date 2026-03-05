@@ -1269,20 +1269,30 @@ describe("word motion path selection", () => {
     assert.equal(calls, 0);
   });
 
-  it("line-local W threads WORD semantic class through cache lookup", () => {
-    const { editor } = createEditorWithSpy("foo-bar baz");
+  it("line-local W/E/B thread WORD semantic class through cache lookup", () => {
+    const scenarios: Array<{ motion: string; setup?: string[] }> = [
+      { motion: "W" },
+      { motion: "E" },
+      { motion: "B", setup: ["W"] },
+    ];
 
-    const raw = editor as any;
-    const original = raw.wordBoundaryCache.tryFindTarget.bind(raw.wordBoundaryCache);
-    let seenSemanticClass: string | null = null;
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy("foo-bar baz");
+      const raw = editor as any;
+      const original = raw.wordBoundaryCache.tryFindTarget.bind(raw.wordBoundaryCache);
+      let seenSemanticClass: string | null = null;
 
-    raw.wordBoundaryCache.tryFindTarget = (...args: unknown[]) => {
-      seenSemanticClass = String(args[4] ?? "");
-      return original(...args);
-    };
+      raw.wordBoundaryCache.tryFindTarget = (...args: unknown[]) => {
+        seenSemanticClass = String(args[4] ?? "");
+        return original(...args);
+      };
 
-    sendKeys(editor, ["W"]);
-    assert.equal(seenSemanticClass, "WORD");
+      if (scenario.setup) {
+        sendKeys(editor, scenario.setup);
+      }
+      sendKeys(editor, [scenario.motion]);
+      assert.equal(seenSemanticClass, "WORD", `${scenario.motion} should use WORD class`);
+    }
   });
 
   it("cache uncertainty falls back to canonical absolute scanner", () => {
@@ -1353,6 +1363,29 @@ describe("word motion path selection", () => {
     sendKeys(editor, ["b"]);
     assert.ok(calls > 0);
   });
+
+  it("W/E at EOL and B at BOL fall back to canonical absolute scanner", () => {
+    const scenarios: Array<{ name: string; initial: string; setup: string[]; motion: string }> = [
+      { name: "W@EOL", initial: "foo\nbar", setup: ["$"], motion: "W" },
+      { name: "E@EOL", initial: "foo\nbar", setup: ["$"], motion: "E" },
+      { name: "B@BOL", initial: "foo\nbar", setup: ["j", "0"], motion: "B" },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createMultiLineEditor(scenario.initial);
+      const raw = editor as any;
+      const original = raw.findWordTargetInText.bind(raw);
+      let calls = 0;
+
+      raw.findWordTargetInText = (...args: unknown[]) => {
+        calls++;
+        return original(...args);
+      };
+
+      sendKeys(editor, [...scenario.setup, scenario.motion]);
+      assert.ok(calls > 0, `${scenario.name} should fall back`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1409,6 +1442,9 @@ describe("operator word-motion path selection", () => {
       { name: "dW@EOL", initial: "foo\nbar", keys: ["$", "d", "W"] },
       { name: "cW@EOL", initial: "foo\nbar", keys: ["$", "c", "W"] },
       { name: "yW@EOL", initial: "foo\nbar", keys: ["$", "y", "W"] },
+      { name: "dE@EOL", initial: "foo\nbar", keys: ["$", "d", "E"] },
+      { name: "cE@EOL", initial: "foo\nbar", keys: ["$", "c", "E"] },
+      { name: "yE@EOL", initial: "foo\nbar", keys: ["$", "y", "E"] },
       { name: "dB@BOL", initial: "foo\nbar", keys: ["j", "0", "d", "B"] },
       { name: "cB@BOL", initial: "foo\nbar", keys: ["j", "0", "c", "B"] },
       { name: "yB@BOL", initial: "foo\nbar", keys: ["j", "0", "y", "B"] },
@@ -1456,15 +1492,21 @@ describe("word-motion fast path differential", () => {
       { name: "W+x", keys: ["W", "x"] },
       { name: "E+x", keys: ["E", "x"] },
       { name: "W,B,x", keys: ["W", "B", "x"] },
+      { name: "2W+x", keys: ["2", "W", "x"] },
+      { name: "2E+x", keys: ["2", "E", "x"] },
       { name: "dW", keys: ["d", "W"] },
       { name: "dE", keys: ["d", "E"] },
       { name: "W,dB", keys: ["W", "d", "B"] },
+      { name: "d2W", keys: ["d", "2", "W"] },
+      { name: "2dW", keys: ["2", "d", "W"] },
       { name: "cW", keys: ["c", "W"] },
       { name: "cE", keys: ["c", "E"] },
       { name: "W,cB", keys: ["W", "c", "B"] },
+      { name: "c2E", keys: ["c", "2", "E"] },
       { name: "yW", keys: ["y", "W"] },
       { name: "yE", keys: ["y", "E"] },
       { name: "W,yB", keys: ["W", "y", "B"] },
+      { name: "y2W(cancel)", keys: ["y", "2", "W", "x"] },
     ];
 
     for (const line of fixtures) {
@@ -1475,6 +1517,30 @@ describe("word-motion fast path differential", () => {
           `line=${JSON.stringify(line)} scenario=${scenario.name}`,
         );
       }
+    }
+  });
+
+  it("matches canonical behavior on cross-line uppercase WORD scenarios", () => {
+    const scenarios: Array<{ name: string; initial: string; keys: string[] }> = [
+      { name: "W@EOL", initial: "foo\nbar", keys: ["$", "W", "x"] },
+      { name: "2W@EOL", initial: "foo\nbar baz", keys: ["$", "2", "W", "x"] },
+      { name: "E@EOL", initial: "foo\nbar", keys: ["$", "E", "x"] },
+      { name: "2E@EOL", initial: "foo\nbar baz", keys: ["$", "2", "E", "x"] },
+      { name: "B@BOL", initial: "foo\nbar", keys: ["j", "0", "B", "x"] },
+      { name: "2B@BOL", initial: "foo bar\nbaz", keys: ["j", "0", "2", "B", "x"] },
+      { name: "dW@EOL", initial: "foo\nbar", keys: ["$", "d", "W"] },
+      { name: "cW@EOL", initial: "foo\nbar", keys: ["$", "c", "W", "X", "\x1b"] },
+      { name: "yW@EOL", initial: "foo\nbar", keys: ["$", "y", "W", "p"] },
+      { name: "dE@EOL", initial: "foo\nbar", keys: ["$", "d", "E"] },
+      { name: "cE@EOL", initial: "foo\nbar", keys: ["$", "c", "E", "X", "\x1b"] },
+      { name: "yE@EOL", initial: "foo\nbar", keys: ["$", "y", "E", "p"] },
+      { name: "dB@BOL", initial: "foo\nbar", keys: ["j", "0", "d", "B"] },
+      { name: "cB@BOL", initial: "foo\nbar", keys: ["j", "0", "c", "B", "X", "\x1b"] },
+      { name: "yB@BOL", initial: "foo\nbar", keys: ["j", "0", "y", "B", "p"] },
+    ];
+
+    for (const scenario of scenarios) {
+      assertFastEqualsCanonical(scenario.initial, scenario.keys, scenario.name);
     }
   });
 });
@@ -1490,9 +1556,18 @@ describe("word-motion guard boundary regressions", () => {
     const cases: Array<{ label: string; initial: string; keys: string[] }> = [
       { label: "EOL cross-line dw", initial: "foo\nbar", keys: ["$", "d", "w"] },
       { label: "BOL cross-line yb", initial: "foo\nbar", keys: ["j", "0", "y", "b"] },
-      { label: "punctuation run", initial: "foo---bar", keys: ["w", "x"] },
-      { label: "whitespace run", initial: "foo     bar", keys: ["w", "x"] },
-      { label: "empty line", initial: "", keys: ["w", "d", "w"] },
+      { label: "EOL cross-line dW", initial: "foo\nbar", keys: ["$", "d", "W"] },
+      { label: "EOL cross-line yE", initial: "foo\nbar", keys: ["$", "y", "E", "p"] },
+      { label: "BOL cross-line cB", initial: "foo\nbar", keys: ["j", "0", "c", "B", "X", "\x1b"] },
+      { label: "punctuation run (word)", initial: "foo---bar", keys: ["w", "x"] },
+      { label: "punctuation run (WORD)", initial: "foo---bar", keys: ["W", "x"] },
+      { label: "whitespace run (word)", initial: "foo     bar", keys: ["w", "x"] },
+      { label: "whitespace run (WORD)", initial: "foo     bar", keys: ["W", "x"] },
+      { label: "empty line (word)", initial: "", keys: ["w", "d", "w"] },
+      { label: "empty line (WORD)", initial: "", keys: ["W", "d", "W"] },
+      { label: "blank-middle-line W", initial: "foo\n\nbar", keys: ["$", "W", "x"] },
+      { label: "blank-middle-line B", initial: "foo\n\nbar", keys: ["j", "j", "0", "B", "x"] },
+      { label: "WORD punctuation + whitespace boundary", initial: "foo--bar   baz", keys: ["W", "E", "x"] },
     ];
 
     for (const testCase of cases) {
@@ -1547,6 +1622,48 @@ describe("cross-line word motions", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
     const before = editor.getText();
     sendKeys(editor, ["y", "w"]);
+    assert.equal(editor.getRegister(), "foo\n");
+    assert.equal(editor.getText(), before);
+  });
+
+  it("W crosses EOL to next line WORD start", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    sendKeys(editor, ["$", "W", "x"]);
+    assert.equal(editor.getText(), "foo\nar");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("B at BOL jumps to previous line WORD start", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    sendKeys(editor, ["j", "0", "B", "x"]);
+    assert.equal(editor.getText(), "oo\nbar");
+    assert.equal(editor.getRegister(), "f");
+  });
+
+  it("E crosses EOL to end of next line WORD", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    sendKeys(editor, ["$", "E", "x"]);
+    assert.equal(editor.getText(), "foo\nba");
+    assert.equal(editor.getRegister(), "r");
+  });
+
+  it("dW crosses newline while cW keeps cE parity", () => {
+    const { editor: deleteEditor } = createMultiLineEditor("foo\nbar");
+    sendKeys(deleteEditor, ["d", "W"]);
+    assert.equal(deleteEditor.getText(), "bar");
+    assert.equal(deleteEditor.getRegister(), "foo\n");
+
+    const { editor: changeEditor } = createMultiLineEditor("foo\nbar");
+    sendKeys(changeEditor, ["c", "W"]);
+    assert.equal(changeEditor.getText(), "\nbar");
+    assert.equal(changeEditor.getRegister(), "foo");
+    assert.equal(changeEditor.getMode(), "insert");
+  });
+
+  it("yW can yank across newline without mutation", () => {
+    const { editor } = createMultiLineEditor("foo\nbar");
+    const before = editor.getText();
+    sendKeys(editor, ["y", "W"]);
     assert.equal(editor.getRegister(), "foo\n");
     assert.equal(editor.getText(), before);
   });
