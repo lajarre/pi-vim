@@ -555,6 +555,53 @@ describe("buffer motions — gg / G", () => {
   });
 });
 
+describe("first non-whitespace motion — ^", () => {
+  it("^ moves to the first non-whitespace character", () => {
+    const { editor } = createEditorWithSpy("    foo");
+
+    sendKeys(editor, ["$", "^", "x"]);
+
+    assert.equal(editor.getText(), "    oo");
+    assert.equal(editor.getRegister(), "f");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+
+  it("prefixed ^ clears count state before later commands", () => {
+    const { editor } = createEditorWithSpy("    foo bar");
+
+    sendKeys(editor, ["3", "^", "x"]);
+
+    assert.equal(editor.getText(), "    oo bar");
+    assert.equal(editor.getRegister(), "f");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+
+  it("d^ deletes back to the first non-whitespace character", () => {
+    chk("    foo bar", ["w", "w", "d", "^"], "    bar", "foo ");
+  });
+
+  it("c^ changes back to the first non-whitespace character", () => {
+    const { editor } = createEditorWithSpy("    foo bar");
+
+    sendKeys(editor, ["w", "w", "c", "^"]);
+
+    assert.equal(editor.getText(), "    bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("y^ yanks back to the first non-whitespace character", () => {
+    const { editor } = createEditorWithSpy("    foo bar");
+    const before = editor.getText();
+
+    sendKeys(editor, ["w", "w", "y", "^"]);
+
+    assert.equal(editor.getText(), before);
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 8 });
+  });
+});
+
 describe("paragraph motions — { / }", () => {
   const paragraphFixture = "alpha one\nalpha two\n\n   \nbeta one\nbeta two\n\ngamma one\n\n   ";
 

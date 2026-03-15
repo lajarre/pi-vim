@@ -31,6 +31,14 @@ function clampLineIndex(lines: readonly string[], lineIndex: number): number {
 }
 
 /**
+ * Column of first non-whitespace char, or 0 for blank lines.
+ */
+export function findFirstNonWhitespaceColumn(line: string): number {
+  const match = line.search(/\S/);
+  return match === -1 ? 0 : match;
+}
+
+/**
  * True when line matches ^\s*$.
  */
 export function isBlankLine(line: string | undefined): boolean {

@@ -12,11 +12,12 @@
  * - O: open new line above (insert mode)
  * - hjkl: navigation in normal mode
  * - 0/$: line start/end
+ * - ^: first non-whitespace char of line
  * - x: delete char under cursor
  * - D: delete to end of line
  * - S: substitute line (delete line content + insert mode)
  * - s: substitute char (delete char + insert mode)
- * - d{motion}: delete with motion (`w/b/e` + `W/B/E`, `$`, `0`, `dd`, `f/t/F/T{char}`)
+ * - d{motion}: delete with motion (`w/b/e` + `W/B/E`, `$`, `0`, `^`, `dd`, `f/t/F/T{char}`)
  * - c{motion}: change with same motion set as `d` (then enter insert mode)
  * - y{motion}: yank with same motion set as `d` (no text mutation)
  * - f{char}: jump to next {char} on line
@@ -84,6 +85,7 @@ import {
   reverseCharMotion,
   findCharMotionTarget,
   findParagraphMotionTarget,
+  findFirstNonWhitespaceColumn,
   type WordMotionClass,
 } from "./motions.js";
 import {
@@ -762,6 +764,11 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (data === "^") {
+      this.moveCursorToFirstNonWhitespace();
+      return;
+    }
+
     if (data === "w") {
       const count = this.takeTotalCount(1);
       return this.moveWord("forward", "start", count, "word");
@@ -922,6 +929,12 @@ export class ModalEditor extends CustomEditor {
     }
 
     super.handleInput(CTRL_A);
+  }
+
+  private moveCursorToFirstNonWhitespace(): void {
+    const { line, col } = this.getCurrentLineAndCol();
+    const targetCol = findFirstNonWhitespaceColumn(line);
+    this.moveCursorBy(targetCol - col);
   }
 
   private moveCursorToBufferStart(): void {
@@ -1392,6 +1405,11 @@ export class ModalEditor extends CustomEditor {
       return true;
     }
 
+    if (motion === "^") {
+      this.deleteRange(col, findFirstNonWhitespaceColumn(this.getLines()[cursor.line] ?? ""), false);
+      return true;
+    }
+
     const wordMotion = this.resolveWordMotion(motion);
     if (wordMotion) {
       const lineLocalRange = this.tryWordMotionLineLocalRange(
@@ -1512,6 +1530,11 @@ export class ModalEditor extends CustomEditor {
 
     if (motion === "0") {
       this.yankRange(col, 0, false);
+      return true;
+    }
+
+    if (motion === "^") {
+      this.yankRange(col, findFirstNonWhitespaceColumn(line), false);
       return true;
     }
 

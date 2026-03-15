@@ -113,6 +113,7 @@ A `{count}` prefix can be prepended to any navigation key (max: `9999`).
 | `{count}h/l`  | Move left/right `{count}` cols  |
 | `{count}j/k`  | Move down/up `{count}` lines (clamped to buffer size) |
 | `0`           | Line start                    |
+| `^`           | First non-whitespace char of line |
 | `$`           | Line end                      |
 | `gg`          | Buffer start (line 1)         |
 | `{count}gg`   | Go to line `{count}` (1-indexed, clamped) |
@@ -185,6 +186,7 @@ word, char-find, and linewise motions. Maximum total count: `9999`.
 | `d{count}W/E/B`   | Forward/backward `{count}` `WORD` motions                 |
 | `d$`              | To end of line                                            |
 | `d0`              | To start of line                                          |
+| `d^`              | To first non-whitespace char of line                      |
 | `dd`              | Current line (linewise)                                   |
 | `{count}dd`       | `{count}` lines (linewise)                                |
 | `d{count}j`       | Current line + `{count}` lines below (linewise)           |
@@ -214,7 +216,7 @@ Same motion and count set as `d`. Deletes text then enters Insert mode.
 | `ciw`           | Change inner word                             |
 | `caw`           | Change around word                            |
 | `cc`            | Delete line content + Insert                  |
-| `c$`            | Delete to EOL + Insert                        |
+| `c$` / `c0` / `c^` | Delete to EOL / BOL / first non-whitespace + Insert |
 | …               | All `d` motions apply                         |
 
 #### Single-key edits
@@ -251,6 +253,7 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 | `yB`         | Backward to `WORD` start                          |
 | `y$`         | To end of line                                    |
 | `y0`         | To start of line                                  |
+| `y^`         | To first non-whitespace char of line              |
 | `yf{c}`      | To and including `char`                           |
 | `yiw`        | Inner word                                        |
 | `yaw`        | Around word (includes spaces)                     |

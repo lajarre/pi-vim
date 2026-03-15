@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   findWordMotionTarget,
   findCharMotionTarget,
+  findFirstNonWhitespaceColumn,
   isBlankLine,
   isParagraphStart,
   findNextParagraphStart,
@@ -268,6 +269,22 @@ describe("WordBoundaryCache differential", () => {
         }
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First non-whitespace column
+// ---------------------------------------------------------------------------
+
+describe("findFirstNonWhitespaceColumn", () => {
+  it("returns 0 for blank and all-whitespace lines", () => {
+    assert.equal(findFirstNonWhitespaceColumn(""), 0);
+    assert.equal(findFirstNonWhitespaceColumn("   \t"), 0);
+  });
+
+  it("finds the first non-whitespace column", () => {
+    assert.equal(findFirstNonWhitespaceColumn("    foo"), 4);
+    assert.equal(findFirstNonWhitespaceColumn("\t  foo"), 3);
   });
 });
 
