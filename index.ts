@@ -209,23 +209,20 @@ export class ModalEditor extends CustomEditor {
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
-    let snapshot: EditorSnapshot | undefined;
+    const editor = this as unknown as ModalEditorInternals;
 
     for (let i = 0; i < maxSteps; i++) {
-      const nextSnapshot = this.redoStack.pop();
-      if (!nextSnapshot) break;
-      snapshot = nextSnapshot;
-    }
+      const snapshot = this.redoStack[this.redoStack.length - 1];
+      if (!snapshot) break;
 
-    if (!snapshot) return;
-
-    const editor = this as unknown as ModalEditorInternals;
-    this.isApplyingRedo = true;
-    try {
-      editor.pushUndoSnapshot?.();
-      this.restoreSnapshot(snapshot);
-    } finally {
-      this.isApplyingRedo = false;
+      this.isApplyingRedo = true;
+      try {
+        editor.pushUndoSnapshot?.();
+        this.restoreSnapshot(snapshot);
+        this.redoStack.pop();
+      } finally {
+        this.isApplyingRedo = false;
+      }
     }
   }
 

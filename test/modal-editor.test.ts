@@ -2401,6 +2401,33 @@ describe("undo / redo — u / ctrl+r", () => {
     assert.equal(editor.getText(), "cd");
   });
 
+  describe("stepwise counted redo — intermediate undo granularity", () => {
+    it("2<C-r> then u lands on state after first redo", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "x", "x"]); // "d"
+      sendKeys(editor, ["u", "u", "u"]); // "abcd"
+      sendKeys(editor, ["2", "\x12"]); // redo 2 steps → "cd"
+      assert.equal(editor.getText(), "cd");
+      sendKeys(editor, ["u"]); // undo one redo → "bcd"
+      assert.equal(editor.getText(), "bcd");
+    });
+
+    it("after 2<C-r> then u, another u returns to pre-redo state", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "x", "x"]);
+      sendKeys(editor, ["u", "u", "u"]);
+      sendKeys(editor, ["2", "\x12"]);
+      sendKeys(editor, ["u"]); // → "bcd"
+      sendKeys(editor, ["u"]); // → "abcd"
+      assert.equal(editor.getText(), "abcd");
+    });
+
+    // NOTE: stepwise redo with synthetic-edit history (J) is
+    // deferred to Task 6 — joinLines currently bypasses
+    // pushUndoSnapshot, so undo/redo granularity for J requires
+    // the applySyntheticEdit helper from Tasks 5+6.
+  });
+
   describe("normal-mode CTRL_UNDERSCORE undo alias", () => {
     it("CTRL_UNDERSCORE in normal mode acts as undo", () => {
       const { editor } = createEditorWithSpy("abcd");
