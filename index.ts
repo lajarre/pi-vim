@@ -131,6 +131,7 @@ export class ModalEditor extends CustomEditor {
   private readonly wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
   private isApplyingRedo: boolean = false;
+  private isApplyingUndo: boolean = false;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -192,12 +193,17 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performUndo(): void {
-    const beforeUndo = this.captureSnapshot();
-    super.handleInput(CTRL_UNDERSCORE);
-    const afterUndo = this.captureSnapshot();
+    this.isApplyingUndo = true;
+    try {
+      const beforeUndo = this.captureSnapshot();
+      super.handleInput(CTRL_UNDERSCORE);
+      const afterUndo = this.captureSnapshot();
 
-    if (this.snapshotChanged(beforeUndo, afterUndo)) {
-      this.redoStack.push(beforeUndo);
+      if (this.snapshotChanged(beforeUndo, afterUndo)) {
+        this.redoStack.push(beforeUndo);
+      }
+    } finally {
+      this.isApplyingUndo = false;
     }
   }
 
@@ -228,7 +234,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private clearRedoStackIfFreshMutation(before: EditorSnapshot): void {
-    if (this.isApplyingRedo || this.redoStack.length === 0) return;
+    if (this.isApplyingUndo || this.isApplyingRedo || this.redoStack.length === 0) return;
 
     const after = this.captureSnapshot();
     if (before.text !== after.text) {

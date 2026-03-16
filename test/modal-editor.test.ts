@@ -2386,6 +2386,21 @@ describe("undo / redo — u / ctrl+r", () => {
     assert.ok(editor.getText().includes("u"), "u in insert mode must insert character");
   });
 
+  it("undo does not self-invalidate redo stack", () => {
+    const { editor } = createEditorWithSpy("abcd");
+    sendKeys(editor, ["x", "x"]); // 'a' then 'b' deleted
+    assert.equal(editor.getText(), "cd");
+    sendKeys(editor, ["u"]); // undo 'b' delete → "bcd"
+    // redo stack has 1 entry; second undo must not clear it
+    sendKeys(editor, ["u"]); // undo 'a' delete → "abcd"
+    assert.equal(editor.getText(), "abcd");
+    // both redo entries must survive
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "bcd");
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "cd");
+  });
+
   describe("normal-mode CTRL_UNDERSCORE undo alias", () => {
     it("CTRL_UNDERSCORE in normal mode acts as undo", () => {
       const { editor } = createEditorWithSpy("abcd");
