@@ -475,7 +475,9 @@ export class ModalEditor extends CustomEditor {
     this.prefixCount = "";
     this.operatorCount = "";
     if (!this.isPrintableChunk(data)) {
-      super.handleInput(data);
+      this.trackFreshMutation(() => {
+        super.handleInput(data);
+      });
     }
   }
 

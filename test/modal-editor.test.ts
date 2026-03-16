@@ -48,6 +48,42 @@ function chkMode(
   assert.equal(editor.getMode(), expectedMode, `mode after [${keys.join("")}]`);
 }
 
+function assertRedoRoundTrip(options: {
+  initial: string;
+  keys: string[];
+  expectedText: string;
+  expectedCursor: { line: number; col: number };
+  expectedRegister: string;
+  multiLine?: boolean;
+  before?: (editor: ReturnType<typeof createEditorWithSpy>["editor"]) => void;
+}): void {
+  const {
+    initial,
+    keys,
+    expectedText,
+    expectedCursor,
+    expectedRegister,
+    multiLine = false,
+    before,
+  } = options;
+  const { editor } = multiLine
+    ? createMultiLineEditor(initial)
+    : createEditorWithSpy(initial);
+
+  before?.(editor);
+  sendKeys(editor, keys);
+
+  assert.equal(editor.getText(), expectedText, `text after [${keys.join("")}]`);
+  assert.deepEqual(editor.getCursor(), expectedCursor, `cursor after [${keys.join("")}]`);
+  assert.equal(editor.getRegister(), expectedRegister, `register after [${keys.join("")}]`);
+
+  sendKeys(editor, ["u", "\x12"]);
+
+  assert.equal(editor.getText(), expectedText, `redo text after [${keys.join("")}]`);
+  assert.deepEqual(editor.getCursor(), expectedCursor, `redo cursor after [${keys.join("")}]`);
+  assert.equal(editor.getRegister(), expectedRegister, `redo register after [${keys.join("")}]`);
+}
+
 function makeGeneratedLineFixtures(count: number): string[] {
   let seed = 0x51f15eed;
   const next = (): number => {
@@ -2164,6 +2200,69 @@ describe("undo / redo — u / ctrl+r", () => {
     assert.equal(editor.getRegister(), "c");
   });
 
+  it("redo parity: x restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "hello",
+      keys: ["x"],
+      expectedText: "ello",
+      expectedCursor: { line: 0, col: 0 },
+      expectedRegister: "h",
+    });
+  });
+
+  it("redo parity: dw restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "hello world",
+      keys: ["d", "w"],
+      expectedText: "world",
+      expectedCursor: { line: 0, col: 0 },
+      expectedRegister: "hello ",
+    });
+  });
+
+  it("redo parity: dd restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "foo\nbar",
+      keys: ["d", "d"],
+      expectedText: "bar",
+      expectedCursor: { line: 0, col: 0 },
+      expectedRegister: "foo\n",
+      multiLine: true,
+    });
+  });
+
+  it("redo parity: p restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "ab",
+      keys: ["p"],
+      expectedText: "aXb",
+      expectedCursor: { line: 0, col: 2 },
+      expectedRegister: "X",
+      before: (editor) => editor.setRegister("X"),
+    });
+  });
+
+  it("redo parity: P restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "ab",
+      keys: ["P"],
+      expectedText: "Xab",
+      expectedCursor: { line: 0, col: 1 },
+      expectedRegister: "X",
+      before: (editor) => editor.setRegister("X"),
+    });
+  });
+
+  it("redo parity: cw restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "hello world",
+      keys: ["c", "w", "Z", "\x1b"],
+      expectedText: "Zworld",
+      expectedCursor: { line: 0, col: 1 },
+      expectedRegister: "hello ",
+    });
+  });
+
   it("fresh normal-mode mutation after undo clears redo history", () => {
     const { editor } = createEditorWithSpy("abcd");
 
@@ -2230,6 +2329,53 @@ describe("undo / redo — u / ctrl+r", () => {
 
     sendKeys(editor, ["\x12"]);
     assert.equal(editor.getText(), "bcd");
+  });
+
+  it("bracketed paste in normal mode still clears pending state before redo", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    editor.setRegister("keep");
+    sendKeys(editor, ["d", "\x1b[200~paste\x1b[201~", "\x12"]);
+
+    assert.equal(editor.getText(), "bcd");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getRegister(), "keep");
+  });
+
+  it("ctrl+k still cancels pending delete and clears stale redo history", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "u"]);
+    assert.equal(editor.getText(), "abcd");
+    assert.equal(editor.getRegister(), "a");
+
+    sendKeys(editor, ["d", "\x0b"]);
+
+    assert.equal(editor.getText(), "");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getRegister(), "a");
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getRegister(), "a");
+  });
+
+  it("redo does not stomp a newer unnamed register value", () => {
+    const { editor } = createEditorWithSpy("hello world");
+
+    sendKeys(editor, ["x", "u"]);
+    sendKeys(editor, ["y", "w"]);
+    assert.equal(editor.getRegister(), "hello ");
+
+    sendKeys(editor, ["\x12"]);
+
+    assert.equal(editor.getText(), "ello world");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getRegister(), "hello ");
   });
 
   it("u in insert mode inserts literal 'u' (not intercepted)", () => {
