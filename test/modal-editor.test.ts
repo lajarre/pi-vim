@@ -2319,52 +2319,68 @@ describe("undo / redo — u / ctrl+r", () => {
     });
   });
 
-  it("fresh normal-mode mutation after undo clears redo history", () => {
-    const { editor } = createEditorWithSpy("abcd");
-
-    sendKeys(editor, ["x"]);
-    sendKeys(editor, ["u"]);
-    assert.equal(editor.getText(), "abcd");
-
-    sendKeys(editor, ["D"]);
-    assert.equal(editor.getText(), "");
-
-    sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), "");
-  });
-
-  it("insert-mode text mutation after undo clears redo history", () => {
-    const { editor } = createEditorWithSpy("abcd");
-
-    sendKeys(editor, ["x"]);
-    sendKeys(editor, ["u"]);
-    assert.equal(editor.getText(), "abcd");
-
-    sendKeys(editor, ["i", "Z", "\x1b"]);
-    assert.equal(editor.getText(), "Zabcd");
-
-    sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), "Zabcd");
-  });
-
-  it("navigation, yank, failed motion, and mode toggles keep redo history", () => {
-    const scenarios: Array<{ name: string; keys: string[] }> = [
-      { name: "navigation", keys: ["l"] },
-      { name: "yank", keys: ["y", "w"] },
-      { name: "failed motion", keys: ["f", "z"] },
-      { name: "mode toggle", keys: ["i", "\x1b"] },
-    ];
-
-    for (const scenario of scenarios) {
+  describe("central invalidation hook", () => {
+    it("insert-mode mutation after undo clears redo history", () => {
       const { editor } = createEditorWithSpy("abcd");
 
       sendKeys(editor, ["x"]);
       sendKeys(editor, ["u"]);
-      assert.equal(editor.getText(), "abcd", `${scenario.name} setup`);
+      assert.equal(editor.getText(), "abcd");
 
-      sendKeys(editor, [...scenario.keys, "\x12"]);
-      assert.equal(editor.getText(), "bcd", scenario.name);
-    }
+      sendKeys(editor, ["i", "Z", "\x1b"]);
+      assert.equal(editor.getText(), "Zabcd");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "Zabcd");
+    });
+
+    it("delegated normal-mode mutation after undo clears redo history", () => {
+      const { editor } = createEditorWithSpy("abcd");
+
+      sendKeys(editor, ["x"]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "abcd");
+
+      sendKeys(editor, ["D"]);
+      assert.equal(editor.getText(), "");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "");
+    });
+
+    it("synthetic edit J after undo clears redo history", () => {
+      const { editor } = createMultiLineEditor("a\nb");
+
+      sendKeys(editor, ["x"]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "a\nb");
+
+      sendKeys(editor, ["J"]);
+      assert.equal(editor.getText(), "a b");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "a b");
+    });
+
+    it("non-mutating paths after undo preserve redo history", () => {
+      const scenarios: Array<{ name: string; keys: string[] }> = [
+        { name: "h motion", keys: ["l", "h"] },
+        { name: "yy", keys: ["y", "y"] },
+        { name: "mode toggle", keys: ["i", "\x1b"] },
+        { name: "failed f motion", keys: ["f", "z"] },
+      ];
+
+      for (const scenario of scenarios) {
+        const { editor } = createEditorWithSpy("abcd");
+
+        sendKeys(editor, ["x"]);
+        sendKeys(editor, ["u"]);
+        assert.equal(editor.getText(), "abcd", `${scenario.name} setup`);
+
+        sendKeys(editor, [...scenario.keys, "\x12"]);
+        assert.equal(editor.getText(), "bcd", scenario.name);
+      }
+    });
   });
 
   it("no-op ctrl+r does not mutate or clear history", () => {
