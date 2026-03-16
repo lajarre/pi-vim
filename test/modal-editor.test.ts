@@ -2013,10 +2013,10 @@ describe("put — line-wise", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Undo — u maps to ctrl+_ (readline undo)  (Task 6)
+// Undo / redo — u / ctrl+r  (Task 6)
 // ---------------------------------------------------------------------------
 
-describe("undo — u", () => {
+describe("undo / redo — u / ctrl+r", () => {
   it("u in normal mode does not insert the letter 'u'", () => {
     // u must not be treated as a printable char — it must forward ctrl+_ to super
     const { editor } = createEditorWithSpy("hello");
@@ -2029,9 +2029,8 @@ describe("undo — u", () => {
   });
 
   it("u after dw: text does not grow (undo forwarded to underlying editor)", () => {
-    // The unit harness uses a stub tui without undo history, so full text
-    // restoration cannot be asserted here — that is a runtime concern.
-    // What we CAN assert: u sends ctrl+_ to super (no crash, no extra chars).
+    // Keep this as a narrow safety regression. Round-trip restore coverage
+    // lives in the redo-focused tests below.
     const { editor } = createEditorWithSpy("hello world");
     sendKeys(editor, ["d", "w"]);
     const afterDelete = editor.getText();
@@ -2044,12 +2043,57 @@ describe("undo — u", () => {
     );
   });
 
-  it("ctrl+r in normal mode is safe (redo deferred)", () => {
+  it("ctrl+r in normal mode with no redo history is a safe no-op", () => {
     const { editor } = createEditorWithSpy("hello world");
-    const before = editor.getText();
+    const beforeText = editor.getText();
+    const beforeCursor = editor.getCursor();
 
     assert.doesNotThrow(() => sendKeys(editor, ["\x12"]));
-    assert.equal(editor.getText(), before);
+    assert.equal(editor.getText(), beforeText);
+    assert.deepEqual(editor.getCursor(), beforeCursor);
+  });
+
+  it("ctrl+r after x then u restores deleted text", () => {
+    const { editor } = createEditorWithSpy("hello");
+
+    sendKeys(editor, ["x"]);
+    assert.equal(editor.getText(), "ello");
+
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "hello");
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "ello");
+  });
+
+  it("ctrl+r restores the captured post-change cursor", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("ab");
+
+    sendKeys(editor, ["p"]);
+    const afterPutCursor = editor.getCursor();
+    assert.equal(editor.getText(), "Xab");
+    assert.deepEqual(afterPutCursor, { line: 0, col: 3 });
+
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "X");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "Xab");
+    assert.deepEqual(editor.getCursor(), afterPutCursor);
+  });
+
+  it("ctrl+r in normal mode is not inserted as a literal control character", () => {
+    const { editor } = createEditorWithSpy("hello");
+
+    sendKeys(editor, ["x", "u", "\x12"]);
+
+    assert.equal(editor.getText(), "ello");
+    assert.ok(
+      !editor.getText().includes("\x12"),
+      "ctrl+r must not become a literal control character in the buffer",
+    );
   });
 
   it("u in insert mode inserts literal 'u' (not intercepted)", () => {

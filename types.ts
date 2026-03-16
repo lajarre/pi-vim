@@ -43,6 +43,7 @@ export const ESC_DELETE = "\x1b[3~";
 export const CTRL_A = "\x01"; // line start
 export const CTRL_E = "\x05"; // line end
 export const CTRL_K = "\x0b"; // kill to end of line
+export const CTRL_R = "\x12"; // ctrl+r — readline redo trigger in vim layer
 export const CTRL_UNDERSCORE = "\x1f"; // ctrl+_ — readline undo
 export const NEWLINE = "\n"; // newline character
 export const ESC_UP = "\x1b[A"; // cursor up

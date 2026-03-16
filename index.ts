@@ -77,6 +77,7 @@ import {
   CTRL_A,
   CTRL_E,
   CTRL_K,
+  CTRL_R,
   CTRL_UNDERSCORE,
   NEWLINE,
   ESC_DOWN,
@@ -99,6 +100,22 @@ const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
 
+type EditorSnapshot = {
+  text: string;
+  cursor: { line: number; col: number };
+};
+
+type ModalEditorInternals = {
+  state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+  preferredVisualCol?: number | null;
+  lastAction?: string | null;
+  historyIndex?: number;
+  onChange?: (text: string) => void;
+  tui?: { requestRender?: () => void };
+  pushUndoSnapshot?: () => void;
+  setCursorCol?: (col: number) => void;
+};
+
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
@@ -112,6 +129,8 @@ export class ModalEditor extends CustomEditor {
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private readonly wordBoundaryCache = new WordBoundaryCache();
+  private readonly redoStack: EditorSnapshot[] = [];
+  private isApplyingRedo: boolean = false;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -125,6 +144,93 @@ export class ModalEditor extends CustomEditor {
   setRegister(text: string): void { this.unnamedRegister = text; }
   getMode(): Mode { return this.mode; }
   getText(): string { return this.getLines().join("\n"); }
+
+  override setText(text: string): void {
+    this.clearRedoStack();
+    super.setText(text);
+  }
+
+  private captureSnapshot(): EditorSnapshot {
+    const cursor = this.getCursor();
+    return {
+      text: this.getText(),
+      cursor: { line: cursor.line, col: cursor.col },
+    };
+  }
+
+  private restoreSnapshot(snapshot: EditorSnapshot): void {
+    const editor = this as unknown as ModalEditorInternals;
+    const state = editor.state;
+    if (!state) return;
+
+    const lines = snapshot.text.split("\n");
+    state.lines = lines.length > 0 ? lines : [""];
+
+    const maxLine = Math.max(0, state.lines.length - 1);
+    const cursorLine = Math.max(0, Math.min(snapshot.cursor.line, maxLine));
+    const line = state.lines[cursorLine] ?? "";
+    const cursorCol = Math.max(0, Math.min(snapshot.cursor.col, line.length));
+
+    state.cursorLine = cursorLine;
+    if (typeof editor.setCursorCol === "function") {
+      editor.setCursorCol(cursorCol);
+    } else {
+      state.cursorCol = cursorCol;
+      editor.preferredVisualCol = null;
+    }
+
+    editor.historyIndex = -1;
+    editor.lastAction = null;
+    editor.onChange?.(this.getText());
+    editor.tui?.requestRender?.();
+  }
+
+  private snapshotChanged(a: EditorSnapshot, b: EditorSnapshot): boolean {
+    return a.text !== b.text
+      || a.cursor.line !== b.cursor.line
+      || a.cursor.col !== b.cursor.col;
+  }
+
+  private performUndo(): void {
+    const beforeUndo = this.captureSnapshot();
+    super.handleInput(CTRL_UNDERSCORE);
+    const afterUndo = this.captureSnapshot();
+
+    if (this.snapshotChanged(beforeUndo, afterUndo)) {
+      this.redoStack.push(beforeUndo);
+    }
+  }
+
+  private performRedo(): void {
+    const snapshot = this.redoStack.pop();
+    if (!snapshot) return;
+
+    const editor = this as unknown as ModalEditorInternals;
+    editor.pushUndoSnapshot?.();
+
+    this.isApplyingRedo = true;
+    try {
+      this.restoreSnapshot(snapshot);
+    } finally {
+      this.isApplyingRedo = false;
+    }
+  }
+
+  private clearRedoStack(): void {
+    this.redoStack.length = 0;
+  }
+
+  private clearRedoStackIfBufferReset(before: EditorSnapshot): void {
+    const after = this.captureSnapshot();
+    if (
+      before.text !== after.text
+      && after.text === ""
+      && after.cursor.line === 0
+      && after.cursor.col === 0
+    ) {
+      this.clearRedoStack();
+    }
+  }
 
   private clearPendingState(): void {
     this.pendingMotion = null;
@@ -239,7 +345,10 @@ export class ModalEditor extends CustomEditor {
         super.handleInput(ESC_UP);
         return;
       }
-      return super.handleInput(data);
+      const beforeSuperInput = this.captureSnapshot();
+      super.handleInput(data);
+      this.clearRedoStackIfBufferReset(beforeSuperInput);
+      return;
     }
 
     if (this.pendingTextObject) {
@@ -755,7 +864,12 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (data === "u") {
-      super.handleInput(CTRL_UNDERSCORE); // ctrl+_ — readline undo
+      this.performUndo();
+      return;
+    }
+
+    if (data === CTRL_R) {
+      this.performRedo();
       return;
     }
 
@@ -785,7 +899,9 @@ export class ModalEditor extends CustomEditor {
 
     // Pass control sequences (ctrl+c, etc.) to super, ignore printable chars
     if (this.isPrintableChunk(data)) return;
+    const beforeSuperInput = this.captureSnapshot();
     super.handleInput(data);
+    this.clearRedoStackIfBufferReset(beforeSuperInput);
   }
 
   private handleMappedKey(key: string): void {
