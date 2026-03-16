@@ -2263,6 +2263,62 @@ describe("undo / redo — u / ctrl+r", () => {
     });
   });
 
+  it("redo parity: J restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "foo\nbar",
+      keys: ["J"],
+      expectedText: "foo bar",
+      expectedCursor: { line: 0, col: 3 },
+      expectedRegister: "",
+      multiLine: true,
+    });
+  });
+
+  it("redo parity: gJ restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "foo\nbar",
+      keys: ["g", "J"],
+      expectedText: "foobar",
+      expectedCursor: { line: 0, col: 3 },
+      expectedRegister: "",
+      multiLine: true,
+    });
+  });
+
+  it("redo parity: 3J restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "aa\nbb\ncc",
+      keys: ["3", "J"],
+      expectedText: "aa bb cc",
+      expectedCursor: { line: 0, col: 5 },
+      expectedRegister: "",
+      multiLine: true,
+    });
+  });
+
+  it("redo parity: 3gJ restores text, cursor, and register", () => {
+    assertRedoRoundTrip({
+      initial: "aa\nbb\ncc",
+      keys: ["3", "g", "J"],
+      expectedText: "aabbcc",
+      expectedCursor: { line: 0, col: 4 },
+      expectedRegister: "",
+      multiLine: true,
+    });
+  });
+
+  it("redo parity: J preserves preexisting unnamed register", () => {
+    assertRedoRoundTrip({
+      initial: "foo\nbar",
+      keys: ["J"],
+      expectedText: "foo bar",
+      expectedCursor: { line: 0, col: 3 },
+      expectedRegister: "keep",
+      multiLine: true,
+      before: (editor) => editor.setRegister("keep"),
+    });
+  });
+
   it("fresh normal-mode mutation after undo clears redo history", () => {
     const { editor } = createEditorWithSpy("abcd");
 

@@ -1130,46 +1130,39 @@ export class ModalEditor extends CustomEditor {
     if (steps === 0) return;
 
     this.trackFreshMutation(() => {
-      const editor = this as unknown as {
-        state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
-        preferredVisualCol?: number;
-        tui?: { requestRender?: () => void };
-        pushUndoSnapshot?: () => void;
-      };
+      this.applySyntheticEdit(() => {
+        const editor = this as unknown as ModalEditorInternals;
+        const state = editor.state;
+        if (!state || !Array.isArray(state.lines)) return;
 
-      const state = editor.state;
-      if (!state || !Array.isArray(state.lines)) return;
+        const currentLine = state.cursorLine ?? 0;
+        let joinPoint = state.cursorCol ?? 0;
 
-      editor.pushUndoSnapshot?.();
+        for (let i = 0; i < steps; i++) {
+          if (currentLine >= state.lines.length - 1) break;
 
-      const currentLine = state.cursorLine ?? 0;
-      let joinPoint = state.cursorCol ?? 0;
+          const left = state.lines[currentLine]!;
+          const right = state.lines[currentLine + 1]!;
+          let joined: string;
 
-      for (let i = 0; i < steps; i++) {
-        if (currentLine >= state.lines.length - 1) break;
+          if (normalize) {
+            const trimmedRight = right.trimStart();
+            const leftEndsWithSpace = left.length > 0 && /\s/.test(left[left.length - 1]!);
+            const needsSeparator = !leftEndsWithSpace && trimmedRight.length > 0;
+            joined = needsSeparator ? `${left} ${trimmedRight}` : left + trimmedRight;
+            joinPoint = left.length;
+          } else {
+            joined = left + right;
+            joinPoint = left.length;
+          }
 
-        const left = state.lines[currentLine]!;
-        const right = state.lines[currentLine + 1]!;
-        let joined: string;
-
-        if (normalize) {
-          const trimmedRight = right.trimStart();
-          const leftEndsWithSpace = left.length > 0 && /\s/.test(left[left.length - 1]!);
-          const needsSeparator = !leftEndsWithSpace && trimmedRight.length > 0;
-          joined = needsSeparator ? `${left} ${trimmedRight}` : left + trimmedRight;
-          joinPoint = left.length;
-        } else {
-          joined = left + right;
-          joinPoint = left.length;
+          state.lines.splice(currentLine, 2, joined);
         }
 
-        state.lines.splice(currentLine, 2, joined);
-      }
-
-      state.cursorLine = currentLine;
-      state.cursorCol = joinPoint;
-      editor.preferredVisualCol = joinPoint;
-      editor.tui?.requestRender?.();
+        state.cursorLine = currentLine;
+        state.cursorCol = joinPoint;
+        editor.preferredVisualCol = joinPoint;
+      });
     });
   }
 
