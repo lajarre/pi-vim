@@ -874,7 +874,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (data === "u") {
+    if (data === "u" || data === CTRL_UNDERSCORE) {
       this.performUndo();
       return;
     }

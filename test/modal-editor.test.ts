@@ -2385,6 +2385,41 @@ describe("undo / redo — u / ctrl+r", () => {
     sendKeys(editor, ["u"]);
     assert.ok(editor.getText().includes("u"), "u in insert mode must insert character");
   });
+
+  describe("normal-mode CTRL_UNDERSCORE undo alias", () => {
+    it("CTRL_UNDERSCORE in normal mode acts as undo", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x"]); // delete 'a'
+      assert.equal(editor.getText(), "bcd");
+      sendKeys(editor, ["\x1f"]); // CTRL_UNDERSCORE
+      assert.equal(editor.getText(), "abcd");
+    });
+
+    it("CTRL_UNDERSCORE feeds redo history like u", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x"]);
+      sendKeys(editor, ["\x1f"]); // undo via CTRL_UNDERSCORE
+      assert.equal(editor.getText(), "abcd");
+      sendKeys(editor, ["\x12"]); // redo
+      assert.equal(editor.getText(), "bcd");
+    });
+
+    it("no-op CTRL_UNDERSCORE does not create redo history", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["\x1f"]); // undo with nothing to undo
+      sendKeys(editor, ["\x12"]); // redo should be no-op
+      assert.equal(editor.getText(), "abcd");
+    });
+
+    it("CTRL_UNDERSCORE does not insert literal control char", () => {
+      const { editor } = createEditorWithSpy("hello");
+      sendKeys(editor, ["\x1f"]);
+      assert.ok(
+        !editor.getText().includes("\x1f"),
+        "must not insert literal \\x1f",
+      );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
