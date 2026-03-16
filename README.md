@@ -284,7 +284,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 | Key | Action |
 |-----|--------|
-| `u` | Undo in normal mode (forwards `ctrl+_` / `\x1f` to the underlying readline editor) |
+| `u` | Undo in normal mode |
 | `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
 | `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
 
