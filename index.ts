@@ -159,10 +159,19 @@ export class ModalEditor extends CustomEditor {
     };
   }
 
+  private requireRedoRestoreState(
+    editor: ModalEditorInternals,
+  ): { lines: string[]; cursorLine?: number; cursorCol?: number } {
+    const state = editor.state;
+    if (!state || !Array.isArray(state.lines)) {
+      throw new Error("Redo restore prerequisite: editor state unavailable");
+    }
+    return state;
+  }
+
   private restoreSnapshot(snapshot: EditorSnapshot): void {
     const editor = this as unknown as ModalEditorInternals;
-    const state = editor.state;
-    if (!state) return;
+    const state = this.requireRedoRestoreState(editor);
 
     const lines = snapshot.text.split("\n");
     state.lines = lines.length > 0 ? lines : [""];
@@ -217,6 +226,7 @@ export class ModalEditor extends CustomEditor {
 
       this.isApplyingRedo = true;
       try {
+        this.requireRedoRestoreState(editor);
         editor.pushUndoSnapshot?.();
         this.restoreSnapshot(snapshot);
         this.redoStack.pop();

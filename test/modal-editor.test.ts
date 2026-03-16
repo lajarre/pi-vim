@@ -2439,6 +2439,68 @@ describe("undo / redo — u / ctrl+r", () => {
     });
   });
 
+  describe("redo restore hardening", () => {
+    it("restore failure does not consume redo entry or change visible state", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "u"]);
+      assert.equal(editor.getText(), "abcd");
+
+      const raw = editor as any;
+      const savedState = raw.state;
+      raw.state = undefined;
+
+      try {
+        assert.throws(
+          () => sendKeys(editor, ["\x12"]),
+          /redo restore prerequisite: editor state unavailable/i,
+        );
+      } finally {
+        raw.state = savedState;
+      }
+
+      assert.equal(editor.getText(), "abcd");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "bcd");
+    });
+
+    it("partial counted redo failure preserves committed steps", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "x"]); // "cd"
+      sendKeys(editor, ["u", "u"]); // "abcd"
+      assert.equal(editor.getText(), "abcd");
+
+      const raw = editor as any;
+      const originalPushUndoSnapshot = raw.pushUndoSnapshot;
+      let pushCalls = 0;
+      let suspendedState = raw.state;
+
+      raw.pushUndoSnapshot = () => {
+        pushCalls++;
+        originalPushUndoSnapshot?.call(raw);
+        if (pushCalls === 2) {
+          suspendedState = raw.state;
+          raw.state = undefined;
+        }
+      };
+
+      try {
+        assert.throws(
+          () => sendKeys(editor, ["2", "\x12"]),
+          /redo restore prerequisite: editor state unavailable/i,
+        );
+      } finally {
+        raw.state = suspendedState;
+        raw.pushUndoSnapshot = originalPushUndoSnapshot;
+      }
+
+      assert.equal(editor.getText(), "bcd");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "cd");
+    });
+  });
+
   describe("normal-mode CTRL_UNDERSCORE undo alias", () => {
     it("CTRL_UNDERSCORE in normal mode acts as undo", () => {
       const { editor } = createEditorWithSpy("abcd");
