@@ -130,6 +130,7 @@ export class ModalEditor extends CustomEditor {
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private readonly wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
+  private isApplyingRedo: boolean = false;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -213,24 +214,33 @@ export class ModalEditor extends CustomEditor {
     if (!snapshot) return;
 
     const editor = this as unknown as ModalEditorInternals;
-    editor.pushUndoSnapshot?.();
-    this.restoreSnapshot(snapshot);
+    this.isApplyingRedo = true;
+    try {
+      editor.pushUndoSnapshot?.();
+      this.restoreSnapshot(snapshot);
+    } finally {
+      this.isApplyingRedo = false;
+    }
   }
 
   private clearRedoStack(): void {
     this.redoStack.length = 0;
   }
 
-  private clearRedoStackIfBufferReset(before: EditorSnapshot): void {
+  private clearRedoStackIfFreshMutation(before: EditorSnapshot): void {
+    if (this.isApplyingRedo || this.redoStack.length === 0) return;
+
     const after = this.captureSnapshot();
-    if (
-      before.text !== after.text
-      && after.text === ""
-      && after.cursor.line === 0
-      && after.cursor.col === 0
-    ) {
+    if (before.text !== after.text) {
       this.clearRedoStack();
     }
+  }
+
+  private trackFreshMutation<T>(action: () => T): T {
+    const before = this.captureSnapshot();
+    const result = action();
+    this.clearRedoStackIfFreshMutation(before);
+    return result;
   }
 
   private clearPendingState(): void {
@@ -334,21 +344,18 @@ export class ModalEditor extends CustomEditor {
       }
       // Alt+o: open new line below (stay in insert mode)
       if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
-        super.handleInput(CTRL_E);
-        super.handleInput(NEWLINE);
+        this.openLineBelow();
         return;
       }
       // Alt+Shift+o: open new line above (stay in insert mode)
       // \x1bO is the legacy sequence for Alt+Shift+O (VT100 SS3 prefix in non-Kitty terminals)
       if (matchesKey(data, Key.shiftAlt("o")) || data === "\x1bO") {
-        super.handleInput(CTRL_A);
-        super.handleInput(NEWLINE);
-        super.handleInput(ESC_UP);
+        this.openLineAbove();
         return;
       }
-      const beforeSuperInput = this.captureSnapshot();
-      super.handleInput(data);
-      this.clearRedoStackIfBufferReset(beforeSuperInput);
+      this.trackFreshMutation(() => {
+        super.handleInput(data);
+      });
       return;
     }
 
@@ -901,9 +908,24 @@ export class ModalEditor extends CustomEditor {
 
     // Pass control sequences (ctrl+c, etc.) to super, ignore printable chars
     if (this.isPrintableChunk(data)) return;
-    const beforeSuperInput = this.captureSnapshot();
-    super.handleInput(data);
-    this.clearRedoStackIfBufferReset(beforeSuperInput);
+    this.trackFreshMutation(() => {
+      super.handleInput(data);
+    });
+  }
+
+  private openLineBelow(): void {
+    this.trackFreshMutation(() => {
+      super.handleInput(CTRL_E);
+      super.handleInput(NEWLINE);
+    });
+  }
+
+  private openLineAbove(): void {
+    this.trackFreshMutation(() => {
+      super.handleInput(CTRL_A);
+      super.handleInput(NEWLINE);
+      super.handleInput(ESC_UP);
+    });
   }
 
   private handleMappedKey(key: string): void {
@@ -927,14 +949,11 @@ export class ModalEditor extends CustomEditor {
         super.handleInput(CTRL_A);
         break;
       case "o":
-        super.handleInput(CTRL_E);
-        super.handleInput(NEWLINE);
+        this.openLineBelow();
         this.mode = "insert";
         break;
       case "O":
-        super.handleInput(CTRL_A);
-        super.handleInput(NEWLINE);
-        super.handleInput(ESC_UP);
+        this.openLineAbove();
         this.mode = "insert";
         break;
       case "D":
@@ -1069,43 +1088,45 @@ export class ModalEditor extends CustomEditor {
     const steps = Math.max(0, count - 1);
     if (steps === 0) return;
 
-    const editor = this as unknown as {
-      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
-      preferredVisualCol?: number;
-      tui?: { requestRender?: () => void };
-    };
+    this.trackFreshMutation(() => {
+      const editor = this as unknown as {
+        state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+        preferredVisualCol?: number;
+        tui?: { requestRender?: () => void };
+      };
 
-    const state = editor.state;
-    if (!state || !Array.isArray(state.lines)) return;
+      const state = editor.state;
+      if (!state || !Array.isArray(state.lines)) return;
 
-    const currentLine = state.cursorLine ?? 0;
-    let joinPoint = state.cursorCol ?? 0;
+      const currentLine = state.cursorLine ?? 0;
+      let joinPoint = state.cursorCol ?? 0;
 
-    for (let i = 0; i < steps; i++) {
-      if (currentLine >= state.lines.length - 1) break;
+      for (let i = 0; i < steps; i++) {
+        if (currentLine >= state.lines.length - 1) break;
 
-      const left = state.lines[currentLine]!;
-      const right = state.lines[currentLine + 1]!;
-      let joined: string;
+        const left = state.lines[currentLine]!;
+        const right = state.lines[currentLine + 1]!;
+        let joined: string;
 
-      if (normalize) {
-        const trimmedRight = right.trimStart();
-        const leftEndsWithSpace = left.length > 0 && /\s/.test(left[left.length - 1]!);
-        const needsSeparator = !leftEndsWithSpace && trimmedRight.length > 0;
-        joined = needsSeparator ? `${left} ${trimmedRight}` : left + trimmedRight;
-        joinPoint = left.length;
-      } else {
-        joined = left + right;
-        joinPoint = left.length;
+        if (normalize) {
+          const trimmedRight = right.trimStart();
+          const leftEndsWithSpace = left.length > 0 && /\s/.test(left[left.length - 1]!);
+          const needsSeparator = !leftEndsWithSpace && trimmedRight.length > 0;
+          joined = needsSeparator ? `${left} ${trimmedRight}` : left + trimmedRight;
+          joinPoint = left.length;
+        } else {
+          joined = left + right;
+          joinPoint = left.length;
+        }
+
+        state.lines.splice(currentLine, 2, joined);
       }
 
-      state.lines.splice(currentLine, 2, joined);
-    }
-
-    state.cursorLine = currentLine;
-    state.cursorCol = joinPoint;
-    editor.preferredVisualCol = joinPoint;
-    editor.tui?.requestRender?.();
+      state.cursorLine = currentLine;
+      state.cursorCol = joinPoint;
+      editor.preferredVisualCol = joinPoint;
+      editor.tui?.requestRender?.();
+    });
   }
 
   private isWordChar(ch: string): boolean {
@@ -1393,28 +1414,32 @@ export class ModalEditor extends CustomEditor {
   }
 
   private cutToEndOfLine(): void {
-    const lines = this.getLines();
-    const cursorLine = this.getCursor().line;
-    const { line, col } = this.getCurrentLineAndCol();
+    this.trackFreshMutation(() => {
+      const lines = this.getLines();
+      const cursorLine = this.getCursor().line;
+      const { line, col } = this.getCurrentLineAndCol();
 
-    const hasNextLine = cursorLine < lines.length - 1;
-    const deleted = col < line.length ? line.slice(col) : hasNextLine ? "\n" : "";
+      const hasNextLine = cursorLine < lines.length - 1;
+      const deleted = col < line.length ? line.slice(col) : hasNextLine ? "\n" : "";
 
-    this.writeToRegister(deleted);
-    super.handleInput(CTRL_K);
+      this.writeToRegister(deleted);
+      super.handleInput(CTRL_K);
+    });
   }
 
   private cutCurrentLineContent(): void {
-    const lines = this.getLines();
-    const cursorLine = this.getCursor().line;
-    const { line } = this.getCurrentLineAndCol();
+    this.trackFreshMutation(() => {
+      const lines = this.getLines();
+      const cursorLine = this.getCursor().line;
+      const { line } = this.getCurrentLineAndCol();
 
-    const hasNextLine = cursorLine < lines.length - 1;
-    const deleted = line.length > 0 ? line : hasNextLine ? "\n" : "";
+      const hasNextLine = cursorLine < lines.length - 1;
+      const deleted = line.length > 0 ? line : hasNextLine ? "\n" : "";
 
-    this.writeToRegister(deleted);
-    super.handleInput(CTRL_A);
-    super.handleInput(CTRL_K);
+      this.writeToRegister(deleted);
+      super.handleInput(CTRL_A);
+      super.handleInput(CTRL_K);
+    });
   }
 
   private cutLine(): void {
@@ -1464,25 +1489,27 @@ export class ModalEditor extends CustomEditor {
     const lines = this.getLines();
     if (lines.length === 0) return;
 
-    const payload = this.getLinewisePayload(startLine, endLine);
-    const { startAbs, endAbs } = this.getLineDeleteAbsoluteRange(startLine, endLine);
+    this.trackFreshMutation(() => {
+      const payload = this.getLinewisePayload(startLine, endLine);
+      const { startAbs, endAbs } = this.getLineDeleteAbsoluteRange(startLine, endLine);
 
-    this.writeToRegister(payload);
+      this.writeToRegister(payload);
 
-    if (endAbs > startAbs) {
-      const cursor = this.getCursor();
-      const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-      if (cursorAbs !== startAbs) {
-        this.moveCursorBy(startAbs - cursorAbs);
+      if (endAbs > startAbs) {
+        const cursor = this.getCursor();
+        const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
+        if (cursorAbs !== startAbs) {
+          this.moveCursorBy(startAbs - cursorAbs);
+        }
+
+        const count = endAbs - startAbs;
+        for (let i = 0; i < count; i++) {
+          super.handleInput(ESC_DELETE);
+        }
       }
 
-      const count = endAbs - startAbs;
-      for (let i = 0; i < count; i++) {
-        super.handleInput(ESC_DELETE);
-      }
-    }
-
-    super.handleInput(CTRL_A);
+      super.handleInput(CTRL_A);
+    });
   }
 
   private yankLineRange(startLine: number, endLine: number): void {
@@ -1730,18 +1757,20 @@ export class ModalEditor extends CustomEditor {
 
     if (end <= start) return;
 
-    this.writeToRegister(text.slice(start, end));
+    this.trackFreshMutation(() => {
+      this.writeToRegister(text.slice(start, end));
 
-    const cursor = this.getCursor();
-    const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-    if (cursorAbs !== start) {
-      this.moveCursorBy(start - cursorAbs);
-    }
+      const cursor = this.getCursor();
+      const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
+      if (cursorAbs !== start) {
+        this.moveCursorBy(start - cursorAbs);
+      }
 
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+      const count = end - start;
+      for (let i = 0; i < count; i++) {
+        super.handleInput(ESC_DELETE);
+      }
+    });
   }
 
   private getWordObjectRange(
@@ -1815,28 +1844,30 @@ export class ModalEditor extends CustomEditor {
     if (!text) return;
     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
-    if (text.endsWith("\n")) {
-      const content = text.slice(0, -1);
+    this.trackFreshMutation(() => {
+      if (text.endsWith("\n")) {
+        const content = text.slice(0, -1);
+        for (let i = 0; i < safeCount; i++) {
+          // Line-wise: insert new line below and fill it
+          super.handleInput(CTRL_E);
+          super.handleInput(NEWLINE);
+          for (const char of content) {
+            super.handleInput(char === "\n" ? NEWLINE : char);
+          }
+        }
+        return;
+      }
+
+      // Character-wise: insert after cursor
+      if (!this.isCursorAtOrPastEol()) {
+        super.handleInput(ESC_RIGHT);
+      }
       for (let i = 0; i < safeCount; i++) {
-        // Line-wise: insert new line below and fill it
-        super.handleInput(CTRL_E);
-        super.handleInput(NEWLINE);
-        for (const char of content) {
+        for (const char of text) {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
-      return;
-    }
-
-    // Character-wise: insert after cursor
-    if (!this.isCursorAtOrPastEol()) {
-      super.handleInput(ESC_RIGHT);
-    }
-    for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
-    }
+    });
   }
 
   private putBefore(): void {
@@ -1845,26 +1876,28 @@ export class ModalEditor extends CustomEditor {
     if (!text) return;
     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
-    if (text.endsWith("\n")) {
-      const content = text.slice(0, -1);
+    this.trackFreshMutation(() => {
+      if (text.endsWith("\n")) {
+        const content = text.slice(0, -1);
+        for (let i = 0; i < safeCount; i++) {
+          // Line-wise: insert new line above and fill it
+          super.handleInput(CTRL_A);
+          super.handleInput(NEWLINE);
+          super.handleInput(ESC_UP);
+          for (const char of content) {
+            super.handleInput(char === "\n" ? NEWLINE : char);
+          }
+        }
+        return;
+      }
+
+      // Character-wise: insert before cursor (just type it)
       for (let i = 0; i < safeCount; i++) {
-        // Line-wise: insert new line above and fill it
-        super.handleInput(CTRL_A);
-        super.handleInput(NEWLINE);
-        super.handleInput(ESC_UP);
-        for (const char of content) {
+        for (const char of text) {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
-      return;
-    }
-
-    // Character-wise: insert before cursor (just type it)
-    for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
-    }
+    });
   }
 
   private deleteRange(col: number, targetCol: number, inclusive: boolean): void {
@@ -1876,16 +1909,18 @@ export class ModalEditor extends CustomEditor {
 
     if (end <= start) return;
 
-    this.writeToRegister(line.slice(start, end));
+    this.trackFreshMutation(() => {
+      this.writeToRegister(line.slice(start, end));
 
-    if (start !== col) {
-      this.moveCursorBy(start - col);
-    }
+      if (start !== col) {
+        this.moveCursorBy(start - col);
+      }
 
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+      const count = end - start;
+      for (let i = 0; i < count; i++) {
+        super.handleInput(ESC_DELETE);
+      }
+    });
   }
 
   render(width: number): string[] {
