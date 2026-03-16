@@ -285,6 +285,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 | Key | Action |
 |-----|--------|
 | `u` | Undo in normal mode |
+| `Ctrl+_` | Undo in normal mode (alias for `u`) |
 | `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
 | `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
 
@@ -310,7 +311,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for `word` + `WORD` motions | Cross-line                    |
 | `0` / `$` operators   | Exclusive of anchor col                | `0` inclusive of col 0        |
 | Undo depth            | Delegates to underlying readline undo  | Full per-change undo tree     |
-| Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo clamps to available history) | `<C-r>`                       |
+| Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo is stepwise, clamps to available history, and preserves single-step undo granularity) | `<C-r>`                       |
 | Visual mode           | Not implemented                        | `v`, `V`, `<C-v>`            |
 | Text objects          | Supports `iw`/`aw` only               | Full text-object set           |
 | Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
