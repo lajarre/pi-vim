@@ -2462,6 +2462,25 @@ describe("undo / redo — u / ctrl+r", () => {
       );
     });
   });
+
+  describe("count-state safety for counted redo", () => {
+    it("{count}<C-r> does not leak count into next command (9)", () => {
+      const { editor } = createEditorWithSpy("abcdefghij");
+      sendKeys(editor, ["x", "u"]);
+      // 9<C-r> clamps to 1 available entry, then x deletes one char
+      sendKeys(editor, ["9", "\x12", "x"]);
+      assert.equal(editor.getText(), "cdefghij");
+      assert.equal(editor.getRegister(), "b");
+    });
+
+    it("0 after counted redo is treated as line-start motion", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["l", "l", "x", "u"]);
+      // 1<C-r> redoes the x at col 2 → "abd"; 0 = line-start; x deletes 'a'
+      sendKeys(editor, ["1", "\x12", "0", "x"]);
+      assert.equal(editor.getText(), "bd");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
