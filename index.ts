@@ -72,7 +72,6 @@ import {
   CHAR_MOTION_KEYS,
   ESC_LEFT,
   ESC_RIGHT,
-  ESC_DELETE,
   ESC_UP,
   CTRL_A,
   CTRL_E,
@@ -1033,6 +1032,59 @@ export class ModalEditor extends CustomEditor {
     return this.getAbsoluteIndex(cursor.line, cursor.col);
   }
 
+  private getCursorFromAbsoluteIndex(text: string, abs: number): { line: number; col: number } {
+    const lines = text.length === 0 ? [""] : text.split("\n");
+    let remaining = Math.max(0, Math.min(abs, text.length));
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex] ?? "";
+      if (remaining <= line.length) {
+        return { line: lineIndex, col: remaining };
+      }
+      remaining -= line.length + 1;
+    }
+
+    const lastLine = Math.max(0, lines.length - 1);
+    return { line: lastLine, col: (lines[lastLine] ?? "").length };
+  }
+
+  private replaceTextInBuffer(text: string, cursorAbs: number): void {
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number | null;
+      historyIndex?: number;
+      lastAction?: string | null;
+      onChange?: (text: string) => void;
+      tui?: { requestRender?: () => void };
+      pushUndoSnapshot?: () => void;
+      autocompleteState?: unknown;
+      updateAutocomplete?: () => void;
+    };
+
+    const state = editor.state;
+    if (!state) return;
+
+    const currentText = this.getText();
+    if (currentText !== text) {
+      editor.pushUndoSnapshot?.();
+    }
+
+    const nextLines = text.length === 0 ? [""] : text.split("\n");
+    const { line, col } = this.getCursorFromAbsoluteIndex(text, cursorAbs);
+
+    editor.historyIndex = -1;
+    editor.lastAction = null;
+    state.lines = nextLines;
+    state.cursorLine = line;
+    state.cursorCol = col;
+    editor.preferredVisualCol = null;
+    editor.onChange?.(this.getText());
+    if (editor.autocompleteState) {
+      editor.updateAutocomplete?.();
+    }
+    editor.tui?.requestRender?.();
+  }
+
   private findWordTargetInText(
     text: string,
     abs: number,
@@ -1352,16 +1404,8 @@ export class ModalEditor extends CustomEditor {
     this.writeToRegister(payload);
 
     if (endAbs > startAbs) {
-      const cursor = this.getCursor();
-      const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-      if (cursorAbs !== startAbs) {
-        this.moveCursorBy(startAbs - cursorAbs);
-      }
-
-      const count = endAbs - startAbs;
-      for (let i = 0; i < count; i++) {
-        super.handleInput(ESC_DELETE);
-      }
+      const text = this.getText();
+      this.replaceTextInBuffer(text.slice(0, startAbs) + text.slice(endAbs), startAbs);
     }
 
     super.handleInput(CTRL_A);
@@ -1613,17 +1657,7 @@ export class ModalEditor extends CustomEditor {
     if (end <= start) return;
 
     this.writeToRegister(text.slice(start, end));
-
-    const cursor = this.getCursor();
-    const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-    if (cursorAbs !== start) {
-      this.moveCursorBy(start - cursorAbs);
-    }
-
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+    this.replaceTextInBuffer(text.slice(0, start) + text.slice(end), start);
   }
 
   private getWordObjectRange(
@@ -1750,24 +1784,10 @@ export class ModalEditor extends CustomEditor {
   }
 
   private deleteRange(col: number, targetCol: number, inclusive: boolean): void {
-    const line = this.getLines()[this.getCursor().line] ?? "";
-
-    const start = Math.min(col, targetCol);
-    const rawEnd = Math.max(col, targetCol) + (inclusive ? 1 : 0);
-    const end = Math.min(rawEnd, line.length);
-
-    if (end <= start) return;
-
-    this.writeToRegister(line.slice(start, end));
-
-    if (start !== col) {
-      this.moveCursorBy(start - col);
-    }
-
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+    const cursor = this.getCursor();
+    const currentAbs = this.getAbsoluteIndex(cursor.line, col);
+    const targetAbs = this.getAbsoluteIndex(cursor.line, targetCol);
+    this.deleteRangeByAbsolute(currentAbs, targetAbs, inclusive);
   }
 
   render(width: number): string[] {

@@ -271,6 +271,22 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.equal(editor.getRegister(), "hello\n");
     assert.equal(editor.getText(), "");
   });
+
+  it("dd deletes only the current line when it contains surrogate pairs", () => {
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["😀x", "keep"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+
+    sendKeys(editor, ["d", "d"]);
+
+    assert.equal(editor.getRegister(), "😀x\n");
+    assert.equal(editor.getText(), "keep");
+  });
 });
 
 describe("delete operator — WORD motions (dW / dE / dB)", () => {
