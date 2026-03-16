@@ -2096,6 +2096,74 @@ describe("undo / redo — u / ctrl+r", () => {
     );
   });
 
+  it("repeated ctrl+r walks forward through stacked redo history", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "x", "x"]);
+    assert.equal(editor.getText(), "d");
+
+    sendKeys(editor, ["u", "u", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "bcd");
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "cd");
+
+    sendKeys(editor, ["\x12"]);
+    assert.equal(editor.getText(), "d");
+  });
+
+  it("2ctrl+r redoes two stacked undo steps", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "x", "x"]);
+    sendKeys(editor, ["u", "u", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    sendKeys(editor, ["2", "\x12"]);
+
+    assert.equal(editor.getText(), "cd");
+  });
+
+  it("3ctrl+r redoes three stacked undo steps", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "x", "x"]);
+    sendKeys(editor, ["u", "u", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    sendKeys(editor, ["3", "\x12"]);
+
+    assert.equal(editor.getText(), "d");
+  });
+
+  it("3ctrl+r clamps when fewer redo steps exist", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "x"]);
+    sendKeys(editor, ["u", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    sendKeys(editor, ["3", "\x12"]);
+
+    assert.equal(editor.getText(), "cd");
+  });
+
+  it("counted ctrl+r does not leak count into the next command", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "x", "x"]);
+    sendKeys(editor, ["u", "u", "u"]);
+    assert.equal(editor.getText(), "abcd");
+
+    sendKeys(editor, ["2", "\x12", "x"]);
+
+    assert.equal(editor.getText(), "d");
+    assert.equal(editor.getRegister(), "c");
+  });
+
   it("u in insert mode inserts literal 'u' (not intercepted)", () => {
     const { editor } = createEditorWithSpy("hello");
     sendKeys(editor, ["i"]); // → insert mode

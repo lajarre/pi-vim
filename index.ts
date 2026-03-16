@@ -200,8 +200,16 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private performRedo(): void {
-    const snapshot = this.redoStack.pop();
+  private performRedo(count: number = this.takeTotalCount(1)): void {
+    const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
+    let snapshot: EditorSnapshot | undefined;
+
+    for (let i = 0; i < maxSteps; i++) {
+      const nextSnapshot = this.redoStack.pop();
+      if (!nextSnapshot) break;
+      snapshot = nextSnapshot;
+    }
+
     if (!snapshot) return;
 
     const editor = this as unknown as ModalEditorInternals;
@@ -733,6 +741,7 @@ export class ModalEditor extends CustomEditor {
         || data === "p"
         || data === "P"
         || data === "J"
+        || data === CTRL_R
       );
       const supportsCountedCharMotion = (
         CHAR_MOTION_KEYS.has(data)
