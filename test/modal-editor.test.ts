@@ -2422,10 +2422,21 @@ describe("undo / redo — u / ctrl+r", () => {
       assert.equal(editor.getText(), "abcd");
     });
 
-    // NOTE: stepwise redo with synthetic-edit history (J) is
-    // deferred to Task 6 — joinLines currently bypasses
-    // pushUndoSnapshot, so undo/redo granularity for J requires
-    // the applySyntheticEdit helper from Tasks 5+6.
+    it("stepwise redo with synthetic-edit history (J)", () => {
+      const { editor } = createMultiLineEditor("a\nb\nc");
+      sendKeys(editor, ["J"]); // join → "a b\nc"
+      sendKeys(editor, ["J"]); // join → "a b c"
+      assert.equal(editor.getText(), "a b c");
+
+      sendKeys(editor, ["u", "u"]); // undo both → "a\nb\nc"
+      assert.equal(editor.getText(), "a\nb\nc");
+
+      sendKeys(editor, ["2", "\x12"]); // redo 2 → "a b c"
+      assert.equal(editor.getText(), "a b c");
+
+      sendKeys(editor, ["u"]); // undo last redo → "a b\nc"
+      assert.equal(editor.getText(), "a b\nc");
+    });
   });
 
   describe("normal-mode CTRL_UNDERSCORE undo alias", () => {

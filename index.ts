@@ -1098,10 +1098,13 @@ export class ModalEditor extends CustomEditor {
         state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
         preferredVisualCol?: number;
         tui?: { requestRender?: () => void };
+        pushUndoSnapshot?: () => void;
       };
 
       const state = editor.state;
       if (!state || !Array.isArray(state.lines)) return;
+
+      editor.pushUndoSnapshot?.();
 
       const currentLine = state.cursorLine ?? 0;
       let joinPoint = state.cursorCol ?? 0;
