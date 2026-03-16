@@ -3070,3 +3070,167 @@ describe("additional count combinations", () => {
     assert.equal(editor.getRegister(), "a");
   });
 });
+
+describe("surrogate pair / buffer replacement regression", () => {
+  it("dd deletes only the current line when it contains surrogate pairs", () => {
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["😀x", "keep"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+    sendKeys(editor, ["d", "d"]);
+    assert.equal(editor.getRegister(), "😀x\n");
+    assert.equal(editor.getText(), "keep");
+  });
+
+  it("9x on multiline buffer does not cross newline", () => {
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["ab", "cd"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+    sendKeys(editor, ["9", "x"]);
+    assert.equal(editor.getText(), "\ncd");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Underscore motion — _ (first non-whitespace, linewise with operators)
+// ---------------------------------------------------------------------------
+
+describe("underscore motion — _ (first non-whitespace)", () => {
+  it("_ moves to first non-whitespace char on indented line", () => {
+    const { editor } = createEditorWithSpy("   hello");
+    sendKeys(editor, ["_"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("_ on line with no leading whitespace stays at col 0", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["_"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("_ from mid-line moves back to first non-whitespace", () => {
+    const { editor } = createEditorWithSpy("   hello world");
+    sendKeys(editor, ["w", "w"]);
+    sendKeys(editor, ["_"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("_ stays in normal mode", () => {
+    const { editor } = createEditorWithSpy("   hello");
+    sendKeys(editor, ["_"]);
+    assert.equal(editor.getMode(), "normal");
+  });
+});
+
+describe("counted underscore motion — {count}_", () => {
+  it("2_ moves down one line then to first non-whitespace", () => {
+    const { editor } = createMultiLineEditor("foo\n   bar\nbaz");
+    sendKeys(editor, ["2", "_"]);
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 3 });
+  });
+
+  it("1_ is same as plain _", () => {
+    const { editor } = createEditorWithSpy("   hello");
+    sendKeys(editor, ["1", "_"]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("counted _ clamps at last line", () => {
+    const { editor } = createMultiLineEditor("foo\n   bar");
+    sendKeys(editor, ["9", "_"]);
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 3 });
+  });
+});
+
+describe("operator + underscore — d_ / c_ / y_ (linewise)", () => {
+  it("d_ deletes entire current line (linewise)", () => {
+    const { editor } = createMultiLineEditor("hello\nworld\nfoo");
+    sendKeys(editor, ["d", "_"]);
+    assert.equal(editor.getText(), "world\nfoo");
+    assert.equal(editor.getRegister(), "hello\n");
+  });
+
+  it("d3_ deletes 3 lines", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc\nd\ne");
+    sendKeys(editor, ["d", "3", "_"]);
+    assert.equal(editor.getText(), "d\ne");
+    assert.equal(editor.getRegister(), "a\nb\nc\n");
+  });
+
+  it("c_ changes current line and enters insert mode", () => {
+    const { editor } = createMultiLineEditor("hello\nworld");
+    sendKeys(editor, ["c", "_"]);
+    assert.equal(editor.getMode(), "insert");
+    // Line content should be cleared but line preserved
+  });
+
+  it("y_ yanks current line without mutation", () => {
+    const { editor } = createMultiLineEditor("hello\nworld");
+    const before = editor.getText();
+    sendKeys(editor, ["y", "_"]);
+    assert.equal(editor.getRegister(), "hello\n");
+    assert.equal(editor.getText(), before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Replace — r{char}
+// ---------------------------------------------------------------------------
+
+describe("replace — r{char}", () => {
+  it("ra replaces char at cursor", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["r", "a"]);
+    assert.equal(editor.getText(), "aello");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("r replaces char in middle of word", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["l", "l", "r", "x"]);
+    assert.equal(editor.getText(), "hexlo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("3rx replaces 3 chars", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["3", "r", "x"]);
+    assert.equal(editor.getText(), "xxxlo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("r + Escape cancels", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["r", "\x1b"]);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("5rx on short line cancels (not enough chars)", () => {
+    const { editor } = createEditorWithSpy("hi");
+    sendKeys(editor, ["5", "r", "x"]);
+    assert.equal(editor.getText(), "hi");
+  });
+
+  it("r stays in normal mode", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["r", "a"]);
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("r does not affect register", () => {
+    const { editor } = createEditorWithSpy("hello");
+    editor.setRegister("untouched");
+    sendKeys(editor, ["r", "a"]);
+    assert.equal(editor.getRegister(), "untouched");
+  });
+});

@@ -13,11 +13,12 @@
  * - hjkl: navigation in normal mode
  * - 0/$: line start/end
  * - ^: first non-whitespace char of line
+ * - _: first non-whitespace (with count: down count-1 lines first); linewise with d/c/y
  * - x: delete char under cursor
  * - D: delete to end of line
  * - S: substitute line (delete line content + insert mode)
  * - s: substitute char (delete char + insert mode)
- * - d{motion}: delete with motion (`w/b/e` + `W/B/E`, `$`, `0`, `^`, `dd`, `f/t/F/T{char}`)
+ * - d{motion}: delete with motion (`w/b/e` + `W/B/E`, `$`, `0`, `^`, `dd`/`d_`, `f/t/F/T{char}`)
  * - c{motion}: change with same motion set as `d` (then enter insert mode)
  * - y{motion}: yank with same motion set as `d` (no text mutation)
  * - f{char}: jump to next {char} on line
@@ -72,7 +73,6 @@ import {
   CHAR_MOTION_KEYS,
   ESC_LEFT,
   ESC_RIGHT,
-  ESC_DELETE,
   ESC_UP,
   CTRL_A,
   CTRL_E,
@@ -127,6 +127,7 @@ export class ModalEditor extends CustomEditor {
   private operatorCount: string = "";
   private pendingG: boolean = false;
   private pendingGCount: string = "";
+  private pendingReplace: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
@@ -333,6 +334,7 @@ export class ModalEditor extends CustomEditor {
     this.operatorCount = "";
     this.pendingG = false;
     this.pendingGCount = "";
+    this.pendingReplace = false;
   }
 
   private isEscapeLikeInput(data: string): boolean {
@@ -441,6 +443,33 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingReplace) {
+      this.pendingReplace = false;
+      if (!this.isPrintableInput(data)) {
+        this.prefixCount = "";
+        return;
+      }
+      const count = this.takeTotalCount(1);
+      const lines = this.getLines();
+      const cursor = this.getCursor();
+      const line = lines[cursor.line] ?? "";
+      if (cursor.col + count > line.length) {
+        return;
+      }
+      const before = line.slice(0, cursor.col);
+      const after = line.slice(cursor.col + count);
+      const replacement = data.repeat(count);
+      const newLine = before + replacement + after;
+      const abs = this.getAbsoluteIndex(cursor.line, cursor.col);
+      const text = this.getText();
+      const lineStart = abs - cursor.col;
+      const newText = text.slice(0, lineStart) + newLine
+        + text.slice(lineStart + line.length);
+      const newCursorAbs = abs + count - 1;
+      this.replaceTextInBuffer(newText, newCursorAbs);
+      return;
+    }
+
     if (this.pendingTextObject) {
       return this.handlePendingTextObject(data);
     }
@@ -491,6 +520,7 @@ export class ModalEditor extends CustomEditor {
       || this.operatorCount
       || this.pendingG
       || this.pendingGCount
+      || this.pendingReplace
     ) {
       this.clearPendingState();
       return;
@@ -663,6 +693,13 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (data === "_") {
+      const count = this.takeTotalCount(1);
+      this.deleteLinewiseByDelta(count - 1);
+      this.pendingOperator = null;
+      return;
+    }
+
     if (CHAR_MOTION_KEYS.has(data)) {
       this.pendingMotion = data as PendingMotion;
       return;
@@ -725,6 +762,28 @@ export class ModalEditor extends CustomEditor {
       this.mode = "insert";
       return;
     }
+
+    if (data === "_") {
+      const count = this.takeTotalCount(1);
+      if (count <= 1) {
+        this.cutLine();
+      } else {
+        const currentLine = this.getCursor().line;
+        const lines = this.getLines();
+        const clampedEnd = Math.min(currentLine + count - 1, lines.length - 1);
+        this.writeToRegister(this.getLinewisePayload(currentLine, clampedEnd));
+        const before = lines.slice(0, currentLine);
+        const after = lines.slice(clampedEnd + 1);
+        const newLines = [...before, "", ...after];
+        const newText = newLines.join("\n");
+        const cursorAbs = before.reduce((acc, l) => acc + l.length + 1, 0);
+        this.replaceTextInBuffer(newText, cursorAbs);
+      }
+      this.pendingOperator = null;
+      this.mode = "insert";
+      return;
+    }
+
     if (CHAR_MOTION_KEYS.has(data)) {
       this.pendingMotion = data as PendingMotion;
       return;
@@ -823,6 +882,7 @@ export class ModalEditor extends CustomEditor {
 
       const supportsCountedStandaloneEdit = (
         data === "x"
+        || data === "r"
         || data === "s"
         || data === "S"
         || data === "D"
@@ -853,6 +913,7 @@ export class ModalEditor extends CustomEditor {
         || data === "k"
         || data === "l"
       );
+      const supportsCountedUnderscore = data === "_";
 
       if (supportsCountedNav) {
         const count = this.takeTotalCount(1);
@@ -886,6 +947,7 @@ export class ModalEditor extends CustomEditor {
         && !supportsCountedCharMotion
         && !supportsCountedWordMotion
         && !supportsCountedParagraphMotion
+        && !supportsCountedUnderscore
       ) {
         // Unsupported prefixed forms: drop count and keep processing this key.
         this.prefixCount = "";
@@ -909,6 +971,11 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "G") {
       this.moveCursorToBufferEnd();
+      return;
+    }
+
+    if (data === "r") {
+      this.pendingReplace = true;
       return;
     }
 
@@ -971,6 +1038,21 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (data === "^") {
+      this.moveCursorToFirstNonWhitespace();
+      return;
+    }
+
+    if (data === "_") {
+      const count = this.takeTotalCount(1);
+      if (count > 1) {
+        const lines = this.getLines();
+        const currentLine = this.getCursor().line;
+        const targetLine = Math.min(currentLine + count - 1, lines.length - 1);
+        const delta = targetLine - currentLine;
+        for (let i = 0; i < delta; i++) {
+          super.handleInput(ESC_DOWN);
+        }
+      }
       this.moveCursorToFirstNonWhitespace();
       return;
     }
@@ -1562,19 +1644,13 @@ export class ModalEditor extends CustomEditor {
     this.writeToRegister(payload);
 
     if (endAbs > startAbs) {
-      const cursor = this.getCursor();
-      const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-      if (cursorAbs !== startAbs) {
-        this.moveCursorBy(startAbs - cursorAbs);
-      }
+      const text = this.getText();
+      const newText = text.slice(0, startAbs) + text.slice(endAbs);
+      this.replaceTextInBuffer(newText, startAbs);
 
-      const count = endAbs - startAbs;
-      for (let i = 0; i < count; i++) {
-        super.handleInput(ESC_DELETE);
-      }
+      // Ensure cursor is at column 0 of the landing line
+      super.handleInput(CTRL_A);
     }
-
-    super.handleInput(CTRL_A);
   }
 
   private yankLineRange(startLine: number, endLine: number): void {
@@ -1705,6 +1781,13 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (data === "_") {
+      const count = this.takeTotalCount(1);
+      this.yankLinewiseByDelta(count - 1);
+      this.pendingOperator = null;
+      return;
+    }
+
     if (CHAR_MOTION_KEYS.has(data)) {
       this.pendingMotion = data as PendingMotion;
       return;
@@ -1814,6 +1897,47 @@ export class ModalEditor extends CustomEditor {
     this.writeToRegister(text.slice(start, end));
   }
 
+  private getCursorFromAbsoluteIndex(text: string, abs: number): { line: number; col: number } {
+    const lines = text.length === 0 ? [""] : text.split("\n");
+    let remaining = Math.max(0, Math.min(abs, text.length));
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex] ?? "";
+      if (remaining <= line.length) return { line: lineIndex, col: remaining };
+      remaining -= line.length + 1;
+    }
+    const lastLine = Math.max(0, lines.length - 1);
+    return { line: lastLine, col: (lines[lastLine] ?? "").length };
+  }
+
+  private replaceTextInBuffer(text: string, cursorAbs: number): void {
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number | null;
+      historyIndex?: number;
+      lastAction?: string | null;
+      onChange?: (text: string) => void;
+      tui?: { requestRender?: () => void };
+      pushUndoSnapshot?: () => void;
+      autocompleteState?: unknown;
+      updateAutocomplete?: () => void;
+    };
+    const state = editor.state;
+    if (!state) return;
+    const currentText = this.getText();
+    if (currentText !== text) editor.pushUndoSnapshot?.();
+    const nextLines = text.length === 0 ? [""] : text.split("\n");
+    const { line, col } = this.getCursorFromAbsoluteIndex(text, cursorAbs);
+    editor.historyIndex = -1;
+    editor.lastAction = null;
+    state.lines = nextLines;
+    state.cursorLine = line;
+    state.cursorCol = col;
+    editor.preferredVisualCol = null;
+    editor.onChange?.(this.getText());
+    if (editor.autocompleteState) editor.updateAutocomplete?.();
+    editor.tui?.requestRender?.();
+  }
+
   private deleteRangeByAbsolute(currentAbs: number, targetAbs: number, inclusive: boolean = false): void {
     const text = this.getText();
     const start = Math.min(currentAbs, targetAbs);
@@ -1824,16 +1948,7 @@ export class ModalEditor extends CustomEditor {
 
     this.writeToRegister(text.slice(start, end));
 
-    const cursor = this.getCursor();
-    const cursorAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
-    if (cursorAbs !== start) {
-      this.moveCursorBy(start - cursorAbs);
-    }
-
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+    this.replaceTextInBuffer(text.slice(0, start) + text.slice(end), start);
   }
 
   private getWordObjectRange(
@@ -1960,24 +2075,13 @@ export class ModalEditor extends CustomEditor {
   }
 
   private deleteRange(col: number, targetCol: number, inclusive: boolean): void {
-    const line = this.getLines()[this.getCursor().line] ?? "";
-
-    const start = Math.min(col, targetCol);
-    const rawEnd = Math.max(col, targetCol) + (inclusive ? 1 : 0);
-    const end = Math.min(rawEnd, line.length);
-
-    if (end <= start) return;
-
-    this.writeToRegister(line.slice(start, end));
-
-    if (start !== col) {
-      this.moveCursorBy(start - col);
-    }
-
-    const count = end - start;
-    for (let i = 0; i < count; i++) {
-      super.handleInput(ESC_DELETE);
-    }
+    const cursor = this.getCursor();
+    const line = this.getLines()[cursor.line] ?? "";
+    const clampedCol = Math.min(col, line.length);
+    const clampedTarget = Math.min(targetCol, line.length);
+    const currentAbs = this.getAbsoluteIndex(cursor.line, clampedCol);
+    const targetAbs = this.getAbsoluteIndex(cursor.line, clampedTarget);
+    this.deleteRangeByAbsolute(currentAbs, targetAbs, inclusive);
   }
 
   render(width: number): string[] {
@@ -1998,6 +2102,10 @@ export class ModalEditor extends CustomEditor {
     const prefixCount = this.prefixCount;
     const operatorCount = this.operatorCount;
 
+    if (this.pendingReplace) {
+      const count = `${this.prefixCount}${this.operatorCount}`;
+      return count ? ` NORMAL ${count}r_ ` : " NORMAL r_ ";
+    }
     if (this.pendingOperator && this.pendingMotion) {
       return ` NORMAL ${prefixCount}${this.pendingOperator}${operatorCount}${this.pendingMotion}_ `;
     }

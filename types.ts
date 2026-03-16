@@ -39,7 +39,6 @@ export const CHAR_MOTION_KEYS = new Set<string>(["f", "F", "t", "T"]);
 // Escape sequences
 export const ESC_LEFT = "\x1b[D";
 export const ESC_RIGHT = "\x1b[C";
-export const ESC_DELETE = "\x1b[3~";
 export const CTRL_A = "\x01"; // line start
 export const CTRL_E = "\x05"; // line end
 export const CTRL_K = "\x0b"; // kill to end of line
