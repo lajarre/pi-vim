@@ -41,6 +41,7 @@ Esc        # NORMAL mode
 3gg        # jump to absolute line 3
 2dw        # delete two words
 u          # undo
+<C-r>      # redo last undone edit (safe no-op when empty)
 2}         # jump two paragraphs forward
 ```
 
@@ -71,6 +72,7 @@ ex-commands, etc.).
 | Join 3 lines with spacing | `3J` |
 | Jump 2 paragraphs forward | `2}` |
 | Undo last edit | `u` |
+| Redo last undone edit | `<C-r>` |
 
 ---
 
@@ -278,13 +280,13 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ---
 
-### Undo
+### Undo / Redo
 
-| Key | Action                                          |
-|-----|-------------------------------------------------|
-| `u` | Undo — sends `ctrl+_` (`\x1f`) to the underlying readline editor |
-
-Redo (`<C-r>`) is **not implemented** — see [Out of scope](#out-of-scope).
+| Key | Action |
+|-----|--------|
+| `u` | Undo in normal mode (forwards `ctrl+_` / `\x1f` to the underlying readline editor) |
+| `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
+| `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
 
 ---
 
@@ -308,7 +310,7 @@ Redo (`<C-r>`) is **not implemented** — see [Out of scope](#out-of-scope).
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for `word` + `WORD` motions | Cross-line                    |
 | `0` / `$` operators   | Exclusive of anchor col                | `0` inclusive of col 0        |
 | Undo depth            | Delegates to underlying readline undo  | Full per-change undo tree     |
-| Redo                  | Not implemented                        | `<C-r>`                       |
+| Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo clamps to available history) | `<C-r>`                       |
 | Visual mode           | Not implemented                        | `v`, `V`, `<C-v>`            |
 | Text objects          | Supports `iw`/`aw` only               | Full text-object set           |
 | Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
@@ -332,8 +334,9 @@ These are **explicitly deferred** and not planned for this feature:
 - Search mode (`/`, `?`, `n`, `N`)
 - Repeat (`.`)
 - Extended count prefix beyond currently supported motions (e.g. `:`, global operator counts)
-- Redo (`<C-r>`) — no native redo primitive in the underlying readline editor;
-  deferred until a suitable hook is available.
+- No insert-mode `<C-r>` feature expansion beyond current underlying-editor behavior.
+- No cross-session redo persistence.
+- No upstream `pi-tui` redo prerequisite in this wave.
 - Window / tab / buffer management
 - Plugin / runtime ecosystem compatibility
 
