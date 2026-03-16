@@ -2501,6 +2501,40 @@ describe("undo / redo — u / ctrl+r", () => {
     });
   });
 
+  describe("post-redo motion/cache coherence", () => {
+    it("w motion after redo of join reads restored buffer", () => {
+      const { editor } = createMultiLineEditor("aaa\nbbb ccc");
+
+      sendKeys(editor, ["J"]);
+      assert.equal(editor.getText(), "aaa bbb ccc");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "aaa\nbbb ccc");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "aaa bbb ccc");
+
+      sendKeys(editor, ["w", "x"]);
+      assert.equal(editor.getText(), "aaa bb ccc");
+    });
+
+    it("b motion after redo reads restored buffer", () => {
+      const { editor } = createEditorWithSpy("hello world");
+
+      sendKeys(editor, ["x"]);
+      assert.equal(editor.getText(), "ello world");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "hello world");
+
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "ello world");
+
+      sendKeys(editor, ["$", "b", "x"]);
+      assert.equal(editor.getText(), "ello orld");
+    });
+  });
+
   describe("normal-mode CTRL_UNDERSCORE undo alias", () => {
     it("CTRL_UNDERSCORE in normal mode acts as undo", () => {
       const { editor } = createEditorWithSpy("abcd");

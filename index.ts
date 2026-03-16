@@ -128,7 +128,7 @@ export class ModalEditor extends CustomEditor {
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
-  private readonly wordBoundaryCache = new WordBoundaryCache();
+  private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
   private isApplyingRedo: boolean = false;
   private isApplyingUndo: boolean = false;
@@ -189,6 +189,8 @@ export class ModalEditor extends CustomEditor {
       editor.preferredVisualCol = null;
     }
 
+    this.invalidateWordBoundaryCache();
+
     editor.historyIndex = -1;
     editor.lastAction = null;
     editor.onChange?.(this.getText());
@@ -238,6 +240,10 @@ export class ModalEditor extends CustomEditor {
 
   private clearRedoStack(): void {
     this.redoStack.length = 0;
+  }
+
+  private invalidateWordBoundaryCache(): void {
+    this.wordBoundaryCache = new WordBoundaryCache();
   }
 
   private clearRedoStackIfFreshMutation(before: EditorSnapshot): void {
