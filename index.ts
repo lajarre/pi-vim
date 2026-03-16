@@ -246,6 +246,26 @@ export class ModalEditor extends CustomEditor {
     return result;
   }
 
+  private applySyntheticEdit(mutation: () => void): void {
+    const editor = this as unknown as ModalEditorInternals;
+    if (!editor.state || !Array.isArray(editor.state.lines)) {
+      throw new Error(
+        "Synthetic edit prerequisite: editor state unavailable",
+      );
+    }
+
+    if (typeof editor.pushUndoSnapshot !== "function") {
+      throw new Error(
+        "Synthetic edit prerequisite: pushUndoSnapshot unavailable",
+      );
+    }
+
+    editor.pushUndoSnapshot();
+    mutation();
+    editor.onChange?.(this.getText());
+    editor.tui?.requestRender?.();
+  }
+
   private clearPendingState(): void {
     this.pendingMotion = null;
     this.pendingTextObject = null;
