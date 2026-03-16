@@ -2280,13 +2280,29 @@ describe("underscore motion — _ (first non-whitespace)", () => {
   });
 
   it("_ moves to first non-whitespace char with tabs", () => {
-    const { editor } = createEditorWithSpy("\t\thello");
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["\t\thello"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+
     sendKeys(editor, ["_"]);
     assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
   });
 
   it("_ moves to first non-whitespace char with mixed tabs and spaces", () => {
-    const { editor } = createEditorWithSpy("\t hello");
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["\t hello"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+
     sendKeys(editor, ["_"]);
     assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
   });
@@ -2340,7 +2356,15 @@ describe("counted underscore motion — {count}_", () => {
   });
 
   it("3_ moves down two lines then to first non-whitespace", () => {
-    const { editor } = createMultiLineEditor("foo\nbar\n\t\tbaz\nqux");
+    const { editor } = createEditorWithSpy("");
+    (editor as unknown as {
+      state: { lines: string[]; cursorLine: number; cursorCol: number };
+    }).state = {
+      lines: ["foo", "bar", "\t\tbaz", "qux"],
+      cursorLine: 0,
+      cursorCol: 0,
+    };
+
     sendKeys(editor, ["3", "_"]);
     assert.deepEqual(editor.getCursor(), { line: 2, col: 2 });
   });
