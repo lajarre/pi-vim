@@ -130,7 +130,6 @@ export class ModalEditor extends CustomEditor {
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private readonly wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
-  private isApplyingRedo: boolean = false;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -207,13 +206,7 @@ export class ModalEditor extends CustomEditor {
 
     const editor = this as unknown as ModalEditorInternals;
     editor.pushUndoSnapshot?.();
-
-    this.isApplyingRedo = true;
-    try {
-      this.restoreSnapshot(snapshot);
-    } finally {
-      this.isApplyingRedo = false;
-    }
+    this.restoreSnapshot(snapshot);
   }
 
   private clearRedoStack(): void {
