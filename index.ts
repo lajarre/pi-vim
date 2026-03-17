@@ -105,6 +105,8 @@ type EditorSnapshot = {
   cursor: { line: number; col: number };
 };
 
+type TransitionState = "none" | "undo" | "redo";
+
 type ModalEditorInternals = {
   state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
   preferredVisualCol?: number | null;
@@ -130,8 +132,7 @@ export class ModalEditor extends CustomEditor {
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
-  private isApplyingRedo: boolean = false;
-  private isApplyingUndo: boolean = false;
+  private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
 
   // Unnamed register
@@ -204,9 +205,21 @@ export class ModalEditor extends CustomEditor {
       || a.cursor.col !== b.cursor.col;
   }
 
-  private performUndo(): void {
-    this.isApplyingUndo = true;
+  private withTransition<T>(
+    transition: Exclude<TransitionState, "none">,
+    action: () => T,
+  ): T {
+    const previousTransition = this.currentTransition;
+    this.currentTransition = transition;
     try {
+      return action();
+    } finally {
+      this.currentTransition = previousTransition;
+    }
+  }
+
+  private performUndo(): void {
+    this.withTransition("undo", () => {
       const beforeUndo = this.captureSnapshot();
       super.handleInput(CTRL_UNDERSCORE);
       const afterUndo = this.captureSnapshot();
@@ -214,9 +227,7 @@ export class ModalEditor extends CustomEditor {
       if (this.snapshotChanged(beforeUndo, afterUndo)) {
         this.redoStack.push(beforeUndo);
       }
-    } finally {
-      this.isApplyingUndo = false;
-    }
+    });
   }
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
@@ -227,15 +238,12 @@ export class ModalEditor extends CustomEditor {
       const snapshot = this.redoStack[this.redoStack.length - 1];
       if (!snapshot) break;
 
-      this.isApplyingRedo = true;
-      try {
+      this.withTransition("redo", () => {
         this.requireRedoRestoreState(editor);
         editor.pushUndoSnapshot?.();
         this.restoreSnapshot(snapshot);
         this.redoStack.pop();
-      } finally {
-        this.isApplyingRedo = false;
-      }
+      });
     }
   }
 
@@ -263,7 +271,7 @@ export class ModalEditor extends CustomEditor {
 
   private centralInvalidationCheck(): void {
     if (this.redoStack.length === 0) return;
-    if (this.isApplyingUndo || this.isApplyingRedo) return;
+    if (this.currentTransition !== "none") return;
     this.clearRedoStack();
   }
 
