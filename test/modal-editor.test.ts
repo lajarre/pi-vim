@@ -8,10 +8,14 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { ModalEditor } from "../index.js";
 import {
   createEditorWithSpy,
   createMultiLineEditor,
   sendKeys,
+  stubKeybindings,
+  stubTheme,
+  stubTui,
 } from "./harness.js";
 
 // ---------------------------------------------------------------------------
@@ -147,6 +151,24 @@ function runScenario(
     cursorLine: cursor.line,
     cursorCol: cursor.col,
   };
+}
+
+function createEditorAtBufferEnd(text: string): {
+  editor: ModalEditor;
+  clipboardWrites: string[];
+} {
+  const clipboardWrites: string[] = [];
+  const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+
+  editor.setClipboardFn((value) => clipboardWrites.push(value));
+
+  for (const char of text) {
+    editor.handleInput(char);
+  }
+
+  editor.handleInput("\x1b");
+
+  return { editor, clipboardWrites };
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +576,22 @@ describe("Universal Counts State & Bounds", () => {
 });
 
 describe("buffer motions — gg / G", () => {
+  it("gg from the last line reaches line 0", () => {
+    const { editor } = createEditorAtBufferEnd("alpha\nbeta\ngamma");
+
+    sendKeys(editor, ["g", "g"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("G from the first line reaches the last line", () => {
+    const { editor } = createMultiLineEditor("alpha\nbeta\ngamma");
+
+    sendKeys(editor, ["G"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
+  });
+
   it("G moves to last line at column 0", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
 
@@ -572,6 +610,17 @@ describe("buffer motions — gg / G", () => {
     assert.equal(editor.getRegister(), "f");
   });
 
+  it("gg reaches line 0 across wrapped logical lines", () => {
+    const wrappedLine = "x".repeat(200);
+    const { editor } = createEditorAtBufferEnd(
+      `top\n${wrappedLine}\nbottom`,
+    );
+
+    sendKeys(editor, ["g", "g"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
   it("{count}gg moves to target line (1-indexed)", () => {
     const { editor } = createMultiLineEditor("aa\nbb\ncc\ndd");
 
@@ -579,6 +628,14 @@ describe("buffer motions — gg / G", () => {
 
     assert.equal(editor.getText(), "aa\nb\ncc\ndd");
     assert.equal(editor.getRegister(), "b");
+  });
+
+  it("3gg moves to line 2 (0-indexed)", () => {
+    const { editor } = createEditorAtBufferEnd("aa\nbb\ncc\ndd");
+
+    sendKeys(editor, ["3", "g", "g"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
   });
 
   it("{count}G moves to target line (1-indexed)", () => {

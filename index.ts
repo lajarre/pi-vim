@@ -1204,27 +1204,25 @@ export class ModalEditor extends CustomEditor {
   }
 
   private moveCursorToLineStart(lineIndex: number): void {
-    const lines = this.getLines();
-    if (lines.length === 0) {
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number | null;
+      lastAction?: string | null;
+      tui?: { requestRender?: () => void };
+    };
+
+    const state = editor.state;
+    if (!state || !Array.isArray(state.lines) || state.lines.length === 0) {
       super.handleInput(CTRL_A);
       return;
     }
 
-    const targetLine = Math.max(0, Math.min(lineIndex, lines.length - 1));
-    const currentLine = this.getCursor().line;
-    const delta = targetLine - currentLine;
-
-    if (delta > 0) {
-      for (let i = 0; i < delta; i++) {
-        super.handleInput(ESC_DOWN);
-      }
-    } else if (delta < 0) {
-      for (let i = 0; i < Math.abs(delta); i++) {
-        super.handleInput(ESC_UP);
-      }
-    }
-
-    super.handleInput(CTRL_A);
+    const targetLine = Math.max(0, Math.min(lineIndex, state.lines.length - 1));
+    editor.lastAction = null;
+    state.cursorLine = targetLine;
+    state.cursorCol = 0;
+    editor.preferredVisualCol = null;
+    editor.tui?.requestRender?.();
   }
 
   private moveCursorToFirstNonWhitespace(): void {
