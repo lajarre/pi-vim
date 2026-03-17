@@ -153,14 +153,8 @@ function runScenario(
   };
 }
 
-function createEditorAtBufferEnd(text: string): {
-  editor: ModalEditor;
-  clipboardWrites: string[];
-} {
-  const clipboardWrites: string[] = [];
+function createEditorAtBufferEnd(text: string): ModalEditor {
   const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
-
-  editor.setClipboardFn((value) => clipboardWrites.push(value));
 
   for (const char of text) {
     editor.handleInput(char);
@@ -168,7 +162,7 @@ function createEditorAtBufferEnd(text: string): {
 
   editor.handleInput("\x1b");
 
-  return { editor, clipboardWrites };
+  return editor;
 }
 
 // ---------------------------------------------------------------------------
@@ -577,7 +571,7 @@ describe("Universal Counts State & Bounds", () => {
 
 describe("buffer motions — gg / G", () => {
   it("gg from the last line reaches line 0", () => {
-    const { editor } = createEditorAtBufferEnd("alpha\nbeta\ngamma");
+    const editor = createEditorAtBufferEnd("alpha\nbeta\ngamma");
 
     sendKeys(editor, ["g", "g"]);
 
@@ -612,7 +606,7 @@ describe("buffer motions — gg / G", () => {
 
   it("gg reaches line 0 across wrapped logical lines", () => {
     const wrappedLine = "x".repeat(200);
-    const { editor } = createEditorAtBufferEnd(
+    const editor = createEditorAtBufferEnd(
       `top\n${wrappedLine}\nbottom`,
     );
 
@@ -631,7 +625,7 @@ describe("buffer motions — gg / G", () => {
   });
 
   it("3gg moves to line 2 (0-indexed)", () => {
-    const { editor } = createEditorAtBufferEnd("aa\nbb\ncc\ndd");
+    const editor = createEditorAtBufferEnd("aa\nbb\ncc\ndd");
 
     sendKeys(editor, ["3", "g", "g"]);
 
@@ -1421,6 +1415,15 @@ describe("Universal Counts: Change and Nav", () => {
     sendKeys(editor, ["G", "3", "k"]);
 
     assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("j moves by logical lines across wrapped content", () => {
+    const wrappedLine = "x".repeat(200);
+    const { editor } = createMultiLineEditor(`top\n${wrappedLine}\nbottom`);
+
+    sendKeys(editor, ["j", "j"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
   });
 });
 
@@ -3155,6 +3158,13 @@ describe("surrogate pair / buffer replacement regression", () => {
     sendKeys(editor, ["9", "x"]);
     assert.equal(editor.getText(), "\ncd");
   });
+
+  it("x deletes a surrogate pair without corrupting the buffer", () => {
+    const { editor } = createEditorWithSpy("😀x");
+    sendKeys(editor, ["x"]);
+    assert.equal(editor.getText(), "x");
+    assert.equal(editor.getRegister(), "😀");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3206,6 +3216,13 @@ describe("counted underscore motion — {count}_", () => {
     sendKeys(editor, ["9", "_"]);
     assert.deepEqual(editor.getCursor(), { line: 1, col: 3 });
   });
+
+  it("3_ skips wrapped visual rows and lands on the target logical line", () => {
+    const wrappedLine = "x".repeat(200);
+    const { editor } = createMultiLineEditor(`top\n${wrappedLine}\n  bottom`);
+    sendKeys(editor, ["3", "_"]);
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 2 });
+  });
 });
 
 describe("operator + underscore — d_ / c_ / y_ (linewise)", () => {
@@ -3256,6 +3273,13 @@ describe("replace — r{char}", () => {
     sendKeys(editor, ["l", "l", "r", "x"]);
     assert.equal(editor.getText(), "hexlo");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("r replaces a surrogate pair without splitting it", () => {
+    const { editor } = createEditorWithSpy("😀x");
+    sendKeys(editor, ["r", "a"]);
+    assert.equal(editor.getText(), "ax");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
   });
 
   it("3rx replaces 3 chars", () => {

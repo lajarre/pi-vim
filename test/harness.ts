@@ -79,17 +79,20 @@ export function createMultiLineEditor(text: string): {
     editor.handleInput(char);
   }
 
-  // Escape → normal
+  // Escape → normal, then position at line 0 / col 0 directly so the
+  // fixture doesn't depend on navigation behavior under test.
   editor.handleInput("\x1b");
-
-  // Navigate to line 0 by pressing k as many times as needed
-  const lineCount = text.split("\n").length;
-  for (let i = 1; i < lineCount; i++) {
-    editor.handleInput("k");
+  const internal = editor as unknown as {
+    state?: { cursorLine?: number; cursorCol?: number };
+    preferredVisualCol?: number | null;
+    tui?: { requestRender?: () => void };
+  };
+  if (internal.state) {
+    internal.state.cursorLine = 0;
+    internal.state.cursorCol = 0;
   }
-
-  // Go to col 0
-  editor.handleInput("0");
+  internal.preferredVisualCol = null;
+  internal.tui?.requestRender?.();
 
   return { editor, clipboardWrites };
 }
