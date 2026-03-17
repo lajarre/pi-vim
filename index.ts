@@ -87,6 +87,7 @@ import {
   findCharMotionTarget,
   findParagraphMotionTarget,
   findFirstNonWhitespaceColumn,
+  getLineGraphemes,
   type WordMotionClass,
 } from "./motions.js";
 import {
@@ -135,10 +136,6 @@ export class ModalEditor extends CustomEditor {
   private readonly redoStack: EditorSnapshot[] = [];
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
-  private static readonly GRAPHEME_SEGMENTER = typeof Intl !== "undefined"
-    && typeof Intl.Segmenter === "function"
-    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
-    : null;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -1147,7 +1144,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (targetCol !== null && targetCol !== col) {
-      this.moveCursorBy(targetCol - col);
+      this.moveCursorToCol(targetCol);
     }
   }
 
@@ -1232,6 +1229,42 @@ export class ModalEditor extends CustomEditor {
     editor.tui?.requestRender?.();
   }
 
+  private moveCursorToCol(col: number): void {
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number | null;
+      lastAction?: string | null;
+      tui?: { requestRender?: () => void };
+    };
+
+    const state = editor.state;
+    if (!state || !Array.isArray(state.lines)) return;
+
+    editor.lastAction = null;
+    state.cursorCol = col;
+    editor.preferredVisualCol = col;
+    editor.tui?.requestRender?.();
+  }
+
+  private moveCursorToAbsoluteIndex(abs: number): void {
+    const editor = this as unknown as {
+      state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
+      preferredVisualCol?: number | null;
+      lastAction?: string | null;
+      tui?: { requestRender?: () => void };
+    };
+
+    const state = editor.state;
+    if (!state || !Array.isArray(state.lines)) return;
+
+    const { line, col } = this.getCursorFromAbsoluteIndex(this.getText(), abs);
+    editor.lastAction = null;
+    state.cursorLine = line;
+    state.cursorCol = col;
+    editor.preferredVisualCol = col;
+    editor.tui?.requestRender?.();
+  }
+
   private moveCursorToLineStart(lineIndex: number): void {
     const editor = this as unknown as {
       state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
@@ -1257,7 +1290,7 @@ export class ModalEditor extends CustomEditor {
   private moveCursorToFirstNonWhitespace(): void {
     const { line, col } = this.getCurrentLineAndCol();
     const targetCol = findFirstNonWhitespaceColumn(line);
-    this.moveCursorBy(targetCol - col);
+    this.moveCursorToCol(targetCol);
   }
 
   private moveCursorToBufferEnd(): void {
@@ -1448,7 +1481,6 @@ export class ModalEditor extends CustomEditor {
   private tryFindWordTargetLineLocal(
     direction: WordMotionDirection,
     target: WordMotionTarget,
-    allowSameColumn: boolean = false,
     semanticClass: WordMotionClass = "word",
   ): number | null {
     const cursor = this.getCursor();
@@ -1461,7 +1493,7 @@ export class ModalEditor extends CustomEditor {
       col,
       direction,
       target,
-      allowSameColumn,
+      false,
       semanticClass,
     );
     if (targetCol === null) return null;
@@ -1479,10 +1511,10 @@ export class ModalEditor extends CustomEditor {
     semanticClass: WordMotionClass = "word",
   ): boolean {
     const col = this.getCursor().col;
-    const targetCol = this.tryFindWordTargetLineLocal(direction, target, false, semanticClass);
+    const targetCol = this.tryFindWordTargetLineLocal(direction, target, semanticClass);
     if (targetCol === null || targetCol === col) return false;
 
-    this.moveCursorBy(targetCol - col);
+    this.moveCursorToCol(targetCol);
     return true;
   }
 
@@ -1550,7 +1582,7 @@ export class ModalEditor extends CustomEditor {
         semanticClass,
       );
       if (targetAbs !== currentAbs) {
-        this.moveCursorBy(targetAbs - currentAbs);
+        this.moveCursorToAbsoluteIndex(targetAbs);
       }
       return;
     }
@@ -1568,33 +1600,8 @@ export class ModalEditor extends CustomEditor {
     return { line, col };
   }
 
-  private getLineGraphemeSegments(line: string): Array<{
-    start: number;
-    end: number;
-  }> {
-    const segments: Array<{ start: number; end: number }> = [];
-    const segmenter = ModalEditor.GRAPHEME_SEGMENTER;
-
-    if (segmenter) {
-      for (const part of segmenter.segment(line)) {
-        segments.push({
-          start: part.index,
-          end: part.index + part.segment.length,
-        });
-      }
-      return segments;
-    }
-
-    let start = 0;
-    for (const text of Array.from(line)) {
-      segments.push({ start, end: start + text.length });
-      start += text.length;
-    }
-    return segments;
-  }
-
   private hasMultiCodeUnitGraphemes(line: string): boolean {
-    return this.getLineGraphemeSegments(line).some((segment) => segment.end - segment.start > 1);
+    return getLineGraphemes(line).some((segment) => segment.end - segment.start > 1);
   }
 
   private getGraphemeRangeAtCol(
@@ -1604,7 +1611,7 @@ export class ModalEditor extends CustomEditor {
     clampToLine: boolean = false,
   ): { start: number; end: number } | null {
     const clampedCol = Math.max(0, Math.min(col, line.length));
-    const segments = this.getLineGraphemeSegments(line);
+    const segments = getLineGraphemes(line);
     const startIndex = segments.findIndex((segment) => clampedCol < segment.end);
     if (startIndex === -1) return null;
 
@@ -2019,7 +2026,7 @@ export class ModalEditor extends CustomEditor {
     state.cursorLine = line;
     state.cursorCol = col;
     editor.preferredVisualCol = null;
-    editor.onChange?.(this.getText());
+    editor.onChange?.(text);
     if (editor.autocompleteState) editor.updateAutocomplete?.();
     editor.tui?.requestRender?.();
   }

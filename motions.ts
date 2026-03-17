@@ -125,6 +125,27 @@ export function reverseCharMotion(motion: CharMotion): CharMotion {
   return reverseMap[motion];
 }
 
+const GRAPHEME_SEGMENTER = typeof Intl !== "undefined"
+  && typeof Intl.Segmenter === "function"
+  ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+  : null;
+
+export function getLineGraphemes(line: string): Array<{ start: number; end: number }> {
+  const segments: Array<{ start: number; end: number }> = [];
+  if (GRAPHEME_SEGMENTER) {
+    for (const part of GRAPHEME_SEGMENTER.segment(line)) {
+      segments.push({ start: part.index, end: part.index + part.segment.length });
+    }
+    return segments;
+  }
+  let start = 0;
+  for (const text of Array.from(line)) {
+    segments.push({ start, end: start + text.length });
+    start += text.length;
+  }
+  return segments;
+}
+
 /**
  * Find target column for a character motion (f/F/t/T).
  * @returns target column or null if not found
@@ -141,7 +162,9 @@ export function findCharMotionTarget(
   const isTill = motion === "t" || motion === "T";
   const steps = Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
 
-  let currentPos = col;
+  const graphemes = getLineGraphemes(line);
+  let currentIndex = graphemes.findIndex(g => col < g.end);
+  if (currentIndex === -1) currentIndex = graphemes.length;
 
   for (let i = 0; i < steps; i++) {
     const isFirst = i === 0;
@@ -149,19 +172,34 @@ export function findCharMotionTarget(
     const tillRepeatOffset = isFirst && isTill && isRepeat ? 1 : 0;
 
     if (isForward) {
-      const searchStart = currentPos + 1 + tillRepeatOffset;
-      const idx = line.indexOf(targetChar, searchStart);
-      if (idx === -1) return null;
-      if (isFinal) return isTill ? idx - 1 : idx;
-      currentPos = idx;
-      continue;
+      let nextIndex = currentIndex + 1 + tillRepeatOffset;
+      let found = -1;
+      for (let j = nextIndex; j < graphemes.length; j++) {
+        const g = graphemes[j]!;
+        // Use startsWith to allow matching base chars if targetChar lacks combining marks,
+        // or just exact match since targetChar is typically a full grapheme.
+        if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
+          found = j;
+          break;
+        }
+      }
+      if (found === -1) return null;
+      if (isFinal) return isTill ? graphemes[found - 1]!.start : graphemes[found]!.start;
+      currentIndex = found;
+    } else {
+      let nextIndex = currentIndex - 1 - tillRepeatOffset;
+      let found = -1;
+      for (let j = nextIndex; j >= 0; j--) {
+        const g = graphemes[j]!;
+        if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
+          found = j;
+          break;
+        }
+      }
+      if (found === -1) return null;
+      if (isFinal) return isTill ? graphemes[found + 1]!.start : graphemes[found]!.start;
+      currentIndex = found;
     }
-
-    const searchStart = currentPos - 1 - tillRepeatOffset;
-    const idx = line.lastIndexOf(targetChar, searchStart);
-    if (idx === -1) return null;
-    if (isFinal) return isTill ? idx + 1 : idx;
-    currentPos = idx;
   }
 
   return null;
