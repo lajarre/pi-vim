@@ -837,6 +837,14 @@ describe("J — join lines", () => {
 
     assert.deepEqual(clipboardWrites, []);
   });
+
+  it("J keeps the cursor at the join point after a non-ascii grapheme", () => {
+    const { editor } = createMultiLineEditor("中\nx");
+
+    sendKeys(editor, ["J"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
 });
 
 describe("gJ — raw join lines", () => {
@@ -1372,6 +1380,22 @@ describe("Universal Counts: Word Motions", () => {
     sendKeys(e2, ["w", "w", "w"]);
 
     assert.deepEqual(e1.getCursor(), e2.getCursor());
+  });
+
+  it("w skips correctly after a non-ascii grapheme", () => {
+    const { editor } = createEditorWithSpy("中 x");
+
+    sendKeys(editor, ["l", "w"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("w skips correctly after an emoji grapheme", () => {
+    const { editor } = createEditorWithSpy("😀 x");
+
+    sendKeys(editor, ["l", "w"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
   });
 });
 
@@ -2934,6 +2958,14 @@ describe("char-find motions — f / F / t / T / ; / ,", () => {
   it("t{char} with operator: dt{char} deletes up to char (exclusive)", () => {
     // "hello world" col 0, dto → deletes "hell" (col 0..3, not 'o')
     chk("hello world", ["d", "t", "o"], "o world", "hell");
+  });
+
+  it("f{char} handles an emoji before the target", () => {
+    const { editor } = createEditorWithSpy("😀xy");
+
+    sendKeys(editor, ["f", "y"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
   });
 });
 
