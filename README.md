@@ -104,6 +104,7 @@ A `{count}` prefix can be prepended to any navigation key (max: `9999`).
 | `{count}j/k`  | Move down/up `{count}` lines (clamped to buffer size) |
 | `0`           | Line start                    |
 | `^`           | First non-whitespace char of line |
+| `_`           | First non-whitespace char; with `{count}`, move down `count - 1` lines first |
 | `$`           | Line end                      |
 | `gg`          | Buffer start (line 1)         |
 | `{count}gg`   | Go to line `{count}` (1-indexed, clamped) |
@@ -177,6 +178,8 @@ word, char-find, and linewise motions. Maximum total count: `9999`.
 | `d$`              | To end of line                                            |
 | `d0`              | To start of line                                          |
 | `d^`              | To first non-whitespace char of line                      |
+| `d_`              | Current line (linewise, same as `dd`)                     |
+| `d{count}_`       | `{count}` lines (linewise, same as `{count}dd`)           |
 | `dd`              | Current line (linewise)                                   |
 | `{count}dd`       | `{count}` lines (linewise)                                |
 | `d{count}j`       | Current line + `{count}` lines below (linewise)           |
@@ -206,6 +209,8 @@ Same motion and count set as `d`. Deletes text then enters Insert mode.
 | `ciw`           | Change inner word                             |
 | `caw`           | Change around word                            |
 | `cc`            | Delete line content + Insert                  |
+| `c_`            | Change line (linewise, same as `cc`)                  |
+| `c{count}_`     | Change `{count}` lines (linewise)                     |
 | `c$` / `c0` / `c^` | Delete to EOL / BOL / first non-whitespace + Insert |
 | …               | All `d` motions apply                         |
 
@@ -221,6 +226,8 @@ A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
 | `S`          | Delete line content + Insert mode                             |
 | `D`          | Delete cursor to EOL (captures `\n` if at EOL with next line) |
 | `C`          | Delete cursor to EOL + Insert mode                            |
+| `r{char}`    | Replace char under cursor with `{char}` (stays in Normal)     |
+| `{count}r{char}` | Replace next `{count}` chars with `{char}`               |
 
 ---
 
@@ -244,6 +251,8 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 | `y$`         | To end of line                                    |
 | `y0`         | To start of line                                  |
 | `y^`         | To first non-whitespace char of line              |
+| `y_`         | Whole line (linewise, same as `yy`)               |
+| `y{count}_`  | `{count}` whole lines (linewise)                  |
 | `yf{c}`      | To and including `char`                           |
 | `yiw`        | Inner word                                        |
 | `yaw`        | Around word (includes spaces)                     |
@@ -283,7 +292,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 - One unnamed register (like Vim's `""` register).
 - Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
-  (including `dd`, `{count}dd`, `d{count}j/k`, `dG`, `yy`, `{count}yy`,
+  (including `dd`/`d_`, `{count}dd`, `d{count}j/k`, `dG`, `yy`/`y_`, `{count}yy`,
   `y{count}j/k`, `yG`) writes to the register and mirrors to the OS clipboard
   (via `copyToClipboard`, best-effort).
 - `p` / `P` read from the unnamed register only (not the OS clipboard).
@@ -302,7 +311,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 | Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo is stepwise, clamps to available history, and preserves single-step undo granularity) | `<C-r>`                       |
 | Visual mode           | Not implemented                        | `v`, `V`, `<C-v>`            |
 | Text objects          | Supports `iw`/`aw` only               | Full text-object set           |
-| Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
+| Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `r`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
 | Named registers       | Not implemented (`"a`, etc.)           | Supported                     |
 | Macros                | Not implemented (`q`, `@`)             | Supported                     |
 | Search                | Not implemented (`/`, `?`, `n`, `N`)   | Supported                     |
@@ -322,6 +331,7 @@ These are **explicitly deferred** and not planned for this feature:
 - Ex command surface (`:s`, `:g`, `:r`, …)
 - Search mode (`/`, `?`, `n`, `N`)
 - Repeat (`.`)
+- Replace mode (`R`) — only single-char `r{char}` is supported
 - Extended count prefix beyond currently supported motions (e.g. `:`, global operator counts)
 - No insert-mode `<C-r>` feature expansion beyond current underlying-editor behavior.
 - No cross-session redo persistence.
