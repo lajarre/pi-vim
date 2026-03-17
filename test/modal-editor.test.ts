@@ -2320,87 +2320,192 @@ describe("undo / redo — u / ctrl+r", () => {
   });
 
   describe("central invalidation hook", () => {
-    it("insert-mode mutation after undo clears redo history", () => {
-      const { editor } = createEditorWithSpy("abcd");
+    function seedStaleRedo(options: {
+      initial: string;
+      multiLine?: boolean;
+    }): {
+      editor: ReturnType<typeof createEditorWithSpy>["editor"];
+      staleRedoText: string;
+    } {
+      const { initial, multiLine = false } = options;
+      const { editor } = multiLine
+        ? createMultiLineEditor(initial)
+        : createEditorWithSpy(initial);
 
       sendKeys(editor, ["x"]);
+      const staleRedoText = editor.getText();
       sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), initial, "redo setup should restore initial text");
+
+      return { editor, staleRedoText };
+    }
+
+    it("mutation classes clear redo history", () => {
+      const scenarios: Array<{
+        name: string;
+        initial: string;
+        keys: string[];
+        expectedText: string;
+        multiLine?: boolean;
+      }> = [
+        {
+          name: "insert-mode text entry",
+          initial: "abcd",
+          keys: ["i", "Z", "\x1b"],
+          expectedText: "Zabcd",
+        },
+        {
+          name: "delegated normal-mode mutation (D)",
+          initial: "abcd",
+          keys: ["D"],
+          expectedText: "",
+        },
+        {
+          name: "delegated normal-mode mutation (dw)",
+          initial: "alpha beta",
+          keys: ["d", "w"],
+          expectedText: "beta",
+        },
+        {
+          name: "synthetic edit (J)",
+          initial: "a\nb",
+          keys: ["J"],
+          expectedText: "a b",
+          multiLine: true,
+        },
+        {
+          name: "synthetic edit (gJ)",
+          initial: "a\nb",
+          keys: ["g", "J"],
+          expectedText: "ab",
+          multiLine: true,
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const { editor } = seedStaleRedo({
+          initial: scenario.initial,
+          multiLine: scenario.multiLine,
+        });
+
+        sendKeys(editor, scenario.keys);
+        assert.equal(editor.getText(), scenario.expectedText, `${scenario.name} mutates text`);
+
+        sendKeys(editor, ["\x12"]);
+        assert.equal(editor.getText(), scenario.expectedText, `${scenario.name} clears redo`);
+      }
+    });
+
+    it("guarded undo/redo classes preserve redo history", () => {
+      const scenarios: Array<{
+        name: string;
+        run: (editor: ReturnType<typeof createEditorWithSpy>["editor"]) => void;
+      }> = [
+        {
+          name: "undo transition",
+          run: (editor) => {
+            sendKeys(editor, ["x", "x"]);
+            sendKeys(editor, ["u"]);
+            assert.equal(editor.getText(), "bcd", "undo transition checkpoint");
+
+            sendKeys(editor, ["u"]);
+            assert.equal(editor.getText(), "abcd", "undo transition keeps redo stack");
+
+            sendKeys(editor, ["\x12", "\x12"]);
+            assert.equal(editor.getText(), "cd", "undo transition keeps both redo entries");
+          },
+        },
+        {
+          name: "redo transition",
+          run: (editor) => {
+            sendKeys(editor, ["x", "x", "x"]);
+            sendKeys(editor, ["u", "u", "u"]);
+            assert.equal(editor.getText(), "abcd", "redo transition setup");
+
+            sendKeys(editor, ["2", "\x12"]);
+            assert.equal(editor.getText(), "cd", "redo transition keeps stepwise redo");
+
+            sendKeys(editor, ["u"]);
+            assert.equal(editor.getText(), "bcd", "redo transition keeps undo boundaries");
+          },
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const { editor } = createEditorWithSpy("abcd");
+        scenario.run(editor);
+      }
+    });
+
+    it("non-mutating classes preserve redo history", () => {
+      const scenarios: Array<{
+        name: string;
+        run: (
+          editor: ReturnType<typeof createEditorWithSpy>["editor"],
+          staleRedoText: string,
+        ) => void;
+      }> = [
+        {
+          name: "navigation",
+          run: (editor, staleRedoText) => {
+            sendKeys(editor, ["l", "h", "\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "navigation preserves redo");
+          },
+        },
+        {
+          name: "yank",
+          run: (editor, staleRedoText) => {
+            sendKeys(editor, ["y", "y", "\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "yank preserves redo");
+          },
+        },
+        {
+          name: "failed motion",
+          run: (editor, staleRedoText) => {
+            sendKeys(editor, ["f", "z", "\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "failed motion preserves redo");
+          },
+        },
+        {
+          name: "mode toggle",
+          run: (editor, staleRedoText) => {
+            sendKeys(editor, ["i", "\x1b", "\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "mode toggle preserves redo");
+          },
+        },
+        {
+          name: "no-op redo",
+          run: (editor, staleRedoText) => {
+            sendKeys(editor, ["\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "redo setup should replay once");
+
+            sendKeys(editor, ["\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "no-op redo does not mutate");
+
+            sendKeys(editor, ["u", "\x12"]);
+            assert.equal(editor.getText(), staleRedoText, "no-op redo keeps history intact");
+          },
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const { editor, staleRedoText } = seedStaleRedo({ initial: "abcd" });
+        scenario.run(editor, staleRedoText);
+      }
+    });
+
+    it("empty redo-stack fast path is harmless", () => {
+      const { editor } = createEditorWithSpy("abcd");
+
+      sendKeys(editor, ["\x12"]);
       assert.equal(editor.getText(), "abcd");
 
       sendKeys(editor, ["i", "Z", "\x1b"]);
       assert.equal(editor.getText(), "Zabcd");
 
-      sendKeys(editor, ["\x12"]);
+      sendKeys(editor, ["u", "\x12"]);
       assert.equal(editor.getText(), "Zabcd");
     });
-
-    it("delegated normal-mode mutation after undo clears redo history", () => {
-      const { editor } = createEditorWithSpy("abcd");
-
-      sendKeys(editor, ["x"]);
-      sendKeys(editor, ["u"]);
-      assert.equal(editor.getText(), "abcd");
-
-      sendKeys(editor, ["D"]);
-      assert.equal(editor.getText(), "");
-
-      sendKeys(editor, ["\x12"]);
-      assert.equal(editor.getText(), "");
-    });
-
-    it("synthetic edit J after undo clears redo history", () => {
-      const { editor } = createMultiLineEditor("a\nb");
-
-      sendKeys(editor, ["x"]);
-      sendKeys(editor, ["u"]);
-      assert.equal(editor.getText(), "a\nb");
-
-      sendKeys(editor, ["J"]);
-      assert.equal(editor.getText(), "a b");
-
-      sendKeys(editor, ["\x12"]);
-      assert.equal(editor.getText(), "a b");
-    });
-
-    it("non-mutating paths after undo preserve redo history", () => {
-      const scenarios: Array<{ name: string; keys: string[] }> = [
-        { name: "h motion", keys: ["l", "h"] },
-        { name: "yy", keys: ["y", "y"] },
-        { name: "mode toggle", keys: ["i", "\x1b"] },
-        { name: "failed f motion", keys: ["f", "z"] },
-      ];
-
-      for (const scenario of scenarios) {
-        const { editor } = createEditorWithSpy("abcd");
-
-        sendKeys(editor, ["x"]);
-        sendKeys(editor, ["u"]);
-        assert.equal(editor.getText(), "abcd", `${scenario.name} setup`);
-
-        sendKeys(editor, [...scenario.keys, "\x12"]);
-        assert.equal(editor.getText(), "bcd", scenario.name);
-      }
-    });
-  });
-
-  it("no-op ctrl+r does not mutate or clear history", () => {
-    const { editor } = createEditorWithSpy("abcd");
-
-    sendKeys(editor, ["x", "u", "\x12"]);
-    assert.equal(editor.getText(), "bcd");
-
-    const beforeNoOpText = editor.getText();
-    const beforeNoOpCursor = editor.getCursor();
-
-    sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), beforeNoOpText);
-    assert.deepEqual(editor.getCursor(), beforeNoOpCursor);
-
-    sendKeys(editor, ["u"]);
-    assert.equal(editor.getText(), "abcd");
-
-    sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), "bcd");
   });
 
   it("bracketed paste in normal mode still clears pending state before redo", () => {
