@@ -280,10 +280,6 @@ export class ModalEditor extends CustomEditor {
     this.clearRedoStack();
   }
 
-  private trackFreshMutation<T>(action: () => T): T {
-    return action();
-  }
-
   private applySyntheticEdit(mutation: () => void): void {
     const editor = this as unknown as ModalEditorInternals;
     if (!editor.state || !Array.isArray(editor.state.lines)) {
