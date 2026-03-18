@@ -293,8 +293,33 @@ export class ModalEditor extends CustomEditor {
       );
     }
 
-    editor.pushUndoSnapshot();
+    const textBefore = this.getText();
+    const preCursorLine = editor.state.cursorLine;
+    const preCursorCol = editor.state.cursorCol;
+
     mutation();
+
+    if (this.getText() === textBefore) return;
+
+    // Text changed — push undo boundary for pre-mutation state.
+    // Briefly swap pre-mutation state in for the snapshot, then
+    // restore the post-mutation result.
+    const postLines = editor.state.lines.slice();
+    const postCursorLine = editor.state.cursorLine;
+    const postCursorCol = editor.state.cursorCol;
+    const postPreferredCol = editor.preferredVisualCol;
+
+    const preLines = textBefore.split("\n");
+    editor.state.lines = preLines.length > 0 ? preLines : [""];
+    editor.state.cursorLine = preCursorLine;
+    editor.state.cursorCol = preCursorCol;
+    editor.pushUndoSnapshot();
+
+    editor.state.lines = postLines;
+    editor.state.cursorLine = postCursorLine;
+    editor.state.cursorCol = postCursorCol;
+    editor.preferredVisualCol = postPreferredCol;
+
     editor.onChange?.(this.getText());
     editor.tui?.requestRender?.();
   }

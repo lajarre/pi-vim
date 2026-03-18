@@ -2506,6 +2506,16 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["u", "\x12"]);
       assert.equal(editor.getText(), "Zabcd");
     });
+
+    it("no-op synthetic edit (J on last line) preserves redo", () => {
+      const { editor } = createEditorWithSpy("hello");
+      sendKeys(editor, ["x"]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "hello");
+      sendKeys(editor, ["J"]);
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "ello");
+    });
   });
 
   it("bracketed paste in normal mode still clears pending state before redo", () => {
