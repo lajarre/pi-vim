@@ -462,6 +462,7 @@ export class ModalEditor extends CustomEditor {
   private pendingG: boolean = false;
   private pendingGCount: string = "";
   private pendingReplace: boolean = false;
+  private pendingExCommand: string | null = null;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
@@ -475,6 +476,8 @@ export class ModalEditor extends CustomEditor {
   private unnamedRegister: string = "";
   private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
   private clipboardReadFn: ClipboardReadFn = readClipboardInChildProcess;
+  private quitFn: () => void = () => {};
+  private notifyFn: (message: string) => void = () => {};
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -498,6 +501,8 @@ export class ModalEditor extends CustomEditor {
   setClipboardReadFn(fn: ClipboardReadFn): void {
     this.clipboardReadFn = fn;
   }
+  setQuitFn(fn: () => void): void { this.quitFn = fn; }
+  setNotifyFn(fn: (message: string) => void): void { this.notifyFn = fn; }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
   getMode(): Mode { return this.mode; }
@@ -832,6 +837,10 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingExCommand !== null) {
+      return this.handlePendingExCommand(data);
+    }
+
     if (this.pendingTextObject) {
       this.handlePendingTextObject(data);
       return;
@@ -879,6 +888,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handleEscape(): void {
+    if (this.pendingExCommand !== null) {
+      this.pendingExCommand = null;
+      return;
+    }
+
     if (
       this.pendingMotion
       || this.pendingTextObject
@@ -897,6 +911,42 @@ export class ModalEditor extends CustomEditor {
       this.mode = "normal";
     } else {
       super.handleInput("\x1b"); // pass escape to abort agent
+    }
+  }
+
+  private isEnterLikeInput(data: string): boolean {
+    return data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return");
+  }
+
+  private handlePendingExCommand(data: string): void {
+    if (this.isEnterLikeInput(data)) {
+      this.submitPendingExCommand();
+      return;
+    }
+
+    if (matchesKey(data, "backspace")) {
+      if (this.pendingExCommand!.length > 1) {
+        this.pendingExCommand = this.pendingExCommand!.slice(0, -1);
+      }
+      return;
+    }
+
+    if (this.isPrintableChunk(data)) {
+      this.pendingExCommand += data;
+    }
+  }
+
+  private submitPendingExCommand(): void {
+    const command = this.pendingExCommand?.slice(1).trim() ?? "";
+    this.pendingExCommand = null;
+
+    if (command === "q" || command === "qa") {
+      this.quitFn();
+      return;
+    }
+
+    if (command) {
+      this.notifyFn(`Unsupported ex command: :${command}`);
     }
   }
 
@@ -1338,6 +1388,11 @@ export class ModalEditor extends CustomEditor {
     if (data === "g") {
       this.pendingGCount = "";
       this.pendingG = true;
+      return;
+    }
+
+    if (data === ":") {
+      this.pendingExCommand = ":";
       return;
     }
 
@@ -2635,6 +2690,7 @@ export class ModalEditor extends CustomEditor {
 
   private getModeLabel(): string {
     if (this.mode === "insert") return " INSERT ";
+    if (this.pendingExCommand !== null) return ` EX ${this.pendingExCommand}_ `;
 
     const prefixCount = this.prefixCount;
     const operatorCount = this.operatorCount;
@@ -2668,6 +2724,11 @@ export default function (pi: ExtensionAPI) {
       insert: (s: string) => t.fg("borderMuted", `\x1b[7m${s}\x1b[27m`),
       normal: (s: string) => t.fg("borderAccent", `\x1b[7m${s}\x1b[27m`),
     } : null;
-    ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb, colorizers));
+    ctx.ui.setEditorComponent((tui, theme, kb) => {
+      const editor = new ModalEditor(tui, theme, kb, colorizers);
+      editor.setQuitFn(() => ctx.shutdown());
+      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
+      return editor;
+    });
   });
 }
