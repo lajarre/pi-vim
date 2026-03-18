@@ -240,7 +240,12 @@ export class ModalEditor extends CustomEditor {
 
       this.withTransition("redo", () => {
         this.requireRedoRestoreState(editor);
-        editor.pushUndoSnapshot?.();
+        if (typeof editor.pushUndoSnapshot !== "function") {
+          throw new Error(
+            "Redo restore prerequisite: pushUndoSnapshot unavailable",
+          );
+        }
+        editor.pushUndoSnapshot();
         this.restoreSnapshot(snapshot);
         this.redoStack.pop();
       });

@@ -2686,6 +2686,29 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["\x12"]);
       assert.equal(editor.getText(), "cd");
     });
+
+    it("redo throws when pushUndoSnapshot is unavailable", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "u"]);
+      assert.equal(editor.getText(), "abcd");
+
+      const raw = editor as any;
+      const saved = raw.pushUndoSnapshot;
+      raw.pushUndoSnapshot = undefined;
+
+      try {
+        assert.throws(
+          () => sendKeys(editor, ["\x12"]),
+          /pushUndoSnapshot/i,
+        );
+      } finally {
+        raw.pushUndoSnapshot = saved;
+      }
+
+      // Redo entry must NOT have been consumed
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "bcd");
+    });
   });
 
   describe("post-redo motion/cache coherence", () => {
