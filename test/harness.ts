@@ -42,11 +42,17 @@ export function sendKeys(editor: ModalEditor, keys: string[]): void {
 export function createEditorWithSpy(initialText: string): {
   editor: ModalEditor;
   clipboardWrites: string[];
+  quitCalls: number;
+  notifications: string[];
 } {
   const clipboardWrites: string[] = [];
+  const notifications: string[] = [];
+  let quitCalls = 0;
   const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
 
   editor.setClipboardFn((text) => clipboardWrites.push(text));
+  editor.setQuitFn(() => { quitCalls++; });
+  editor.setNotifyFn((message) => notifications.push(message));
 
   // Populate buffer in insert mode (editor starts in insert)
   for (const char of initialText) {
@@ -57,7 +63,12 @@ export function createEditorWithSpy(initialText: string): {
   editor.handleInput("\x1b");
   editor.handleInput("0");
 
-  return { editor, clipboardWrites };
+  return {
+    editor,
+    clipboardWrites,
+    get quitCalls() { return quitCalls; },
+    notifications,
+  };
 }
 
 /**
@@ -69,10 +80,16 @@ export function createEditorWithSpy(initialText: string): {
 export function createMultiLineEditor(text: string): {
   editor: ModalEditor;
   clipboardWrites: string[];
+  quitCalls: number;
+  notifications: string[];
 } {
   const clipboardWrites: string[] = [];
+  const notifications: string[] = [];
+  let quitCalls = 0;
   const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
   editor.setClipboardFn((t) => clipboardWrites.push(t));
+  editor.setQuitFn(() => { quitCalls++; });
+  editor.setNotifyFn((message) => notifications.push(message));
 
   // Type text in insert mode (newlines create new lines)
   for (const char of text) {
@@ -96,5 +113,10 @@ export function createMultiLineEditor(text: string): {
   internal.preferredVisualCol = null;
   internal.tui?.requestRender?.();
 
-  return { editor, clipboardWrites };
+  return {
+    editor,
+    clipboardWrites,
+    get quitCalls() { return quitCalls; },
+    notifications,
+  };
 }

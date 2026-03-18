@@ -273,6 +273,56 @@ describe("mode transitions", () => {
   });
 });
 
+describe("ex mini-mode", () => {
+  it(":q requests quit", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it(":qa requests quit", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "a", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("escape cancels ex mini-mode", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "\x1b", "x"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getRegister(), "h");
+  });
+
+  it("backspace edits the pending ex command", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "a", "\x7f", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("unsupported ex commands do not quit", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "w", "q", "\r"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :wq"]);
+    assert.equal(session.editor.getText(), "hello");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Delete (d) operator — 6 motions
 // ---------------------------------------------------------------------------
