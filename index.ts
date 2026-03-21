@@ -889,6 +889,7 @@ export class ModalEditor extends CustomEditor {
         || data === "C"
         || data === "p"
         || data === "P"
+        || data === "Y"
         || data === "J"
         || data === CTRL_R
         || matchesKey(data, "ctrl+r")
@@ -993,6 +994,12 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "P") {
       this.putBefore();
+      return;
+    }
+
+    if (data === "Y") {
+      const count = this.takeTotalCount(1);
+      this.yankLinewiseByDelta(count - 1);
       return;
     }
 

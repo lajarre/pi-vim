@@ -2121,6 +2121,20 @@ describe("put — line-wise", () => {
     assert.equal(lines[1], "bar");
   });
 
+  it("Y yanks current line (like yy)", () => {
+    const { editor } = createMultiLineEditor("aaa\nbbb\nccc");
+    sendKeys(editor, ["j", "Y", "p"]);
+    const lines = editor.getText().split("\n");
+    assert.deepStrictEqual(lines, ["aaa", "bbb", "bbb", "ccc"]);
+  });
+
+  it("3Y yanks 3 lines", () => {
+    const { editor } = createMultiLineEditor("aaa\nbbb\nccc\nddd");
+    sendKeys(editor, ["3", "Y", "G", "p"]);
+    const lines = editor.getText().split("\n");
+    assert.deepStrictEqual(lines, ["aaa", "bbb", "ccc", "ddd", "aaa", "bbb", "ccc"]);
+  });
+
   it("yy then p: duplicates line below", () => {
     const { editor } = createEditorWithSpy("hello");
     sendKeys(editor, ["y", "y"]);
