@@ -85,12 +85,14 @@ export function createMultiLineEditor(text: string): {
   const internal = editor as unknown as {
     state?: { cursorLine?: number; cursorCol?: number };
     preferredVisualCol?: number | null;
+    lastAction?: string | null;
     tui?: { requestRender?: () => void };
   };
   if (internal.state) {
     internal.state.cursorLine = 0;
     internal.state.cursorCol = 0;
   }
+  internal.lastAction = null;
   internal.preferredVisualCol = null;
   internal.tui?.requestRender?.();
 

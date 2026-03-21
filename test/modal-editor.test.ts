@@ -2983,6 +2983,15 @@ describe("char-find motions — f / F / t / T / ; / ,", () => {
 
     assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
   });
+
+  it("f{char} accepts a single grapheme made of multiple code points", () => {
+    const target = "e\u0301";
+    const { editor } = createEditorWithSpy(`x${target}y`);
+
+    sendKeys(editor, ["f", target]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3327,6 +3336,14 @@ describe("replace — r{char}", () => {
     const { editor } = createEditorWithSpy("😀x");
     sendKeys(editor, ["r", "a"]);
     assert.equal(editor.getText(), "ax");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("r accepts a single grapheme made of multiple code points", () => {
+    const replacement = "e\u0301";
+    const { editor } = createEditorWithSpy("abc");
+    sendKeys(editor, ["r", replacement]);
+    assert.equal(editor.getText(), `${replacement}bc`);
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
   });
 

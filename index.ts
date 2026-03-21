@@ -543,7 +543,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private isPrintableInput(data: string): boolean {
-    return this.isPrintableChunk(data) && Array.from(data).length === 1;
+    return this.isPrintableChunk(data) && getLineGraphemes(data).length === 1;
   }
 
   private isDigit(data: string): boolean {
