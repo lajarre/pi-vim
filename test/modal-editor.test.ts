@@ -2914,6 +2914,56 @@ describe("undo / redo — u / ctrl+r", () => {
       assert.equal(editor.getText(), "bd");
     });
   });
+  describe("counted undo", () => {
+    it("3u undoes 3 separate edits", () => {
+      const { editor } = createMultiLineEditor("hello");
+      // make 3 edits
+      sendKeys(editor, ["A"]);
+      sendKeys(editor, [" "]);
+      sendKeys(editor, ["\x1b"]);
+      sendKeys(editor, ["A"]);
+      sendKeys(editor, ["w"]);
+      sendKeys(editor, ["\x1b"]);
+      sendKeys(editor, ["A"]);
+      sendKeys(editor, ["!"]);
+      sendKeys(editor, ["\x1b"]);
+      // buffer should be "hello w!"
+      assert.equal(editor.getText(), "hello w!");
+      // 3u should undo all 3 edits
+      sendKeys(editor, ["3", "u"]);
+      assert.equal(editor.getText(), "hello");
+    });
+
+    it("counted undo clamps at available history", () => {
+      // Start with empty text so no setup undo history exists
+      const { editor } = createMultiLineEditor("");
+      // make 1 edit: type a char in insert mode
+      sendKeys(editor, ["i", "!", "\x1b"]);
+      assert.equal(editor.getText(), "!");
+      // 9u should undo the 1 available edit without error
+      sendKeys(editor, ["9", "u"]);
+      assert.equal(editor.getText(), "");
+    });
+
+    it("counted undo does not leak count to next command", () => {
+      const { editor } = createMultiLineEditor("aaa\nbbb\nccc");
+      // make 2 edits
+      sendKeys(editor, ["A"]);
+      sendKeys(editor, ["!"]);
+      sendKeys(editor, ["\x1b"]);
+      sendKeys(editor, ["j"]);
+      sendKeys(editor, ["A"]);
+      sendKeys(editor, ["?"]);
+      sendKeys(editor, ["\x1b"]);
+      // 2u
+      sendKeys(editor, ["2", "u"]);
+      // now press j — should move 1 line, not 2
+      sendKeys(editor, ["j"]);
+      // cursor should be on line 1 (0-indexed), not line 2
+      assert.strictEqual(editor.getCursor().line, 1);
+    });
+  });
+
   describe("kitty keyboard protocol sequences", () => {
     it("kitty ctrl+r triggers redo", () => {
       const { editor } = createEditorWithSpy("abcd");

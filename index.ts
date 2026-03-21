@@ -220,16 +220,22 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private performUndo(): void {
-    this.withTransition("undo", () => {
-      const beforeUndo = this.captureSnapshot();
-      super.handleInput(CTRL_UNDERSCORE);
-      const afterUndo = this.captureSnapshot();
+  private performUndo(count: number = this.takeTotalCount(1)): void {
+    const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
+    for (let i = 0; i < maxSteps; i++) {
+      let changed = false;
+      this.withTransition("undo", () => {
+        const beforeUndo = this.captureSnapshot();
+        super.handleInput(CTRL_UNDERSCORE);
+        const afterUndo = this.captureSnapshot();
 
-      if (this.snapshotChanged(beforeUndo, afterUndo)) {
-        this.redoStack.push(beforeUndo);
-      }
-    });
+        if (this.snapshotChanged(beforeUndo, afterUndo)) {
+          this.redoStack.push(beforeUndo);
+          changed = true;
+        }
+      });
+      if (!changed) break;
+    }
   }
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
@@ -891,6 +897,9 @@ export class ModalEditor extends CustomEditor {
         || data === "P"
         || data === "Y"
         || data === "J"
+        || data === "u"
+        || data === CTRL_UNDERSCORE
+        || matchesKey(data, "ctrl+_")
         || data === CTRL_R
         || matchesKey(data, "ctrl+r")
       );
