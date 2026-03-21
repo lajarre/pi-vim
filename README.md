@@ -1,16 +1,12 @@
-# pi-vim — Vim Mode for Pi REPL
+# pi-vim
 
-Modal vim-like editing for Pi's REPL prompt.
-Focus: the high-frequency 90% command surface, not full Vim.
+Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% command surface.
 
-## TL;DR
+## why
 
-- Problem: REPL editing is slow with only linear cursor movement.
-- Solution: modal editing (`INSERT`/`NORMAL`) with Vim-style motions,
-  operators, counts, and repeatable workflows.
-- Install: `pi install npm:pi-vim`
+You love Pi, you love Vim, you'll love pi-vim.
 
-## Install
+## install
 
 ```bash
 pi install npm:pi-vim
@@ -18,11 +14,11 @@ pi install npm:pi-vim
 
 Restart Pi after install.
 
-### Local loading (dev)
+## stats
 
-```bash
-pi --extension /path/to/pi-vim/index.ts
-```
+- **112 commands**: motions, operators, counts, text objects, undo/redo
+- **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
+- **0 dependencies**
 
 ## 30-second quickstart
 
@@ -39,22 +35,22 @@ u          # undo
 
 Mode indicator (`INSERT` / `NORMAL`) appears at bottom-right.
 
-## Why pi-vim
+## why pi-vim
 
 - Fast modal editing without leaving Pi.
 - Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
 - Strong REPL-focused defaults; safe out-of-scope boundaries documented.
 - Clipboard/register behavior is explicit and tested.
 
-## For you / not for you
+## for you / not for you
 
 Use pi-vim if you want fast Vim muscle-memory in Pi prompts.
 Skip it if you need full Vim feature parity (visual mode, macros, search,
 ex-commands, etc.).
 
-## Common recipes
+## common recipes
 
-| Goal | Keys |
+| goal | keys |
 |------|------|
 | Jump to exact line 25 | `25gg` (or `25G`) |
 | Delete two words | `2dw` |
@@ -68,11 +64,11 @@ ex-commands, etc.).
 
 ---
 
-## Full reference
+## full reference
 
-### Mode switching
+### mode switching
 
-| Key      | Action                                 |
+| key      | action                                 |
 |----------|----------------------------------------|
 | `Esc` / `Ctrl+[` | Insert → Normal mode                   |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (abort agent) |
@@ -85,7 +81,7 @@ ex-commands, etc.).
 
 Insert-mode shortcuts (stay in Insert mode):
 
-| Key             | Action                 |
+| key             | action                 |
 |-----------------|------------------------|
 | `Shift+Alt+A`   | Go to end of line      |
 | `Shift+Alt+I`   | Go to start of line    |
@@ -94,11 +90,11 @@ Insert-mode shortcuts (stay in Insert mode):
 
 ---
 
-### Navigation (Normal mode)
+### navigation (normal mode)
 
 A `{count}` prefix can be prepended to any navigation key (max: `9999`).
 
-| Key           | Action                        |
+| key           | action                        |
 |---------------|-------------------------------|
 | `h`           | Left                          |
 | `l`           | Right                         |
@@ -140,11 +136,11 @@ Operator forms with braces (`d{`, `d}`, `c{`, `c}`, `y{`, `y}`) are out of scope
 
 ---
 
-### Character-find motions (Normal mode)
+### character-find motions (normal mode)
 
 A `{count}` prefix finds the Nth occurrence of `{char}` on the line.
 
-| Key              | Action                                         |
+| key              | action                                         |
 |------------------|------------------------------------------------|
 | `f{char}`        | Jump forward to `char` (inclusive)             |
 | `F{char}`        | Jump backward to `char` (inclusive)            |
@@ -158,17 +154,17 @@ Char-find motions compose with operators: `df{char}`, `ct{char}`, `d{count}t{cha
 
 ---
 
-### Edit operators (Normal mode)
+### edit operators (normal mode)
 
 All operators write to the unnamed register and mirror to the system clipboard
 (best-effort; clipboard failure never breaks editing).
 
-#### Delete `d{motion}` / `dd`
+#### delete `d{motion}` / `dd`
 
 A `{count}` or dual-count prefix (`{pfx}d{op}{motion}`) is supported for
 word, char-find, and linewise motions. Maximum total count: `9999`.
 
-| Command           | Deletes                                                   |
+| command           | deletes                                                   |
 |-------------------|-----------------------------------------------------------|
 | `dw`              | Forward to next `word` start (exclusive, can cross lines) |
 | `de`              | Forward to `word` end (inclusive, can cross lines)        |
@@ -195,11 +191,11 @@ word, char-find, and linewise motions. Maximum total count: `9999`.
 | `daw`             | Around word (includes surrounding spaces)                 |
 | `d{count}aw`      | Around `{count}` words                                    |
 
-#### Change `c{motion}` / `cc`
+#### change `c{motion}` / `cc`
 
 Same motion and count set as `d`. Deletes text then enters Insert mode.
 
-| Command         | Action                             |
+| command         | action                             |
 |-----------------|------------------------------------|
 | `cw`            | Change `word` + Insert                        |
 | `ce` / `cb`     | Change to `word` end / previous `word` start  |
@@ -213,11 +209,11 @@ Same motion and count set as `d`. Deletes text then enters Insert mode.
 | `c$` / `c0` / `c^` | Delete to EOL / BOL / first non-whitespace + Insert |
 | …               | All `d` motions apply                         |
 
-#### Single-key edits
+#### single-key edits
 
 A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
 
-| Key          | Action                                                        |
+| key          | action                                                        |
 |--------------|---------------------------------------------------------------|
 | `x`          | Delete char under cursor (no-op at/past EOL)                  |
 | `{count}x`   | Delete `{count}` chars                                        |
@@ -228,11 +224,11 @@ A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
 
 ---
 
-### Yank `y{motion}` / `yy`
+### yank `y{motion}` / `yy`
 
 Same motion set as `d`. Writes to register, **no text mutation**.
 
-| Command | Yanks                           |
+| command | yanks                           |
 |---------|---------------------------------|
 | `yy`         | Whole line + trailing `\n`                     |
 | `{count}yy`  | `{count}` whole lines + trailing `\n`          |
@@ -258,9 +254,9 @@ Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
 
 ---
 
-### Put / Paste
+### put / paste
 
-| Key          | Action                                                      |
+| key          | action                                                      |
 |--------------|-------------------------------------------------------------|
 | `p`          | Put after cursor (char-wise) / new line below (line-wise)   |
 | `P`          | Put before cursor (char-wise) / new line above (line-wise)  |
@@ -272,9 +268,9 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ---
 
-### Undo / Redo
+### undo / redo
 
-| Key | Action |
+| key | action |
 |-----|--------|
 | `u` | Undo in normal mode |
 | `Ctrl+_` | Undo in normal mode (alias for `u`) |
@@ -283,7 +279,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ---
 
-## Register and clipboard policy
+## register and clipboard policy
 
 - One unnamed register (like Vim's `""` register).
 - Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
@@ -295,9 +291,9 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ---
 
-## Known differences from full Vim
+## known differences from full Vim
 
-| Area                  | This extension                         | Full Vim                      |
+| area                  | this extension                         | full Vim                      |
 |-----------------------|----------------------------------------|-------------------------------|
 | `$` motion            | Moves past last char (readline CTRL+E) | Moves to last char            |
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for `word` + `WORD` motions | Cross-line                    |
@@ -315,7 +311,7 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ---
 
-## Out of scope
+## out of scope
 
 These are **explicitly deferred** and not planned for this feature:
 
@@ -335,7 +331,7 @@ These are **explicitly deferred** and not planned for this feature:
 
 ---
 
-## Architecture notes
+## architecture notes
 
 - `index.ts` — `ModalEditor` subclass of `CustomEditor`; all key handling.
 - `motions.ts` — pure motion calculation helpers (`findWordMotionTarget`,
