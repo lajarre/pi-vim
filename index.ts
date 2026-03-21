@@ -831,6 +831,7 @@ export class ModalEditor extends CustomEditor {
         || data === "P"
         || data === "J"
         || data === CTRL_R
+        || matchesKey(data, "ctrl+r")
       );
       const supportsCountedCharMotion = (
         CHAR_MOTION_KEYS.has(data)
@@ -954,12 +955,12 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (data === "u" || data === CTRL_UNDERSCORE) {
+    if (data === "u" || data === CTRL_UNDERSCORE || matchesKey(data, "ctrl+_")) {
       this.performUndo();
       return;
     }
 
-    if (data === CTRL_R) {
+    if (data === CTRL_R || matchesKey(data, "ctrl+r")) {
       this.performRedo();
       return;
     }

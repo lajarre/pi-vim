@@ -2798,6 +2798,35 @@ describe("undo / redo — u / ctrl+r", () => {
       assert.equal(editor.getText(), "bd");
     });
   });
+  describe("kitty keyboard protocol sequences", () => {
+    it("kitty ctrl+r triggers redo", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "u"]);
+      assert.equal(editor.getText(), "abcd");
+      sendKeys(editor, ["\x1b[114;5u"]); // kitty ctrl+r
+      assert.equal(editor.getText(), "bcd");
+    });
+
+    it("kitty ctrl+_ triggers undo and feeds redo", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x"]);
+      assert.equal(editor.getText(), "bcd");
+      sendKeys(editor, ["\x1b[95;5u"]); // kitty ctrl+_
+      assert.equal(editor.getText(), "abcd");
+      sendKeys(editor, ["\x12"]); // redo
+      assert.equal(editor.getText(), "bcd");
+    });
+
+    it("counted kitty ctrl+r works", () => {
+      const { editor } = createEditorWithSpy("abcd");
+      sendKeys(editor, ["x", "x"]);
+      assert.equal(editor.getText(), "cd");
+      sendKeys(editor, ["u", "u"]);
+      assert.equal(editor.getText(), "abcd");
+      sendKeys(editor, ["2", "\x1b[114;5u"]); // 2<kitty-C-r>
+      assert.equal(editor.getText(), "cd");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
