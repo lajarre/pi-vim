@@ -24,14 +24,6 @@ Restart Pi after install.
 pi --extension /path/to/pi-vim/index.ts
 ```
 
-Or add to `.pi/settings.json`:
-
-```json
-{
-  "extensions": ["./pi-extensions/pi-vim/index.ts"]
-}
-```
-
 ## 30-second quickstart
 
 Try on multi-line input:
