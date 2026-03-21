@@ -2965,6 +2965,22 @@ describe("char-find motions — f / F / t / T / ; / ,", () => {
 
     sendKeys(editor, ["f", "y"]);
 
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("T{char} at EOL lands at line end instead of crashing", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["$", "T", "c"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("T{char} after an emoji target at EOL lands safely", () => {
+    const { editor } = createEditorWithSpy("ab😀");
+
+    sendKeys(editor, ["$", "T", "😀"]);
+
     assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
   });
 });

@@ -197,7 +197,11 @@ export function findCharMotionTarget(
         }
       }
       if (found === -1) return null;
-      if (isFinal) return isTill ? graphemes[found + 1]!.start : graphemes[found]!.start;
+      if (isFinal) {
+        if (!isTill) return graphemes[found]!.start;
+        const afterTarget = graphemes[found + 1];
+        return afterTarget ? afterTarget.start : line.length;
+      }
       currentIndex = found;
     }
   }
