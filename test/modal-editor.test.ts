@@ -271,6 +271,24 @@ describe("mode transitions", () => {
     assert.equal(editor.getText(), "ac");
     assert.equal(editor.getRegister(), "b");
   });
+
+  it("I enters insert at first non-whitespace char", () => {
+    const { editor } = createMultiLineEditor("   hello");
+    // move to end of line
+    sendKeys(editor, ["$"]);
+    // I should go to first non-ws (col 3)
+    sendKeys(editor, ["I"]);
+    assert.strictEqual(editor.getMode(), "insert");
+    assert.strictEqual(editor.getCursor().col, 3);
+  });
+
+  it("I on line with no leading whitespace goes to col 0", () => {
+    const { editor } = createMultiLineEditor("hello");
+    sendKeys(editor, ["$"]);
+    sendKeys(editor, ["I"]);
+    assert.strictEqual(editor.getMode(), "insert");
+    assert.strictEqual(editor.getCursor().col, 0);
+  });
 });
 
 // ---------------------------------------------------------------------------

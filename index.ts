@@ -1098,7 +1098,7 @@ export class ModalEditor extends CustomEditor {
         break;
       case "I":
         this.mode = "insert";
-        super.handleInput(CTRL_A);
+        this.moveCursorToFirstNonWhitespace();
         break;
       case "o":
         this.openLineBelow();
