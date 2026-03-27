@@ -136,12 +136,23 @@ export class ModalEditor extends CustomEditor {
   private readonly redoStack: EditorSnapshot[] = [];
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
+  private readonly labelColorizers: { insert: (s: string) => string; normal: (s: string) => string } | null;
 
   // Unnamed register
   private unnamedRegister: string = "";
   private clipboardFn: (text: string) => void = (text: string) => {
     try { copyToClipboard(text); } catch { /* best effort */ }
   };
+
+  constructor(
+    tui: any,
+    theme: any,
+    kb: any,
+    labelColorizers?: { insert: (s: string) => string; normal: (s: string) => string } | null,
+  ) {
+    super(tui, theme, kb);
+    this.labelColorizers = labelColorizers ?? null;
+  }
 
   // Test seams
   setClipboardFn(fn: (text: string) => void): void { this.clipboardFn = fn; }
@@ -2203,10 +2214,14 @@ export class ModalEditor extends CustomEditor {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
 
-    const label = this.getModeLabel();
+    const rawLabel = this.getModeLabel();
+    const colorize = this.labelColorizers
+      ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
+      : null;
+    const label = colorize ? colorize(rawLabel) : rawLabel;
     const last = lines.length - 1;
-    if (visibleWidth(lines[last]!) >= label.length) {
-      lines[last] = truncateToWidth(lines[last]!, width - label.length, "") + label;
+    if (visibleWidth(lines[last]!) >= visibleWidth(rawLabel)) {
+      lines[last] = truncateToWidth(lines[last]!, width - visibleWidth(rawLabel), "") + label;
     }
     return lines;
   }
@@ -2241,6 +2256,11 @@ export class ModalEditor extends CustomEditor {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
-    ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb));
+    const t = ctx.ui.theme;
+    const colorizers = t ? {
+      insert: (s: string) => t.fg("borderMuted", `\x1b[7m${s}\x1b[27m`),
+      normal: (s: string) => t.fg("borderAccent", `\x1b[7m${s}\x1b[27m`),
+    } : null;
+    ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb, colorizers));
   });
 }
