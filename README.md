@@ -34,6 +34,8 @@ u          # undo
 ```
 
 Mode indicator (`INSERT` / `NORMAL`) appears at bottom-right.
+Its label is theme-colored: reverse-video `borderMuted` for
+INSERT, `borderAccent` for NORMAL.
 
 ## why pi-vim
 
@@ -74,7 +76,7 @@ ex-commands, etc.).
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (abort agent) |
 | `i`      | Normal → Insert at cursor              |
 | `a`      | Normal → Insert after cursor           |
-| `I`      | Normal → Insert at line start          |
+| `I`      | Normal → Insert at first non-whitespace |
 | `A`      | Normal → Insert at line end            |
 | `o`      | Normal → open line below + Insert      |
 | `O`      | Normal → open line above + Insert      |
@@ -238,7 +240,9 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 | command | yanks                           |
 |---------|---------------------------------|
 | `yy`         | Whole line + trailing `\n`                     |
+| `Y`          | Whole line + trailing `\n` (same as `yy`)      |
 | `{count}yy`  | `{count}` whole lines + trailing `\n`          |
+| `{count}Y`   | `{count}` whole lines + trailing `\n` (same as `{count}yy`) |
 | `y{count}j`  | Current line + `{count}` lines below (linewise) |
 | `y{count}k`  | Current line + `{count}` lines above (linewise) |
 | `yG`         | Current line to end of buffer (linewise)         |
@@ -281,7 +285,8 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 | key | action |
 |-----|--------|
-| `u` | Undo in normal mode |
+| `u` | Undo one change in normal mode |
+| `{count}u` | Undo up to `{count}` changes in normal mode; clamps at available history |
 | `Ctrl+_` | Undo in normal mode (alias for `u`) |
 | `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
 | `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
