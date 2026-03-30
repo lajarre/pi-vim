@@ -700,6 +700,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
+    this.pendingExCommand = null;
   }
 
   private isEscapeLikeInput(data: string): boolean {
@@ -927,6 +928,8 @@ export class ModalEditor extends CustomEditor {
     if (matchesKey(data, "backspace")) {
       if (this.pendingExCommand!.length > 1) {
         this.pendingExCommand = this.pendingExCommand!.slice(0, -1);
+      } else {
+        this.pendingExCommand = null;
       }
       return;
     }
@@ -940,7 +943,7 @@ export class ModalEditor extends CustomEditor {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
     this.pendingExCommand = null;
 
-    if (command === "q" || command === "qa") {
+    if (command === "q" || command === "q!" || command === "qa") {
       this.quitFn();
       return;
     }

@@ -526,6 +526,37 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
+  it(":q! requests quit", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "!", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("empty submit is a silent no-op", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\r"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.deepEqual(session.notifications, []);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("backspace on bare colon exits ex mode", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x7f", "x"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getRegister(), "h");
+  });
+
   it("unsupported ex commands do not quit", () => {
     const session = createEditorWithSpy("hello");
 
