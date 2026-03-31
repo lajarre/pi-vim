@@ -31,7 +31,7 @@ npm run hooks:install
 
 ## stats
 
-- **112 commands**: motions, operators, counts, text objects, undo/redo
+- **116 commands**: motions, operators, counts, text objects, undo/redo, ex quit
 - **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
 - **0 dependencies**
 
@@ -48,9 +48,9 @@ u          # undo
 2}         # jump two paragraphs forward
 ```
 
-Mode indicator (`INSERT` / `NORMAL`) appears at bottom-right.
+Mode indicator (`INSERT` / `NORMAL` / `EX`) appears at bottom-right.
 Its label is theme-colored: reverse-video `borderMuted` for
-INSERT, `borderAccent` for NORMAL.
+INSERT, `borderAccent` for NORMAL and EX.
 
 ## why pi-vim
 
@@ -63,7 +63,7 @@ INSERT, `borderAccent` for NORMAL.
 
 Use pi-vim if you want fast Vim muscle-memory in Pi prompts.
 Skip it if you need full Vim feature parity (visual mode, macros, search,
-ex-commands, etc.).
+extended ex-commands, etc.).
 
 ## common recipes
 
@@ -89,12 +89,27 @@ ex-commands, etc.).
 |----------|----------------------------------------|
 | `Esc` / `Ctrl+[` | Insert → Normal mode                   |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (abort agent) |
+| `:`      | Normal → EX mini-mode                   |
 | `i`      | Normal → Insert at cursor              |
 | `a`      | Normal → Insert after cursor           |
 | `I`      | Normal → Insert at first non-whitespace |
 | `A`      | Normal → Insert at line end            |
 | `o`      | Normal → open line below + Insert      |
 | `O`      | Normal → open line above + Insert      |
+
+#### ex mini-mode
+
+Limited ex support is implemented for quit-only flows.
+
+| key / command | action |
+|---------------|--------|
+| `:` | Enter EX mini-mode |
+| `Enter` | Execute pending ex command |
+| `Esc` | Cancel EX mini-mode |
+| `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
+| `:q` / `:q!` | Quit the current Pi session |
+| `:qa` / `:qa!` | Quit the current Pi session |
+| unsupported `:{cmd}` | Show warning notification; no quit |
 
 Insert-mode shortcuts (stay in Insert mode):
 
@@ -342,7 +357,7 @@ Future option stub: a later release may expose a setting to choose between OS-ba
 | Named registers       | Not implemented (`"a`, etc.)           | Supported                     |
 | Macros                | Not implemented (`q`, `@`)             | Supported                     |
 | Search                | Not implemented (`/`, `?`, `n`, `N`)   | Supported                     |
-| Ex commands           | Not implemented (`:s`, `:g`, etc.)     | Supported                     |
+| Ex commands           | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
 | Multi-line operators  | Supports `d/c/y` with `w/e/b` and `W/E/B`, plus `j/k` counts and `G`; not full Vim motion matrix | Rich cross-line semantics |
 
 ---
@@ -355,7 +370,7 @@ These are **explicitly deferred** and not planned for this feature:
 - Extended text objects beyond word (`ip`, `i"`, `i(`, etc.)
 - Named registers (`"a`, `"b`, …)
 - Macros (`q{char}`, `@{char}`)
-- Ex command surface (`:s`, `:g`, `:r`, …)
+- Extended ex command surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
 - Search mode (`/`, `?`, `n`, `N`)
 - Repeat (`.`)
 - Replace mode (`R`) — only single-char `r{char}` is supported

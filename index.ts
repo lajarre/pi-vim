@@ -37,6 +37,7 @@
  * - Shift+Alt+I: go to start of line (insert mode shortcut)
  * - Alt+o: open new line below (insert mode shortcut)
  * - Alt+Shift+o: open new line above (insert mode shortcut)
+ * - :q / :q! / :qa / :qa!: ex mini-mode quit commands from normal mode
  * - u: undo (normal mode, sends ctrl+_ to underlying readline editor)
  * - ctrl+c, ctrl+d, etc. work in both modes
  *
@@ -463,6 +464,8 @@ export class ModalEditor extends CustomEditor {
   private pendingGCount: string = "";
   private pendingReplace: boolean = false;
   private pendingExCommand: string | null = null;
+  private acceptingBracketedPasteInExCommand: boolean = false;
+  private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
@@ -691,6 +694,26 @@ export class ModalEditor extends CustomEditor {
     editor.tui?.requestRender?.();
   }
 
+  private startPendingExCommand(): void {
+    this.pendingExCommand = ":";
+    this.acceptingBracketedPasteInExCommand = false;
+    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+  }
+
+  private clearPendingExCommand(): void {
+    const shouldDiscardBracketedPasteTail = this.acceptingBracketedPasteInExCommand
+      || this.pendingEscWhileAcceptingBracketedPasteInExCommand;
+
+    this.pendingExCommand = null;
+    this.acceptingBracketedPasteInExCommand = false;
+    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+
+    if (shouldDiscardBracketedPasteTail) {
+      this.discardingBracketedPasteInNormalMode = true;
+      this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
+    }
+  }
+
   private clearPendingState(): void {
     this.pendingMotion = null;
     this.pendingTextObject = null;
@@ -700,11 +723,67 @@ export class ModalEditor extends CustomEditor {
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
-    this.pendingExCommand = null;
+    this.clearPendingExCommand();
   }
 
   private isEscapeLikeInput(data: string): boolean {
     return matchesKey(data, "escape") || matchesKey(data, "ctrl+[");
+  }
+
+  private normalizePendingExCommandInput(data: string): string | null {
+    let chunk = data;
+    let normalized = "";
+
+    while (true) {
+      if (this.acceptingBracketedPasteInExCommand) {
+        if (this.pendingEscWhileAcceptingBracketedPasteInExCommand) {
+          if (chunk.startsWith(BRACKETED_PASTE_END_TAIL)) {
+            this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+            this.acceptingBracketedPasteInExCommand = false;
+            chunk = chunk.slice(BRACKETED_PASTE_END_TAIL.length);
+            if (chunk.length === 0) {
+              return normalized.length > 0 ? normalized : null;
+            }
+            continue;
+          }
+
+          normalized += "\x1b";
+          this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+        }
+
+        const end = chunk.indexOf(BRACKETED_PASTE_END);
+        if (end !== -1) {
+          normalized += chunk.slice(0, end);
+          this.acceptingBracketedPasteInExCommand = false;
+          chunk = chunk.slice(end + BRACKETED_PASTE_END.length);
+          if (chunk.length === 0) {
+            return normalized.length > 0 ? normalized : null;
+          }
+          continue;
+        }
+
+        if (this.isEscapeLikeInput(chunk)) {
+          this.pendingEscWhileAcceptingBracketedPasteInExCommand = true;
+          return normalized.length > 0 ? normalized : null;
+        }
+
+        normalized += chunk;
+        return normalized.length > 0 ? normalized : null;
+      }
+
+      const start = chunk.indexOf(BRACKETED_PASTE_START);
+      if (start === -1) {
+        normalized += chunk;
+        return normalized.length > 0 ? normalized : null;
+      }
+
+      normalized += chunk.slice(0, start);
+      chunk = chunk.slice(start + BRACKETED_PASTE_START.length);
+      this.acceptingBracketedPasteInExCommand = true;
+      if (chunk.length === 0) {
+        return normalized.length > 0 ? normalized : null;
+      }
+    }
   }
 
   private stripBracketedPasteInNormalMode(data: string): { filtered: string | null; stripped: boolean } {
@@ -745,7 +824,11 @@ export class ModalEditor extends CustomEditor {
   handleInput(data: string): void {
     this.ensureOnChangeHook();
 
-    if (this.mode !== "insert") {
+    if (this.pendingExCommand !== null) {
+      const normalized = this.normalizePendingExCommandInput(data);
+      if (normalized === null) return;
+      data = normalized;
+    } else if (this.mode !== "insert") {
       if (this.discardingBracketedPasteInNormalMode) {
         if (this.isEscapeLikeInput(data)) {
           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
@@ -890,7 +973,7 @@ export class ModalEditor extends CustomEditor {
 
   private handleEscape(): void {
     if (this.pendingExCommand !== null) {
-      this.pendingExCommand = null;
+      this.clearPendingExCommand();
       return;
     }
 
@@ -919,31 +1002,98 @@ export class ModalEditor extends CustomEditor {
     return data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return");
   }
 
+  private isBackspaceLikeInput(data: string): boolean {
+    return data === "\x7f" || data === "\x08" || matchesKey(data, "backspace") || matchesKey(data, "ctrl+h");
+  }
+
+  private deleteLastPendingExCommandGrapheme(): void {
+    const current = this.pendingExCommand ?? "";
+    const graphemes = getLineGraphemes(current);
+
+    if (graphemes.length <= 1) {
+      this.clearPendingExCommand();
+      return;
+    }
+
+    const newEnd = graphemes[graphemes.length - 2]!.end;
+    this.pendingExCommand = current.slice(0, newEnd);
+  }
+
+  private handlePendingExCommandControlChunk(data: string): boolean {
+    if (
+      !data.includes("\r")
+      && !data.includes("\n")
+      && !data.includes("\x7f")
+      && !data.includes("\x08")
+    ) {
+      return false;
+    }
+
+    let printable = "";
+    const flushPrintable = () => {
+      if (!printable) return;
+      this.pendingExCommand += printable;
+      printable = "";
+    };
+
+    for (const char of data) {
+      if (char === "\r" || char === "\n") {
+        flushPrintable();
+        this.submitPendingExCommand();
+        return true;
+      }
+
+      if (char === "\x7f" || char === "\x08") {
+        flushPrintable();
+        this.deleteLastPendingExCommandGrapheme();
+        if (this.pendingExCommand === null) {
+          return true;
+        }
+        continue;
+      }
+
+      const codePoint = char.codePointAt(0)!;
+      if (codePoint < 32 || codePoint === 127) {
+        this.clearPendingExCommand();
+        return true;
+      }
+
+      printable += char;
+    }
+
+    flushPrintable();
+    return true;
+  }
+
   private handlePendingExCommand(data: string): void {
     if (this.isEnterLikeInput(data)) {
       this.submitPendingExCommand();
       return;
     }
 
-    if (matchesKey(data, "backspace")) {
-      if (this.pendingExCommand!.length > 1) {
-        this.pendingExCommand = this.pendingExCommand!.slice(0, -1);
-      } else {
-        this.pendingExCommand = null;
-      }
+    if (this.isBackspaceLikeInput(data)) {
+      this.deleteLastPendingExCommandGrapheme();
       return;
     }
 
-    if (this.isPrintableChunk(data)) {
-      this.pendingExCommand += data;
+    if (this.handlePendingExCommandControlChunk(data)) {
+      return;
     }
+
+    if (!this.isPrintableChunk(data)) {
+      this.clearPendingExCommand();
+      this.handleInput(data);
+      return;
+    }
+
+    this.pendingExCommand += data;
   }
 
   private submitPendingExCommand(): void {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
-    this.pendingExCommand = null;
+    this.clearPendingExCommand();
 
-    if (command === "q" || command === "q!" || command === "qa") {
+    if (command === "q" || command === "q!" || command === "qa" || command === "qa!") {
       this.quitFn();
       return;
     }
@@ -1395,7 +1545,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (data === ":") {
-      this.pendingExCommand = ":";
+      this.startPendingExCommand();
       return;
     }
 
@@ -2674,11 +2824,50 @@ export class ModalEditor extends CustomEditor {
     this.deleteRangeByAbsolute(lineStartAbs + start, lineStartAbs + end);
   }
 
+  private takeModeLabelSuffix(rawLabel: string, width: number): string {
+    if (width <= 0) return "";
+
+    const graphemes = getLineGraphemes(rawLabel);
+    const suffix: string[] = [];
+    let usedWidth = 0;
+
+    for (let i = graphemes.length - 1; i >= 0; i--) {
+      const grapheme = graphemes[i]!;
+      const segment = rawLabel.slice(grapheme.start, grapheme.end);
+      const segmentWidth = visibleWidth(segment);
+      if (usedWidth + segmentWidth > width) break;
+      suffix.push(segment);
+      usedWidth += segmentWidth;
+    }
+
+    return suffix.reverse().join("");
+  }
+
+  private fitModeLabel(rawLabel: string, width: number): string {
+    if (visibleWidth(rawLabel) <= width) return rawLabel;
+
+    const prefix = rawLabel.startsWith(" INSERT ")
+      ? " INSERT "
+      : rawLabel.startsWith(" NORMAL ")
+        ? " NORMAL "
+        : rawLabel.startsWith(" EX ")
+          ? " EX "
+          : "";
+
+    if (!prefix || visibleWidth(prefix) >= width) {
+      return truncateToWidth(rawLabel, width, "");
+    }
+
+    const suffixWidth = width - visibleWidth(prefix) - 1;
+    if (suffixWidth <= 0) return `${prefix}…`;
+    return `${prefix}…${this.takeModeLabelSuffix(rawLabel, suffixWidth)}`;
+  }
+
   render(width: number): string[] {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
 
-    const rawLabel = this.getModeLabel();
+    const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
     const colorize = this.labelColorizers
       ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
       : null;
@@ -2687,6 +2876,8 @@ export class ModalEditor extends CustomEditor {
     const lastLine = lines[last];
     if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
       lines[last] = truncateToWidth(lastLine, width - visibleWidth(rawLabel), "") + label;
+    } else {
+      lines[last] = label;
     }
     return lines;
   }

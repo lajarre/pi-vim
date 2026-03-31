@@ -488,6 +488,32 @@ describe("mode transitions", () => {
 });
 
 describe("ex mini-mode", () => {
+  it("renders the pending EX command and consumes prefixed counts", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, ["2", ":"]);
+
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :_ "));
+
+    sendKeys(session.editor, ["\x1b", "x"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getRegister(), "h");
+  });
+
+  it("keeps the EX label visible on narrow renders", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", ...Array.from("averyveryverylongcommand")]);
+
+    const footer = session.editor.render(20).at(-1) ?? "";
+
+    assert.ok(footer.includes(" EX "));
+    assert.ok(footer.endsWith("_ "));
+  });
+
   it(":q requests quit", () => {
     const session = createEditorWithSpy("hello");
 
@@ -496,12 +522,22 @@ describe("ex mini-mode", () => {
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getMode(), "normal");
     assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
   });
 
   it(":qa requests quit", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "q", "a", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it(":qa! requests quit", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "a", "!", "\r"]);
 
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getText(), "hello");
@@ -526,6 +562,25 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
+  it("ctrl+h edits the pending ex command", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "q", "a", "\x08", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("backspace removes one full grapheme from the pending ex command", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "e\u0301", "\x7f", "q", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
   it(":q! requests quit", () => {
     const session = createEditorWithSpy("hello");
 
@@ -533,6 +588,64 @@ describe("ex mini-mode", () => {
 
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("bracketed paste payload is accepted in ex mini-mode", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~q!\x1b[201~", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("split bracketed paste payload is accepted in ex mini-mode", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~", "q", "a", "!", "\x1b", "[201~", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("newline in bracketed paste submits the pending ex command", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~q!\n\x1b[201~"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("newline submit in split bracketed paste discards the trailing paste marker", () => {
+    const session = createEditorWithSpy("hello");
+    const customEditorProto = Object.getPrototypeOf(Object.getPrototypeOf(session.editor));
+    const originalHandleInput = customEditorProto.handleInput;
+    let forwardedEscapeCount = 0;
+
+    customEditorProto.handleInput = function (this: unknown, data: string): unknown {
+      if (data === "\x1b") forwardedEscapeCount++;
+      return originalHandleInput.call(this, data);
+    };
+
+    try {
+      sendKeys(session.editor, [":", "\x1b[200~q!\n", "\x1b", "[201~", "x"]);
+
+      assert.equal(session.quitCalls, 1);
+      assert.equal(forwardedEscapeCount, 0);
+      assert.equal(session.editor.getMode(), "normal");
+      assert.equal(session.editor.getText(), "ello");
+      assert.equal(session.editor.getRegister(), "h");
+      assert.deepEqual(session.notifications, []);
+    } finally {
+      customEditorProto.handleInput = originalHandleInput;
+    }
   });
 
   it("empty submit is a silent no-op", () => {
@@ -557,14 +670,27 @@ describe("ex mini-mode", () => {
     assert.equal(session.editor.getRegister(), "h");
   });
 
+  it("non-printable input cancels ex mode and is reprocessed", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, ["x", "u", ":", "q", "\x12"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.deepEqual(session.notifications, []);
+    assert.equal(session.editor.getMode(), "normal");
+    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getRegister(), "h");
+  });
+
   it("unsupported ex commands do not quit", () => {
     const session = createEditorWithSpy("hello");
 
-    sendKeys(session.editor, [":", "w", "q", "\r"]);
+    sendKeys(session.editor, ["l", "l", ":", "w", "q", "\r"]);
 
     assert.equal(session.quitCalls, 0);
     assert.deepEqual(session.notifications, ["Unsupported ex command: :wq"]);
     assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 2 });
   });
 });
 
