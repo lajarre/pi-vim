@@ -1,0 +1,13 @@
+pre-commit:
+  commands:
+    lint:
+      run: npm run lint
+    typecheck:
+      run: npm run typecheck
+
+pre-push:
+  commands:
+    check:
+      run: npm run check
+    pack:
+      run: npm run pack:check
