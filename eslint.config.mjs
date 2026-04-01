@@ -15,6 +15,7 @@ export default tseslint.config(
       ".swp",
       "out.txt",
       "spec-review.md",
+      "eslint.config.mjs",
     ],
   },
   eslint.configs.recommended,
@@ -36,6 +37,7 @@ export default tseslint.config(
           checksVoidReturn: true,
         },
       ],
+      "@typescript-eslint/strict-void-return": "error",
     },
   },
   {
@@ -49,6 +51,7 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/strict-void-return": "off",
     },
   },
 );
