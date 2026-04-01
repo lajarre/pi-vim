@@ -22,7 +22,8 @@
   ],
   "scripts": {
     "build": "echo 'nothing to build'",
-    "lint": "eslint .",
+    "format": "biome format --write .",
+    "lint": "biome lint . && eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
     "check": "npm run lint && npm run typecheck && npm run test",
@@ -36,6 +37,7 @@
     ]
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.8",
     "@eslint/js": "^9.25.1",
     "@types/node": "^24.7.2",
     "eslint": "^9.25.1",
