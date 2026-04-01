@@ -5,6 +5,21 @@ import { pathToFileURL } from "node:url";
 
 import { ModalEditor } from "../index.js";
 
+type StubTui = {
+  requestRender(): void;
+  terminal: { rows: number; cols: number };
+};
+
+type StubTheme = {
+  borderColor(s: string): string;
+  fg(_k: string, s: string): string;
+  bold(s: string): string;
+};
+
+type StubKeybindings = {
+  matches(): boolean;
+};
+
 type Stats = {
   min: number;
   median: number;
@@ -20,20 +35,20 @@ type SampledMetric = {
 
 const repoRoot = process.cwd();
 
-const stubTui = {
+const stubTui: StubTui = {
   requestRender() {},
   terminal: { rows: 40, cols: 120 },
-} as unknown as import("@mariozechner/pi-tui").Tui;
+};
 
-const stubTheme = {
+const stubTheme: StubTheme = {
   borderColor: (s: string) => s,
   fg: (_k: string, s: string) => s,
   bold: (s: string) => s,
-} as unknown as import("@mariozechner/pi-tui").Theme;
+};
 
-const stubKeybindings = {
+const stubKeybindings: StubKeybindings = {
   matches: () => false,
-} as unknown as import("@mariozechner/pi-tui").Keybindings;
+};
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;

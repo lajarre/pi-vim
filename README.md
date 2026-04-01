@@ -354,9 +354,9 @@ These are **explicitly deferred** and not planned for this feature:
 - `types.ts` — shared types and escape-sequence constants.
 - `test/` — Node test runner suite; no browser / full runtime required.
 
-Run tests:
+Run checks:
 
 ```
 cd pi-vim
-npm test
+npm run check
 ```

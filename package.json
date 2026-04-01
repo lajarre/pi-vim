@@ -1,6 +1,6 @@
 {
   "name": "pi-vim",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Vim-style modal editing for Pi's TUI editor",
   "type": "module",
   "keywords": [
@@ -22,10 +22,12 @@
   ],
   "scripts": {
     "build": "echo 'nothing to build'",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
-    "check": "npm run test",
+    "check": "npm run lint && npm run typecheck && npm run test",
     "pack:check": "node --import tsx/esm script/pack-check.ts",
-    "prepublishOnly": "npm run pack:check && npm test"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run pack:check && npm test"
   },
   "pi": {
     "extensions": [
@@ -33,7 +35,12 @@
     ]
   },
   "devDependencies": {
-    "tsx": "^4.19.3"
+    "@eslint/js": "^9.25.1",
+    "@types/node": "^24.7.2",
+    "eslint": "^9.25.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.31.1"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

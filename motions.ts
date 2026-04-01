@@ -172,7 +172,7 @@ export function findCharMotionTarget(
     const tillRepeatOffset = isFirst && isTill && isRepeat ? 1 : 0;
 
     if (isForward) {
-      let nextIndex = currentIndex + 1 + tillRepeatOffset;
+      const nextIndex = currentIndex + 1 + tillRepeatOffset;
       let found = -1;
       for (let j = nextIndex; j < graphemes.length; j++) {
         const g = graphemes[j]!;
@@ -187,7 +187,7 @@ export function findCharMotionTarget(
       if (isFinal) return isTill ? graphemes[found - 1]!.start : graphemes[found]!.start;
       currentIndex = found;
     } else {
-      let nextIndex = currentIndex - 1 - tillRepeatOffset;
+      const nextIndex = currentIndex - 1 - tillRepeatOffset;
       let found = -1;
       for (let j = nextIndex; j >= 0; j--) {
         const g = graphemes[j]!;

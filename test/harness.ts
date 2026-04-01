@@ -4,21 +4,36 @@
 
 import { ModalEditor } from "../index.js";
 
+type StubTui = {
+  requestRender(): void;
+  terminal: { rows: number; cols: number };
+};
+
+type StubTheme = {
+  borderColor(s: string): string;
+  fg(_k: string, s: string): string;
+  bold(s: string): string;
+};
+
+type StubKeybindings = {
+  matches(): boolean;
+};
+
 // Minimal pi-tui stub types — avoids importing the full extension runtime.
-export const stubTui = {
+export const stubTui: StubTui = {
   requestRender() {},
   terminal: { rows: 40, cols: 120 },
-} as unknown as import("@mariozechner/pi-tui").Tui;
+};
 
-export const stubTheme = {
+export const stubTheme: StubTheme = {
   borderColor: (s: string) => s,
   fg: (_k: string, s: string) => s,
   bold: (s: string) => s,
-} as unknown as import("@mariozechner/pi-tui").Theme;
+};
 
-export const stubKeybindings = {
+export const stubKeybindings: StubKeybindings = {
   matches: () => false,
-} as unknown as import("@mariozechner/pi-tui").Keybindings;
+};
 
 /**
  * Send an array of key events to the editor.

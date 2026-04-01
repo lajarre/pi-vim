@@ -306,6 +306,30 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.deepEqual(clipboardWrites, ["foo "]);
   });
 
+  it("dw swallows async clipboard failures", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    const rejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+
+    editor.setClipboardFn(async () => {
+      throw new Error("clipboard boom");
+    });
+
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      sendKeys(editor, ["d", "w"]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    assert.equal(editor.getText(), "bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(rejections, []);
+  });
+
   it("de deletes to end of word (inclusive), updates register", () => {
     // "hello world" col 0: e→col 4 inclusive → delete "hello", leave " world"
     chk("hello world", ["d", "e"], " world", "hello");

@@ -140,8 +140,8 @@ export class ModalEditor extends CustomEditor {
 
   // Unnamed register
   private unnamedRegister: string = "";
-  private clipboardFn: (text: string) => void = (text: string) => {
-    try { copyToClipboard(text); } catch { /* best effort */ }
+  private clipboardFn: (text: string) => Promise<void> = async (text: string) => {
+    await copyToClipboard(text);
   };
 
   constructor(
@@ -155,7 +155,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   // Test seams
-  setClipboardFn(fn: (text: string) => void): void { this.clipboardFn = fn; }
+  setClipboardFn(fn: (text: string) => unknown): void {
+    this.clipboardFn = async (text: string) => {
+      await fn(text);
+    };
+  }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
   getMode(): Mode { return this.mode; }
@@ -181,7 +185,7 @@ export class ModalEditor extends CustomEditor {
     if (!state || !Array.isArray(state.lines)) {
       throw new Error("Redo restore prerequisite: editor state unavailable");
     }
-    return state;
+    return state as { lines: string[]; cursorLine?: number; cursorCol?: number };
   }
 
   private restoreSnapshot(snapshot: EditorSnapshot): void {
@@ -1315,7 +1319,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private moveCursorToFirstNonWhitespace(): void {
-    const { line, col } = this.getCurrentLineAndCol();
+    const { line } = this.getCurrentLineAndCol();
     const targetCol = findFirstNonWhitespaceColumn(line);
     this.moveCursorToCol(targetCol);
   }
@@ -1618,7 +1622,8 @@ export class ModalEditor extends CustomEditor {
   private writeToRegister(text: string): void {
     this.unnamedRegister = text;
     if (!text) return;
-    this.clipboardFn(text);
+
+    void this.clipboardFn(text).catch(() => {});
   }
 
   private getCurrentLineAndCol(): { line: string; col: number } {
@@ -2008,7 +2013,7 @@ export class ModalEditor extends CustomEditor {
     this.writeToRegister(line.slice(start, end));
   }
 
-  private yankRangeByAbsolute(currentAbs: number, targetAbs: number, inclusive: boolean): void {
+  private yankRangeByAbsolute(currentAbs: number, targetAbs: number, inclusive: boolean = false): void {
     const text = this.getText();
     const start = Math.min(currentAbs, targetAbs);
     const rawEnd = Math.max(currentAbs, targetAbs) + (inclusive ? 1 : 0);
