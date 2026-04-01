@@ -16,6 +16,7 @@ export default tseslint.config(
       "out.txt",
       "spec-review.md",
       "eslint.config.mjs",
+      ".tmp-*.mjs",
     ],
   },
   eslint.configs.recommended,
