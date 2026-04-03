@@ -55,6 +55,7 @@ import {
   type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
 import {
+  CURSOR_MARKER,
   Key,
   matchesKey,
   truncateToWidth,
@@ -137,6 +138,11 @@ export class ModalEditor extends CustomEditor {
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: { insert: (s: string) => string; normal: (s: string) => string } | null;
+  private cursorShapeEnabled: boolean;
+
+  // Matches the reverse-video cursor block the editor emits:
+  // \x1b[7m + content + \x1b[0m (or \x1b[27m)
+  private static readonly CURSOR_RE = /\x1b\[7m([^\x1b]*)\x1b\[(?:0|27)m/g;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -149,9 +155,33 @@ export class ModalEditor extends CustomEditor {
     theme: any,
     kb: any,
     labelColorizers?: { insert: (s: string) => string; normal: (s: string) => string } | null,
+    cursorShapeEnabled: boolean = true,
   ) {
     super(tui, theme, kb);
     this.labelColorizers = labelColorizers ?? null;
+    this.cursorShapeEnabled = cursorShapeEnabled;
+  }
+
+  /** Toggle cursor shape feature on/off */
+  toggleCursorShape(): void {
+    this.cursorShapeEnabled = !this.cursorShapeEnabled;
+    if (!this.cursorShapeEnabled) {
+      // Reset to default cursor when disabled
+      process.stdout.write("\x1b[0 q");
+    }
+    this.tui?.requestRender?.();
+  }
+
+  /** Get current cursor shape enabled status */
+  isCursorShapeEnabled(): boolean {
+    return this.cursorShapeEnabled;
+  }
+
+  private getCursorShapeSeq(): string {
+    // DECSCUSR: \x1b[N q where N is:
+    // 2 = block (normal mode), 6 = line/bar (insert mode)
+    if (!this.cursorShapeEnabled) return "";
+    return this.mode === "insert" ? "\x1b[6 q" : "\x1b[2 q";
   }
 
   // Test seams
@@ -2219,6 +2249,25 @@ export class ModalEditor extends CustomEditor {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
 
+    // If cursor shape is enabled, strip software cursor and emit cursor shape
+    if (this.cursorShapeEnabled) {
+      const cursorSeq = this.getCursorShapeSeq();
+      const stripped = lines.map((line) => line.replace(ModalEditor.CURSOR_RE, "$1"));
+      stripped[0] = cursorSeq + stripped[0];
+
+      const rawLabel = this.getModeLabel();
+      const colorize = this.labelColorizers
+        ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
+        : null;
+      const label = colorize ? colorize(rawLabel) : rawLabel;
+      const last = stripped.length - 1;
+      if (visibleWidth(stripped[last]!) >= visibleWidth(rawLabel)) {
+        stripped[last] = truncateToWidth(stripped[last]!, width - visibleWidth(rawLabel), "") + label;
+      }
+      return stripped;
+    }
+
+    // Default behavior: use software cursor
     const rawLabel = this.getModeLabel();
     const colorize = this.labelColorizers
       ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
@@ -2260,12 +2309,48 @@ export class ModalEditor extends CustomEditor {
 }
 
 export default function (pi: ExtensionAPI) {
+  let savedTui: { setShowHardwareCursor?: (show: boolean) => void } | undefined;
+  let modalEditor: ModalEditor | undefined;
+
+  // Check environment variable: PI_VIM_CURSOR_SHAPE=0 to disable, =1 or unset to enable
+  const cursorShapeEnabled = process.env.PI_VIM_CURSOR_SHAPE !== "0";
+
   pi.on("session_start", (_event, ctx) => {
     const t = ctx.ui.theme;
     const colorizers = t ? {
       insert: (s: string) => t.fg("borderMuted", `\x1b[7m${s}\x1b[27m`),
       normal: (s: string) => t.fg("borderAccent", `\x1b[7m${s}\x1b[27m`),
     } : null;
-    ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb, colorizers));
+    ctx.ui.setEditorComponent((tui, theme, kb) => {
+      savedTui = tui as typeof savedTui;
+      // Enable hardware cursor so DECSCUSR escape sequences work
+      if (cursorShapeEnabled) {
+        tui.setShowHardwareCursor?.(true);
+      }
+      modalEditor = new ModalEditor(tui, theme, kb, colorizers, cursorShapeEnabled);
+      return modalEditor;
+    });
+  });
+
+  // Register toggle command
+  pi.registerCommand("toggle-cursor", {
+    description: "Toggle vim cursor shape (block/line) on/off",
+    handler: async (_args, _ctx) => {
+      if (!modalEditor) {
+        _ctx.ui.notify("Modal editor not initialized", "error");
+        return;
+      }
+      modalEditor.toggleCursorShape();
+      const status = modalEditor.isCursorShapeEnabled() ? "enabled" : "disabled";
+      _ctx.ui.notify(`Cursor shape ${status}`, "info");
+    },
+  });
+
+  // Reset cursor and disable hardware cursor on session end
+  pi.on("session_end", () => {
+    process.stdout.write("\x1b[0 q");
+    savedTui?.setShowHardwareCursor?.(false);
+    savedTui = undefined;
+    modalEditor = undefined;
   });
 }
