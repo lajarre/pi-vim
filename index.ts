@@ -143,6 +143,7 @@ export class ModalEditor extends CustomEditor {
   private clipboardFn: (text: string) => Promise<void> = async (text: string) => {
     await copyToClipboard(text);
   };
+  private clipboardWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
     tui: any,
@@ -1619,11 +1620,18 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private enqueueClipboardWrite(text: string): void {
+    this.clipboardWriteQueue = this.clipboardWriteQueue
+      .catch((): void => {})
+      .then(() => this.clipboardFn(text))
+      .catch((): void => {});
+  }
+
   private writeToRegister(text: string): void {
     this.unnamedRegister = text;
     if (!text) return;
 
-    void this.clipboardFn(text).catch(() => {});
+    this.enqueueClipboardWrite(text);
   }
 
   private getCurrentLineAndCol(): { line: string; col: number } {

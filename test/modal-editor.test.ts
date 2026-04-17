@@ -300,9 +300,10 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     chk("hello world", ["d", "w"], "world", "hello ");
   });
 
-  it("dw clipboard receives deleted text", () => {
+  it("dw clipboard receives deleted text", async () => {
     const { editor, clipboardWrites } = createEditorWithSpy("foo bar");
     sendKeys(editor, ["d", "w"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual(clipboardWrites, ["foo "]);
   });
 
@@ -328,6 +329,79 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.equal(editor.getText(), "bar");
     assert.equal(editor.getRegister(), "foo ");
     assert.deepEqual(rejections, []);
+  });
+
+  it("serializes clipboard writes so later writes wait for earlier ones", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let callCount = 0;
+
+    editor.setClipboardFn(async (text) => {
+      callCount += 1;
+      events.push(`start:${text}`);
+      if (callCount === 1) {
+        await firstGate;
+      }
+      events.push(`end:${text}`);
+    });
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, ["start:foo "]);
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "bar ");
+
+    releaseFirst?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, [
+      "start:foo ",
+      "end:foo ",
+      "start:bar ",
+      "end:bar ",
+    ]);
+  });
+
+  it("continues queued clipboard writes after an async rejection", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    const events: string[] = [];
+    let rejectFirst: ((error: Error) => void) | undefined;
+    const firstGate = new Promise<void>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    let callCount = 0;
+
+    editor.setClipboardFn(async (text) => {
+      callCount += 1;
+      events.push(`start:${text}`);
+      if (callCount === 1) {
+        await firstGate;
+      }
+      events.push(`end:${text}`);
+    });
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, ["start:foo "]);
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "bar ");
+
+    rejectFirst?.(new Error("clipboard boom"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, [
+      "start:foo ",
+      "start:bar ",
+      "end:bar ",
+    ]);
   });
 
   it("de deletes to end of word (inclusive), updates register", () => {
@@ -1153,9 +1227,10 @@ describe("single-key edits — x / s / S / D / C", () => {
     assert.equal(editor.getMode(), "normal");
   });
 
-  it("x: register written correctly", () => {
+  it("x: register written correctly", async () => {
     const { editor, clipboardWrites } = createEditorWithSpy("hello");
     sendKeys(editor, ["x"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual(clipboardWrites, ["h"]);
   });
 
@@ -1498,21 +1573,23 @@ describe("Universal Counts: Change and Nav", () => {
 // ---------------------------------------------------------------------------
 
 describe("EOL and newline semantics", () => {
-  it("D at EOL captures '\\n' in register when next line exists", () => {
+  it("D at EOL captures '\\n' in register when next line exists", async () => {
     const { editor, clipboardWrites } = createMultiLineEditor("line1\nline2");
     // cursor at col 0 of line 0; go to EOL
     sendKeys(editor, ["$"]); // CTRL_E → col past last char (col 5 for "line1")
     sendKeys(editor, ["D"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(editor.getRegister(), "\n");
     assert.deepEqual(clipboardWrites, ["\n"]);
     // CTRL_K at EOL joins the two lines
     assert.equal(editor.getText(), "line1line2");
   });
 
-  it("d$ at EOL matches D behavior (captures newline and joins lines)", () => {
+  it("d$ at EOL matches D behavior (captures newline and joins lines)", async () => {
     const { editor, clipboardWrites } = createMultiLineEditor("line1\nline2");
     sendKeys(editor, ["$", "d", "$"]);
 
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(editor.getRegister(), "\n");
     assert.deepEqual(clipboardWrites, ["\n"]);
     assert.equal(editor.getText(), "line1line2");
@@ -2019,6 +2096,44 @@ describe("yank operator — yy / yw / ye / yb / y$ / y0", () => {
     sendKeys(editor, ["y", "w"]);
     assert.equal(editor.getRegister(), "hello ");
     assert.equal(editor.getText(), before);
+  });
+
+  it("serializes queued clipboard writes for yanks without changing buffer state", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let callCount = 0;
+
+    editor.setClipboardFn(async (text) => {
+      callCount += 1;
+      events.push(`start:${text}`);
+      if (callCount === 1) {
+        await firstGate;
+      }
+      events.push(`end:${text}`);
+    });
+
+    const before = editor.getText();
+    sendKeys(editor, ["y", "w", "y", "w"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, ["start:foo "]);
+    assert.equal(editor.getText(), before);
+    assert.equal(editor.getRegister(), "foo ");
+
+    releaseFirst?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, [
+      "start:foo ",
+      "end:foo ",
+      "start:foo ",
+      "end:foo ",
+    ]);
   });
 
   it("ye: yanks to end of word (inclusive), no mutation", () => {
