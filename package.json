@@ -28,7 +28,7 @@
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
     "check": "npm run lint && npm run typecheck && npm run test",
     "pack:check": "node --import tsx/esm script/pack-check.ts",
-    "prepare": "node -e \"const { spawnSync } = require('node:child_process'); const r = spawnSync('lefthook', ['install'], { stdio: 'ignore' }); process.exit(r.status ?? (r.error ? 1 : 0));\"",
+    "hooks:install": "lefthook install",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run pack:check && npm test"
   },
   "pi": {

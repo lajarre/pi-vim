@@ -14,6 +14,21 @@ pi install npm:pi-vim
 
 Restart Pi after install.
 
+## contributor setup
+
+Git hooks are contributor-only setup, not part of package install.
+After cloning the repo:
+
+```bash
+npm install
+```
+
+If you need to wire hooks explicitly, run:
+
+```bash
+npm run hooks:install
+```
+
 ## stats
 
 - **112 commands**: motions, operators, counts, text objects, undo/redo
