@@ -404,6 +404,38 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     ]);
   });
 
+  it("continues queued clipboard writes after a timeout", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    const events: string[] = [];
+    let callCount = 0;
+
+    editor.setClipboardWriteTimeoutMs(50);
+    editor.setClipboardFn(async (text) => {
+      callCount += 1;
+      events.push(`start:${text}`);
+      if (callCount === 1) {
+        await new Promise<void>(() => {});
+      }
+      events.push(`end:${text}`);
+    });
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, ["start:foo "]);
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "bar ");
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 60));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(events, [
+      "start:foo ",
+      "start:bar ",
+      "end:bar ",
+    ]);
+  });
+
   it("de deletes to end of word (inclusive), updates register", () => {
     // "hello world" col 0: e→col 4 inclusive → delete "hello", leave " world"
     chk("hello world", ["d", "e"], " world", "hello");

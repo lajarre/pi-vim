@@ -100,6 +100,7 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
+const CLIPBOARD_WRITE_TIMEOUT_MS = 5000;
 
 type EditorSnapshot = {
   text: string;
@@ -144,6 +145,7 @@ export class ModalEditor extends CustomEditor {
     await copyToClipboard(text);
   };
   private clipboardWriteQueue: Promise<void> = Promise.resolve();
+  private clipboardWriteTimeoutMs = CLIPBOARD_WRITE_TIMEOUT_MS;
 
   constructor(
     tui: any,
@@ -160,6 +162,9 @@ export class ModalEditor extends CustomEditor {
     this.clipboardFn = async (text: string) => {
       await fn(text);
     };
+  }
+  setClipboardWriteTimeoutMs(timeoutMs: number): void {
+    this.clipboardWriteTimeoutMs = Math.max(0, timeoutMs);
   }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
@@ -1620,10 +1625,23 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private writeClipboardWithTimeout(text: string): Promise<void> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error("clipboard write timed out"));
+      }, this.clipboardWriteTimeoutMs);
+    });
+
+    return Promise.race([this.clipboardFn(text), timeout]).finally(() => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    });
+  }
+
   private enqueueClipboardWrite(text: string): void {
     this.clipboardWriteQueue = this.clipboardWriteQueue
       .catch((): void => {})
-      .then(() => this.clipboardFn(text))
+      .then(() => this.writeClipboardWithTimeout(text))
       .catch((): void => {});
   }
 
