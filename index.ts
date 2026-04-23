@@ -123,12 +123,18 @@ type ModalEditorInternals = {
 
 type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 
-const CLIPBOARD_HELPER_SOURCE = String.raw`
-import { copyToClipboard } from "@mariozechner/pi-coding-agent";
+const CLIPBOARD_HELPER_MODULE_URL = import.meta.resolve("@mariozechner/pi-coding-agent");
+
+const CLIPBOARD_HELPER_SOURCE = `
+import { copyToClipboard } from ${JSON.stringify(CLIPBOARD_HELPER_MODULE_URL)};
 
 const chunks = [];
 for await (const chunk of process.stdin) {
   chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+}
+
+if (process.env.PI_VIM_CLIPBOARD_SKIP_WRITE === "1") {
+  process.exit(0);
 }
 
 try {
@@ -225,14 +231,23 @@ function runClipboardHelperProcess(
     });
 
     child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "EPIPE") {
-        finish();
+      if (signal.aborted) {
+        finish(getAbortError(signal));
         return;
       }
+
+      if (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED") {
+        return;
+      }
+
       finish(error);
     });
 
-    child.stdin.end(text);
+    try {
+      child.stdin.end(text);
+    } catch (error) {
+      finish(error);
+    }
   });
 }
 
