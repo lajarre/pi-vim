@@ -49,8 +49,9 @@
  *   (home-manager/modules/share/ai/pi/.pi/agent/extensions/vim-mode)
  */
 
+import { spawn } from "node:child_process";
+
 import {
-  copyToClipboard,
   CustomEditor,
   type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
@@ -120,6 +121,121 @@ type ModalEditorInternals = {
   setCursorCol?: (col: number) => void;
 };
 
+type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
+
+const CLIPBOARD_HELPER_SOURCE = String.raw`
+import { copyToClipboard } from "@mariozechner/pi-coding-agent";
+
+const chunks = [];
+for await (const chunk of process.stdin) {
+  chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+}
+
+try {
+  await copyToClipboard(Buffer.concat(chunks).toString("utf8"));
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
+}
+`;
+
+function createClipboardTimeoutError(): Error {
+  const error = new Error("clipboard write timed out");
+  error.name = "AbortError";
+  return error;
+}
+
+function getAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : createClipboardTimeoutError();
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw getAbortError(signal);
+}
+
+function killClipboardHelperProcess(child: ReturnType<typeof spawn>): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  try {
+    if (process.platform !== "win32" && typeof child.pid === "number") {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    }
+  } catch {
+    // Fall through to direct child kill.
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Best effort only.
+  }
+}
+
+function runClipboardHelperProcess(
+  text: string,
+  signal: AbortSignal,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    throwIfAborted(signal);
+
+    let settled = false;
+    const finish = (error?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
+      detached: process.platform !== "win32",
+      env,
+      stdio: ["pipe", "inherit", "ignore"],
+      windowsHide: true,
+    });
+
+    const onAbort = (): void => {
+      killClipboardHelperProcess(child);
+      finish(getAbortError(signal));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    child.once("error", (error) => {
+      finish(error);
+    });
+
+    child.once("close", (code) => {
+      if (signal.aborted) {
+        finish(getAbortError(signal));
+        return;
+      }
+
+      if (code === 0) {
+        finish();
+        return;
+      }
+
+      finish(new Error(`clipboard helper failed with exit code ${code ?? "null"}`));
+    });
+
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EPIPE") {
+        finish();
+        return;
+      }
+      finish(error);
+    });
+
+    child.stdin.end(text);
+  });
+}
+
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
@@ -141,8 +257,9 @@ export class ModalEditor extends CustomEditor {
 
   // Unnamed register
   private unnamedRegister: string = "";
-  private clipboardFn: (text: string) => Promise<void> = async (text: string) => {
-    await copyToClipboard(text);
+  private clipboardProcessEnv: NodeJS.ProcessEnv = process.env;
+  private clipboardFn: ClipboardWriteFn = async (text: string, signal: AbortSignal) => {
+    await runClipboardHelperProcess(text, signal, this.clipboardProcessEnv);
   };
   private clipboardWriteQueue: Promise<void> = Promise.resolve();
   private clipboardWriteTimeoutMs = CLIPBOARD_WRITE_TIMEOUT_MS;
@@ -158,13 +275,16 @@ export class ModalEditor extends CustomEditor {
   }
 
   // Test seams
-  setClipboardFn(fn: (text: string) => unknown): void {
-    this.clipboardFn = async (text: string) => {
-      await fn(text);
+  setClipboardFn(fn: (text: string, signal?: AbortSignal) => unknown): void {
+    this.clipboardFn = async (text: string, signal: AbortSignal) => {
+      await fn(text, signal);
     };
   }
   setClipboardWriteTimeoutMs(timeoutMs: number): void {
     this.clipboardWriteTimeoutMs = Math.max(0, timeoutMs);
+  }
+  setClipboardProcessEnv(env: NodeJS.ProcessEnv): void {
+    this.clipboardProcessEnv = env;
   }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
@@ -1626,14 +1746,18 @@ export class ModalEditor extends CustomEditor {
   }
 
   private writeClipboardWithTimeout(text: string): Promise<void> {
+    const controller = new AbortController();
+    const timeoutError = createClipboardTimeoutError();
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
       timeoutId = setTimeout(() => {
-        reject(new Error("clipboard write timed out"));
+        controller.abort(timeoutError);
+        reject(timeoutError);
       }, this.clipboardWriteTimeoutMs);
     });
+    const write = this.clipboardFn(text, controller.signal);
 
-    return Promise.race([this.clipboardFn(text), timeout]).finally(() => {
+    return Promise.race([write, timeout]).finally(() => {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     });
   }

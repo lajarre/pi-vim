@@ -6,6 +6,9 @@
  * blocks where state inspection requires nuance.
  */
 
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ModalEditor } from "../index.js";
@@ -434,6 +437,150 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
       "start:bar ",
       "end:bar ",
     ]);
+  });
+
+  it("aborts a timed-out mirror before newer clipboard text lands", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    const events: string[] = [];
+    let callCount = 0;
+    let mirroredText = "";
+
+    editor.setClipboardWriteTimeoutMs(20);
+    editor.setClipboardFn((text, signal) => new Promise<void>((resolve, reject) => {
+      callCount += 1;
+      events.push(`start:${text}`);
+
+      const timer = setTimeout(() => {
+        mirroredText = text;
+        events.push(`end:${text}`);
+        resolve();
+      }, callCount === 1 ? 60 : 0);
+
+      signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        events.push(`abort:${text}`);
+        reject(signal.reason ?? new Error("clipboard aborted"));
+      }, { once: true });
+    }));
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "bar ");
+    assert.equal(mirroredText, "bar ");
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(mirroredText, "bar ");
+    assert.deepEqual(events, [
+      "start:foo ",
+      "abort:foo ",
+      "start:bar ",
+      "end:bar ",
+    ]);
+  });
+
+  it("kills the real clipboard backend before a stale overwrite can land", async () => {
+    if (process.platform === "win32") return;
+
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    for (const char of "foo bar baz") {
+      editor.handleInput(char);
+    }
+    editor.handleInput("\x1b");
+    editor.handleInput("0");
+
+    const testEditor = editor as ModalEditor & {
+      setClipboardProcessEnv?: (env: NodeJS.ProcessEnv) => void;
+    };
+    const binDir = await mkdtemp(join(tmpdir(), "pi-vim-clipboard-"));
+    const clipboardFile = join(binDir, "clipboard.txt");
+    const helperEnv = { ...process.env };
+    const originalEnv = {
+      PATH: process.env.PATH,
+      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+      XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
+      TERMUX_VERSION: process.env.TERMUX_VERSION,
+    };
+    const commandName = process.platform === "darwin" ? "pbcopy" : "xclip";
+    const backendScript = `#!/bin/sh
+text="$(cat)"
+if [ "$text" = "foo " ]; then
+  (
+    sleep 3.5
+    printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+  ) &
+  sleep 3600
+  exit 0
+fi
+printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+`;
+
+    await writeFile(join(binDir, commandName), backendScript);
+    await chmod(join(binDir, commandName), 0o755);
+    await writeFile(clipboardFile, "");
+
+    helperEnv.PATH = `${binDir}:${helperEnv.PATH ?? ""}`;
+    helperEnv.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
+    delete helperEnv.WAYLAND_DISPLAY;
+    helperEnv.XDG_SESSION_TYPE = "x11";
+    delete helperEnv.TERMUX_VERSION;
+
+    if (typeof testEditor.setClipboardProcessEnv === "function") {
+      testEditor.setClipboardProcessEnv(helperEnv);
+    } else {
+      process.env.PATH = helperEnv.PATH;
+      process.env.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
+      delete process.env.WAYLAND_DISPLAY;
+      process.env.XDG_SESSION_TYPE = "x11";
+      delete process.env.TERMUX_VERSION;
+    }
+
+    editor.setClipboardWriteTimeoutMs(1500);
+
+    try {
+      sendKeys(editor, ["d", "w", "d", "w"]);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 2600));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      assert.equal(editor.getText(), "baz");
+      assert.equal(editor.getRegister(), "bar ");
+      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
+    } finally {
+      if (typeof testEditor.setClipboardProcessEnv !== "function") {
+        if (originalEnv.PATH === undefined) {
+          delete process.env.PATH;
+        } else {
+          process.env.PATH = originalEnv.PATH;
+        }
+        if (originalEnv.WAYLAND_DISPLAY === undefined) {
+          delete process.env.WAYLAND_DISPLAY;
+        } else {
+          process.env.WAYLAND_DISPLAY = originalEnv.WAYLAND_DISPLAY;
+        }
+        if (originalEnv.XDG_SESSION_TYPE === undefined) {
+          delete process.env.XDG_SESSION_TYPE;
+        } else {
+          process.env.XDG_SESSION_TYPE = originalEnv.XDG_SESSION_TYPE;
+        }
+        if (originalEnv.TERMUX_VERSION === undefined) {
+          delete process.env.TERMUX_VERSION;
+        } else {
+          process.env.TERMUX_VERSION = originalEnv.TERMUX_VERSION;
+        }
+        delete process.env.PI_VIM_CLIPBOARD_TEST_FILE;
+      }
+    }
   });
 
   it("de deletes to end of word (inclusive), updates register", () => {
