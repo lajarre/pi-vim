@@ -502,6 +502,7 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     const helperEnv = { ...process.env };
     const originalEnv = {
       PATH: process.env.PATH,
+      PI_VIM_CLIPBOARD_SKIP_NATIVE: process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE,
       WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
       XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
       TERMUX_VERSION: process.env.TERMUX_VERSION,
@@ -525,6 +526,7 @@ printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
     await writeFile(clipboardFile, "");
 
     helperEnv.PATH = `${binDir}:${helperEnv.PATH ?? ""}`;
+    helperEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE = "1";
     helperEnv.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
     delete helperEnv.WAYLAND_DISPLAY;
     helperEnv.XDG_SESSION_TYPE = "x11";
@@ -534,6 +536,7 @@ printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
       testEditor.setClipboardProcessEnv(helperEnv);
     } else {
       process.env.PATH = helperEnv.PATH;
+      process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = "1";
       process.env.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
       delete process.env.WAYLAND_DISPLAY;
       process.env.XDG_SESSION_TYPE = "x11";
@@ -563,6 +566,11 @@ printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
         } else {
           process.env.PATH = originalEnv.PATH;
         }
+        if (originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE === undefined) {
+          delete process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE;
+        } else {
+          process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE;
+        }
         if (originalEnv.WAYLAND_DISPLAY === undefined) {
           delete process.env.WAYLAND_DISPLAY;
         } else {
@@ -579,6 +587,137 @@ printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
           process.env.TERMUX_VERSION = originalEnv.TERMUX_VERSION;
         }
         delete process.env.PI_VIM_CLIPBOARD_TEST_FILE;
+      }
+    }
+  });
+
+  it("kills the real Wayland clipboard backend before a stale overwrite can land", async () => {
+    if (process.platform !== "linux") return;
+
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    for (const char of "foo bar baz") {
+      editor.handleInput(char);
+    }
+    editor.handleInput("\x1b");
+    editor.handleInput("0");
+
+    const testEditor = editor as ModalEditor & {
+      setClipboardProcessEnv?: (env: NodeJS.ProcessEnv) => void;
+    };
+    const binDir = await mkdtemp(join(tmpdir(), "pi-vim-wayland-clipboard-"));
+    const clipboardFile = join(binDir, "clipboard.txt");
+    const helperEnv = { ...process.env };
+    const originalEnv = {
+      DISPLAY: process.env.DISPLAY,
+      PATH: process.env.PATH,
+      PI_VIM_CLIPBOARD_SKIP_NATIVE: process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE,
+      PI_VIM_CLIPBOARD_TEST_FILE: process.env.PI_VIM_CLIPBOARD_TEST_FILE,
+      TERMUX_VERSION: process.env.TERMUX_VERSION,
+      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+      XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
+    };
+    const backendScript = `#!/bin/sh
+text="$(cat)"
+if [ "$1" != "--foreground" ]; then
+  if [ "$text" = "foo " ]; then
+    (
+      sleep 0.25
+      printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+    ) &
+  else
+    printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+  fi
+  exit 0
+fi
+if [ "$text" = "foo " ]; then
+  (
+    sleep 0.25
+    printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+  ) &
+  sleep 5
+  exit 0
+fi
+printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
+sleep 0.5
+`;
+
+    await writeFile(join(binDir, "wl-copy"), backendScript);
+    await chmod(join(binDir, "wl-copy"), 0o755);
+    await writeFile(clipboardFile, "");
+
+    helperEnv.DISPLAY = "";
+    helperEnv.PATH = `${binDir}:${helperEnv.PATH ?? ""}`;
+    helperEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE = "1";
+    helperEnv.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
+    helperEnv.WAYLAND_DISPLAY = "wayland-0";
+    helperEnv.XDG_SESSION_TYPE = "wayland";
+    delete helperEnv.TERMUX_VERSION;
+
+    if (typeof testEditor.setClipboardProcessEnv === "function") {
+      testEditor.setClipboardProcessEnv(helperEnv);
+    } else {
+      process.env.DISPLAY = helperEnv.DISPLAY;
+      process.env.PATH = helperEnv.PATH;
+      process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = "1";
+      process.env.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
+      delete process.env.TERMUX_VERSION;
+      process.env.WAYLAND_DISPLAY = helperEnv.WAYLAND_DISPLAY;
+      process.env.XDG_SESSION_TYPE = helperEnv.XDG_SESSION_TYPE;
+    }
+
+    editor.setClipboardWriteTimeoutMs(1500);
+
+    try {
+      sendKeys(editor, ["d", "w", "d", "w"]);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      assert.equal(editor.getText(), "baz");
+      assert.equal(editor.getRegister(), "bar ");
+      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
+    } finally {
+      if (typeof testEditor.setClipboardProcessEnv !== "function") {
+        if (originalEnv.DISPLAY === undefined) {
+          delete process.env.DISPLAY;
+        } else {
+          process.env.DISPLAY = originalEnv.DISPLAY;
+        }
+        if (originalEnv.PATH === undefined) {
+          delete process.env.PATH;
+        } else {
+          process.env.PATH = originalEnv.PATH;
+        }
+        if (originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE === undefined) {
+          delete process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE;
+        } else {
+          process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE;
+        }
+        if (originalEnv.PI_VIM_CLIPBOARD_TEST_FILE === undefined) {
+          delete process.env.PI_VIM_CLIPBOARD_TEST_FILE;
+        } else {
+          process.env.PI_VIM_CLIPBOARD_TEST_FILE = originalEnv.PI_VIM_CLIPBOARD_TEST_FILE;
+        }
+        if (originalEnv.TERMUX_VERSION === undefined) {
+          delete process.env.TERMUX_VERSION;
+        } else {
+          process.env.TERMUX_VERSION = originalEnv.TERMUX_VERSION;
+        }
+        if (originalEnv.WAYLAND_DISPLAY === undefined) {
+          delete process.env.WAYLAND_DISPLAY;
+        } else {
+          process.env.WAYLAND_DISPLAY = originalEnv.WAYLAND_DISPLAY;
+        }
+        if (originalEnv.XDG_SESSION_TYPE === undefined) {
+          delete process.env.XDG_SESSION_TYPE;
+        } else {
+          process.env.XDG_SESSION_TYPE = originalEnv.XDG_SESSION_TYPE;
+        }
       }
     }
   });
