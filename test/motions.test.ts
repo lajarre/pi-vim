@@ -27,6 +27,7 @@ function makeGeneratedLineFixtures(count: number): string[] {
   const punct = ["-", "--", "::", ".", ",", "!?", "#"];
   const spaces = [" ", "  ", "   ", "\t"];
   const fixtures = ["", "   ", "---", "a", "a   b", "foo--bar"];
+  const pick = (values: readonly string[]): string => values[next() % values.length] ?? "";
 
   for (let i = 0; i < count; i++) {
     const parts: string[] = [];
@@ -35,11 +36,11 @@ function makeGeneratedLineFixtures(count: number): string[] {
     for (let part = 0; part < partCount; part++) {
       const bucket = next() % 5;
       if (bucket <= 1) {
-        parts.push(words[next() % words.length]!);
+        parts.push(pick(words));
       } else if (bucket === 2) {
-        parts.push(punct[next() % punct.length]!);
+        parts.push(pick(punct));
       } else {
-        parts.push(spaces[next() % spaces.length]!);
+        parts.push(pick(spaces));
       }
     }
 
