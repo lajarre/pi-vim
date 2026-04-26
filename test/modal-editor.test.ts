@@ -8,6 +8,8 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { WordMotionClass } from "../motions.js";
+import type { WordMotionDirection, WordMotionTarget } from "../word-boundary-cache.js";
 import { ModalEditor } from "../index.js";
 import {
   createEditorWithSpy,
@@ -21,6 +23,42 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+type ModalEditorWordBoundaryCacheInternals = {
+  tryFindTarget(
+    line: string,
+    col: number,
+    direction: WordMotionDirection,
+    target: WordMotionTarget,
+    semanticClass?: WordMotionClass,
+  ): number | null;
+};
+
+type ModalEditorTestInternals = {
+  tryFindWordTargetLineLocal?: (
+    direction: WordMotionDirection,
+    target: WordMotionTarget,
+    semanticClass?: WordMotionClass,
+  ) => number | null;
+  findWordTargetInText(
+    text: string,
+    abs: number,
+    direction: "forward" | "backward",
+    target: "start" | "end",
+    count?: number,
+    semanticClass?: WordMotionClass,
+  ): number;
+  wordBoundaryCache: ModalEditorWordBoundaryCacheInternals;
+  state?: unknown;
+  pushUndoSnapshot?: (() => void) | undefined;
+};
+
+type FindWordTargetInTextArgs = Parameters<ModalEditorTestInternals["findWordTargetInText"]>;
+type TryFindTargetArgs = Parameters<ModalEditorWordBoundaryCacheInternals["tryFindTarget"]>;
+
+function getRawEditor(editor: ModalEditor): ModalEditorTestInternals {
+  return editor as unknown as ModalEditorTestInternals;
+}
 
 /** Run keys on a fresh single-line editor and check text + optional register. */
 function chk(
@@ -99,6 +137,7 @@ function makeGeneratedLineFixtures(count: number): string[] {
   const punct = ["-", "--", "::", ".", ",", "!?", "#"];
   const spaces = [" ", "  ", "   ", "\t"];
   const fixtures = ["", "   ", "---", "a", "a   b", "foo--bar"];
+  const pick = (values: readonly string[]): string => values[next() % values.length] ?? "";
 
   for (let i = 0; i < count; i++) {
     const parts: string[] = [];
@@ -107,11 +146,11 @@ function makeGeneratedLineFixtures(count: number): string[] {
     for (let part = 0; part < partCount; part++) {
       const bucket = next() % 5;
       if (bucket <= 1) {
-        parts.push(words[next() % words.length]!);
+        parts.push(pick(words));
       } else if (bucket === 2) {
-        parts.push(punct[next() % punct.length]!);
+        parts.push(pick(punct));
       } else {
-        parts.push(spaces[next() % spaces.length]!);
+        parts.push(pick(spaces));
       }
     }
 
@@ -137,7 +176,7 @@ function runScenario(
     : createEditorWithSpy(initial);
 
   if (mode === "canonical") {
-    (editor as any).tryFindWordTargetLineLocal = () => null;
+    getRawEditor(editor).tryFindWordTargetLineLocal = () => null;
   }
 
   sendKeys(editor, keys);
@@ -1554,11 +1593,11 @@ describe("word motion path selection", () => {
   it("line-local w avoids canonical absolute scanner", () => {
     const { editor } = createEditorWithSpy("alpha beta");
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1570,11 +1609,11 @@ describe("word motion path selection", () => {
   it("line-local e avoids canonical absolute scanner", () => {
     const { editor } = createEditorWithSpy("alpha beta");
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1587,11 +1626,11 @@ describe("word motion path selection", () => {
     const { editor } = createEditorWithSpy("alpha beta");
     sendKeys(editor, ["w"]);
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1609,11 +1648,11 @@ describe("word motion path selection", () => {
 
     for (const scenario of scenarios) {
       const { editor } = createEditorWithSpy("foo-bar baz");
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const original = raw.wordBoundaryCache.tryFindTarget.bind(raw.wordBoundaryCache);
       let seenSemanticClass: string | null = null;
 
-      raw.wordBoundaryCache.tryFindTarget = (...args: unknown[]) => {
+      raw.wordBoundaryCache.tryFindTarget = (...args: TryFindTargetArgs) => {
         seenSemanticClass = String(args[4] ?? "");
         return original(...args);
       };
@@ -1629,11 +1668,11 @@ describe("word motion path selection", () => {
   it("cache uncertainty falls back to canonical absolute scanner", () => {
     const { editor } = createEditorWithSpy("alpha beta");
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1648,11 +1687,11 @@ describe("word motion path selection", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
     sendKeys(editor, ["$"]);
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1665,11 +1704,11 @@ describe("word motion path selection", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
     sendKeys(editor, ["$"]);
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1682,11 +1721,11 @@ describe("word motion path selection", () => {
     const { editor } = createMultiLineEditor("foo\nbar");
     sendKeys(editor, ["j", "0"]);
 
-    const raw = editor as any;
+    const raw = getRawEditor(editor);
     const original = raw.findWordTargetInText.bind(raw);
     let calls = 0;
 
-    raw.findWordTargetInText = (...args: unknown[]) => {
+    raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
       calls++;
       return original(...args);
     };
@@ -1704,11 +1743,11 @@ describe("word motion path selection", () => {
 
     for (const scenario of scenarios) {
       const { editor } = createMultiLineEditor(scenario.initial);
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const original = raw.findWordTargetInText.bind(raw);
       let calls = 0;
 
-      raw.findWordTargetInText = (...args: unknown[]) => {
+      raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
         calls++;
         return original(...args);
       };
@@ -1748,11 +1787,11 @@ describe("operator word-motion path selection", () => {
 
     for (const scenario of scenarios) {
       const { editor } = createEditorWithSpy(scenario.initial);
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const original = raw.findWordTargetInText.bind(raw);
       let calls = 0;
 
-      raw.findWordTargetInText = (...args: unknown[]) => {
+      raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
         calls++;
         return original(...args);
       };
@@ -1783,11 +1822,11 @@ describe("operator word-motion path selection", () => {
 
     for (const scenario of scenarios) {
       const { editor } = createMultiLineEditor(scenario.initial);
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const original = raw.findWordTargetInText.bind(raw);
       let calls = 0;
 
-      raw.findWordTargetInText = (...args: unknown[]) => {
+      raw.findWordTargetInText = (...args: FindWordTargetInTextArgs) => {
         calls++;
         return original(...args);
       };
@@ -2772,7 +2811,7 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["x", "u"]);
       assert.equal(editor.getText(), "abcd");
 
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const savedState = raw.state;
       raw.state = undefined;
 
@@ -2797,7 +2836,7 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["u", "u"]); // "abcd"
       assert.equal(editor.getText(), "abcd");
 
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const originalPushUndoSnapshot = raw.pushUndoSnapshot;
       let pushCalls = 0;
       let suspendedState = raw.state;
@@ -2832,7 +2871,7 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["x", "u"]);
       assert.equal(editor.getText(), "abcd");
 
-      const raw = editor as any;
+      const raw = getRawEditor(editor);
       const saved = raw.pushUndoSnapshot;
       raw.pushUndoSnapshot = undefined;
 

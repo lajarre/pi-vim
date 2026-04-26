@@ -175,7 +175,8 @@ export function findCharMotionTarget(
       const nextIndex = currentIndex + 1 + tillRepeatOffset;
       let found = -1;
       for (let j = nextIndex; j < graphemes.length; j++) {
-        const g = graphemes[j]!;
+        const g = graphemes[j];
+        if (!g) continue;
         // Use startsWith to allow matching base chars if targetChar lacks combining marks,
         // or just exact match since targetChar is typically a full grapheme.
         if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
@@ -184,13 +185,20 @@ export function findCharMotionTarget(
         }
       }
       if (found === -1) return null;
-      if (isFinal) return isTill ? graphemes[found - 1]!.start : graphemes[found]!.start;
+      if (isFinal) {
+        const targetGrapheme = graphemes[found];
+        if (!targetGrapheme) return null;
+        if (!isTill) return targetGrapheme.start;
+        const previousGrapheme = graphemes[found - 1];
+        return previousGrapheme ? previousGrapheme.start : null;
+      }
       currentIndex = found;
     } else {
       const nextIndex = currentIndex - 1 - tillRepeatOffset;
       let found = -1;
       for (let j = nextIndex; j >= 0; j--) {
-        const g = graphemes[j]!;
+        const g = graphemes[j];
+        if (!g) continue;
         if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
           found = j;
           break;
@@ -198,7 +206,9 @@ export function findCharMotionTarget(
       }
       if (found === -1) return null;
       if (isFinal) {
-        if (!isTill) return graphemes[found]!.start;
+        const targetGrapheme = graphemes[found];
+        if (!targetGrapheme) return null;
+        if (!isTill) return targetGrapheme.start;
         const afterTarget = graphemes[found + 1];
         return afterTarget ? afterTarget.start : line.length;
       }

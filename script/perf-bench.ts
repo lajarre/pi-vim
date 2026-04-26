@@ -5,20 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { ModalEditor } from "../index.js";
 
-type StubTui = {
-  requestRender(): void;
-  terminal: { rows: number; cols: number };
-};
-
-type StubTheme = {
-  borderColor(s: string): string;
-  fg(_k: string, s: string): string;
-  bold(s: string): string;
-};
-
-type StubKeybindings = {
-  matches(): boolean;
-};
+type ModalEditorConstructorArgs = ConstructorParameters<typeof ModalEditor>;
 
 type Stats = {
   min: number;
@@ -35,25 +22,25 @@ type SampledMetric = {
 
 const repoRoot = process.cwd();
 
-const stubTui: StubTui = {
+const stubTui = {
   requestRender() {},
   terminal: { rows: 40, cols: 120 },
-};
+} as unknown as ModalEditorConstructorArgs[0];
 
-const stubTheme: StubTheme = {
+const stubTheme = {
   borderColor: (s: string) => s,
   fg: (_k: string, s: string) => s,
   bold: (s: string) => s,
-};
+} as unknown as ModalEditorConstructorArgs[1];
 
-const stubKeybindings: StubKeybindings = {
+const stubKeybindings = {
   matches: () => false,
-};
+} as unknown as ModalEditorConstructorArgs[2];
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
-  return sorted[idx]!;
+  return sorted[idx] ?? 0;
 }
 
 function toStats(samples: number[]): Stats {

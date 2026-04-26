@@ -19,13 +19,13 @@
     "rules": {
       "recommended": true,
       "correctness": {
-        "noVoidTypeReturn": "off"
+        "noVoidTypeReturn": "error"
       },
       "style": {
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "error"
       },
       "suspicious": {
-        "noExplicitAny": "off"
+        "noExplicitAny": "error"
       }
     }
   }

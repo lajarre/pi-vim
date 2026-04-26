@@ -53,7 +53,7 @@ function buildWordBoundaryData(
   }
 
   for (let runStart = 0; runStart < len;) {
-    const runType = charTypes[runStart]!;
+    const runType = charTypes[runStart] ?? CharType.Space;
     let runEnd = runStart;
     while (runEnd + 1 < len && charTypes[runEnd + 1] === runType) {
       runEnd++;
@@ -109,13 +109,13 @@ function findTargetInLine(
 
     if (target === "start") {
       if (data.charTypes[i] !== CharType.Space) {
-        i = data.runEndByIndex[i]! + 1;
+        i = (data.runEndByIndex[i] ?? i) + 1;
       }
 
       if (i >= len) return len;
 
       if (data.charTypes[i] === CharType.Space) {
-        const next = data.nextNonSpaceAtOrAfter[i]!;
+        const next = data.nextNonSpaceAtOrAfter[i] ?? -1;
         return next === -1 ? len : next;
       }
 
@@ -127,23 +127,23 @@ function findTargetInLine(
     if (i >= len) return len;
 
     if (data.charTypes[i] === CharType.Space) {
-      const next = data.nextNonSpaceAtOrAfter[i]!;
+      const next = data.nextNonSpaceAtOrAfter[i] ?? -1;
       if (next === -1) return len;
       i = next;
     }
 
-    return data.runEndByIndex[i]!;
+    return data.runEndByIndex[i] ?? i;
   }
 
   if (i >= len) i = len - 1;
   if (i > 0) i--;
 
   if (data.charTypes[i] === CharType.Space) {
-    const prev = data.prevNonSpaceAtOrBefore[i]!;
+    const prev = data.prevNonSpaceAtOrBefore[i] ?? -1;
     if (prev !== -1) i = prev;
   }
 
-  return data.runStartByIndex[i]!;
+  return data.runStartByIndex[i] ?? i;
 }
 
 const DEFAULT_MAX_CACHE_ENTRIES = 256;
