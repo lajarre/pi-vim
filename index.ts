@@ -49,8 +49,9 @@
  *   (home-manager/modules/share/ai/pi/.pi/agent/extensions/vim-mode)
  */
 
+import { spawn } from "node:child_process";
+
 import {
-  copyToClipboard,
   CustomEditor,
   type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
@@ -100,6 +101,7 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
+const CLIPBOARD_WRITE_TIMEOUT_MS = 5000;
 
 type EditorSnapshot = {
   text: string;
@@ -120,6 +122,188 @@ type ModalEditorInternals = {
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
+type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
+type ClipboardProcess = ReturnType<typeof spawn>;
+
+const PI_CODING_AGENT_MODULE_URL = import.meta.resolve("@mariozechner/pi-coding-agent");
+const CLIPBOARD_HELPER_SOURCE = `
+import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
+
+const chunks = [];
+for await (const chunk of process.stdin) {
+  chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+}
+
+await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
+`;
+
+function createClipboardAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function getAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : createClipboardAbortError("clipboard write aborted");
+}
+
+function killClipboardProcess(child: ClipboardProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Best effort only; clipboard mirroring must not affect editing.
+  }
+}
+
+function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(getAbortError(signal));
+      return;
+    }
+
+    let settled = false;
+    const finish = (error?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
+      stdio: ["pipe", "inherit", "ignore"],
+      windowsHide: true,
+    });
+
+    const onAbort = (): void => {
+      killClipboardProcess(child);
+      finish(getAbortError(signal));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    child.once("error", (error) => {
+      finish(error);
+    });
+
+    child.once("close", (code) => {
+      if (signal.aborted) {
+        finish(getAbortError(signal));
+        return;
+      }
+
+      if (code === 0) {
+        finish();
+        return;
+      }
+
+      finish(new Error(`clipboard helper failed with exit code ${code ?? "null"}`));
+    });
+
+    if (!child.stdin) {
+      finish(new Error("clipboard helper stdin unavailable"));
+      return;
+    }
+
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      if (signal.aborted) {
+        finish(getAbortError(signal));
+        return;
+      }
+
+      if (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED") {
+        return;
+      }
+
+      finish(error);
+    });
+
+    try {
+      child.stdin.end(text);
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+class ClipboardMirror {
+  private activeController: AbortController | null = null;
+  private draining = false;
+  private pendingText: string | null = null;
+
+  constructor(
+    private writeFn: ClipboardWriteFn,
+    private timeoutMs: number = CLIPBOARD_WRITE_TIMEOUT_MS,
+  ) {}
+
+  setWriteFn(writeFn: ClipboardWriteFn): void {
+    this.activeController?.abort(createClipboardAbortError("clipboard writer replaced"));
+    this.writeFn = writeFn;
+  }
+
+  setTimeoutMs(timeoutMs: number): void {
+    this.timeoutMs = Math.max(0, timeoutMs);
+  }
+
+  mirror(text: string): void {
+    this.pendingText = text;
+    this.activeController?.abort(createClipboardAbortError("clipboard write superseded"));
+
+    if (!this.draining) {
+      void this.drain();
+    }
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return;
+    this.draining = true;
+
+    try {
+      while (this.pendingText !== null) {
+        const text = this.pendingText;
+        this.pendingText = null;
+        const controller = new AbortController();
+        this.activeController = controller;
+
+        try {
+          await this.writeWithTimeout(text, controller);
+        } catch {
+          // Clipboard mirroring is best-effort; the register is authoritative.
+        } finally {
+          if (this.activeController === controller) {
+            this.activeController = null;
+          }
+        }
+      }
+    } finally {
+      this.draining = false;
+      if (this.pendingText !== null) {
+        void this.drain();
+      }
+    }
+  }
+
+  private async writeWithTimeout(text: string, controller: AbortController): Promise<void> {
+    const timeoutError = createClipboardAbortError("clipboard write timed out");
+    const timeoutId = setTimeout(() => {
+      controller.abort(timeoutError);
+    }, this.timeoutMs);
+
+    try {
+      await this.writeFn(text, controller.signal);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
@@ -142,9 +326,7 @@ export class ModalEditor extends CustomEditor {
 
   // Unnamed register
   private unnamedRegister: string = "";
-  private clipboardFn: (text: string) => Promise<void> = async (text: string) => {
-    await copyToClipboard(text);
-  };
+  private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -157,10 +339,13 @@ export class ModalEditor extends CustomEditor {
   }
 
   // Test seams
-  setClipboardFn(fn: (text: string) => unknown): void {
-    this.clipboardFn = async (text: string) => {
-      await fn(text);
-    };
+  setClipboardFn(fn: (text: string, signal?: AbortSignal) => unknown): void {
+    this.clipboardMirror.setWriteFn(async (text: string, signal: AbortSignal) => {
+      await fn(text, signal);
+    });
+  }
+  setClipboardWriteTimeoutMs(timeoutMs: number): void {
+    this.clipboardMirror.setTimeoutMs(timeoutMs);
   }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
@@ -1660,7 +1845,7 @@ export class ModalEditor extends CustomEditor {
     this.unnamedRegister = text;
     if (!text) return;
 
-    void this.clipboardFn(text).catch(() => {});
+    this.clipboardMirror.mirror(text);
   }
 
   private getCurrentLineAndCol(): { line: string; col: number } {

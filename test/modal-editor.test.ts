@@ -369,6 +369,40 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.deepEqual(rejections, []);
   });
 
+  it("coalesces clipboard mirrors to the latest register text", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    const events: string[] = [];
+
+    editor.setClipboardFn((text, signal) => new Promise<void>((resolve, reject) => {
+      events.push(`start:${text}`);
+
+      if (text === "foo ") {
+        signal?.addEventListener("abort", () => {
+          events.push(`abort:${text}`);
+          reject(signal.reason ?? new Error("clipboard aborted"));
+        }, { once: true });
+        return;
+      }
+
+      events.push(`end:${text}`);
+      resolve();
+    }));
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "bar ");
+    assert.deepEqual(events, [
+      "start:foo ",
+      "abort:foo ",
+      "start:bar ",
+      "end:bar ",
+    ]);
+  });
+
   it("de deletes to end of word (inclusive), updates register", () => {
     // "hello world" col 0: e→col 4 inclusive → delete "hello", leave " world"
     chk("hello world", ["d", "e"], " world", "hello");
