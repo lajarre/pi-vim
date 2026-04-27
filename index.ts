@@ -133,6 +133,12 @@ type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 type ClipboardReadFn = () => string | null;
 type ClipboardProcess = ReturnType<typeof spawn>;
 
+type ModeLabelColorizers = {
+  insert: (s: string) => string;
+  normal: (s: string) => string;
+  ex: (s: string) => string;
+};
+
 type ClipboardCircuitBreaker = {
   consecutiveEnvironmentFailures: number;
   disabled: boolean;
@@ -473,7 +479,7 @@ export class ModalEditor extends CustomEditor {
   private readonly redoStack: EditorSnapshot[] = [];
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
-  private readonly labelColorizers: { insert: (s: string) => string; normal: (s: string) => string } | null;
+  private readonly labelColorizers: ModeLabelColorizers | null;
 
   // Unnamed register
   private unnamedRegister: string = "";
@@ -486,7 +492,7 @@ export class ModalEditor extends CustomEditor {
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
     kb: CustomEditorConstructorArgs[2],
-    labelColorizers?: { insert: (s: string) => string; normal: (s: string) => string } | null,
+    labelColorizers?: ModeLabelColorizers | null,
   ) {
     super(tui, theme, kb);
     this.labelColorizers = labelColorizers ?? null;
@@ -922,7 +928,8 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (this.pendingExCommand !== null) {
-      return this.handlePendingExCommand(data);
+      this.handlePendingExCommand(data);
+      return;
     }
 
     if (this.pendingTextObject) {
@@ -1015,8 +1022,13 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    const newEnd = graphemes[graphemes.length - 2]!.end;
-    this.pendingExCommand = current.slice(0, newEnd);
+    const previousGrapheme = graphemes[graphemes.length - 2];
+    if (!previousGrapheme) {
+      this.clearPendingExCommand();
+      return;
+    }
+
+    this.pendingExCommand = current.slice(0, previousGrapheme.end);
   }
 
   private handlePendingExCommandControlChunk(data: string): boolean {
@@ -1052,8 +1064,8 @@ export class ModalEditor extends CustomEditor {
         continue;
       }
 
-      const codePoint = char.codePointAt(0)!;
-      if (codePoint < 32 || codePoint === 127) {
+      const codePoint = char.codePointAt(0);
+      if (codePoint === undefined || codePoint < 32 || codePoint === 127) {
         this.clearPendingExCommand();
         return true;
       }
@@ -1089,11 +1101,25 @@ export class ModalEditor extends CustomEditor {
     this.pendingExCommand += data;
   }
 
+  private hasNonEmptyPrompt(): boolean {
+    return this.getText().trim().length > 0;
+  }
+
   private submitPendingExCommand(): void {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
     this.clearPendingExCommand();
 
-    if (command === "q" || command === "q!" || command === "qa" || command === "qa!") {
+    if (command === "q" || command === "qa") {
+      if (this.hasNonEmptyPrompt()) {
+        this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
+        return;
+      }
+
+      this.quitFn();
+      return;
+    }
+
+    if (command === "q!" || command === "qa!") {
       this.quitFn();
       return;
     }
@@ -2832,7 +2858,9 @@ export class ModalEditor extends CustomEditor {
     let usedWidth = 0;
 
     for (let i = graphemes.length - 1; i >= 0; i--) {
-      const grapheme = graphemes[i]!;
+      const grapheme = graphemes[i];
+      if (!grapheme) continue;
+
       const segment = rawLabel.slice(grapheme.start, grapheme.end);
       const segmentWidth = visibleWidth(segment);
       if (usedWidth + segmentWidth > width) break;
@@ -2868,9 +2896,7 @@ export class ModalEditor extends CustomEditor {
     if (lines.length === 0) return lines;
 
     const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
-    const colorize = this.labelColorizers
-      ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
-      : null;
+    const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;
     const last = lines.length - 1;
     const lastLine = lines[last];
@@ -2880,6 +2906,12 @@ export class ModalEditor extends CustomEditor {
       lines[last] = label;
     }
     return lines;
+  }
+
+  private getModeLabelColorizer(): ((s: string) => string) | null {
+    if (!this.labelColorizers) return null;
+    if (this.pendingExCommand !== null) return this.labelColorizers.ex;
+    return this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal;
   }
 
   private getModeLabel(): string {
@@ -2914,9 +2946,11 @@ export class ModalEditor extends CustomEditor {
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     const t = ctx.ui.theme;
+    const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
     const colorizers = t ? {
-      insert: (s: string) => t.fg("borderMuted", `\x1b[7m${s}\x1b[27m`),
-      normal: (s: string) => t.fg("borderAccent", `\x1b[7m${s}\x1b[27m`),
+      insert: (s: string) => t.fg("borderMuted", reverseVideo(s)),
+      normal: (s: string) => t.fg("borderAccent", reverseVideo(s)),
+      ex: (s: string) => t.fg("warning", reverseVideo(s)),
     } : null;
     ctx.ui.setEditorComponent((tui, theme, kb) => {
       const editor = new ModalEditor(tui, theme, kb, colorizers);

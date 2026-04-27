@@ -514,33 +514,83 @@ describe("ex mini-mode", () => {
     assert.ok(footer.endsWith("_ "));
   });
 
-  it(":q requests quit", () => {
+  it("renders EX labels with the EX-specific colorizer", () => {
+    const calls: string[] = [];
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      insert: (s: string) => {
+        calls.push(`insert:${s}`);
+        return `\x1b[32m${s}\x1b[39m`;
+      },
+      normal: (s: string) => {
+        calls.push(`normal:${s}`);
+        return `\x1b[34m${s}\x1b[39m`;
+      },
+      ex: (s: string) => {
+        calls.push(`ex:${s}`);
+        return `\x1b[35m${s}\x1b[39m`;
+      },
+    });
+
+    editor.handleInput("\x1b");
+    sendKeys(editor, [":"]);
+
+    const footer = editor.render(80).at(-1) ?? "";
+
+    assert.deepEqual(calls, ["ex: EX :_ "]);
+    assert.ok(footer.includes(" EX :_ "));
+    assert.ok(footer.endsWith("\x1b[35m EX :_ \x1b[39m"));
+  });
+
+  it(":q refuses to quit when prompt has non-whitespace text", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "q", "\r"]);
 
-    assert.equal(session.quitCalls, 1);
+    assert.equal(session.quitCalls, 0);
     assert.equal(session.editor.getMode(), "normal");
     assert.equal(session.editor.getText(), "hello");
     assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
+    assert.deepEqual(session.notifications, ["Prompt is not empty; use :q! to quit anyway"]);
   });
 
-  it(":qa requests quit", () => {
+  it(":qa refuses to quit when prompt has non-whitespace text", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "q", "a", "\r"]);
 
-    assert.equal(session.quitCalls, 1);
+    assert.equal(session.quitCalls, 0);
     assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, ["Prompt is not empty; use :qa! to quit anyway"]);
   });
 
-  it(":qa! requests quit", () => {
+  it(":q requests quit when prompt is empty", () => {
+    const session = createEditorWithSpy("");
+
+    sendKeys(session.editor, [":", "q", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getText(), "");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it(":qa requests quit when prompt is whitespace-only", () => {
+    const session = createEditorWithSpy("   ");
+
+    sendKeys(session.editor, [":", "q", "a", "\r"]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.equal(session.editor.getText(), "   ");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it(":qa! requests quit when prompt has non-whitespace text", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "q", "a", "!", "\r"]);
 
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
   });
 
   it("escape cancels ex mini-mode", () => {
@@ -554,7 +604,7 @@ describe("ex mini-mode", () => {
   });
 
   it("backspace edits the pending ex command", () => {
-    const session = createEditorWithSpy("hello");
+    const session = createEditorWithSpy("");
 
     sendKeys(session.editor, [":", "q", "a", "\x7f", "\r"]);
 
@@ -563,7 +613,7 @@ describe("ex mini-mode", () => {
   });
 
   it("ctrl+h edits the pending ex command", () => {
-    const session = createEditorWithSpy("hello");
+    const session = createEditorWithSpy("");
 
     sendKeys(session.editor, [":", "q", "a", "\x08", "\r"]);
 
@@ -572,22 +622,23 @@ describe("ex mini-mode", () => {
   });
 
   it("backspace removes one full grapheme from the pending ex command", () => {
-    const session = createEditorWithSpy("hello");
+    const session = createEditorWithSpy("");
 
     sendKeys(session.editor, [":", "e\u0301", "\x7f", "q", "\r"]);
 
     assert.equal(session.quitCalls, 1);
     assert.deepEqual(session.notifications, []);
-    assert.equal(session.editor.getText(), "hello");
+    assert.equal(session.editor.getText(), "");
   });
 
-  it(":q! requests quit", () => {
+  it(":q! requests quit when prompt has non-whitespace text", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "q", "!", "\r"]);
 
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
   });
 
   it("bracketed paste payload is accepted in ex mini-mode", () => {

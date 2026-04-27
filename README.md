@@ -50,7 +50,7 @@ u          # undo
 
 Mode indicator (`INSERT` / `NORMAL` / `EX`) appears at bottom-right.
 Its label is theme-colored: reverse-video `borderMuted` for
-INSERT, `borderAccent` for NORMAL and EX.
+INSERT, `borderAccent` for NORMAL, and `warning` for EX.
 
 ## why pi-vim
 
@@ -97,6 +97,12 @@ extended ex-commands, etc.).
 | `o`      | Normal → open line below + Insert      |
 | `O`      | Normal → open line above + Insert      |
 
+Optional Pi keybinding note: if you use pi-vim heavily, consider remapping Pi's `app.interrupt` away from bare `escape` in `~/.pi/agent/keybindings.json`; user config overrides defaults. Minimal remap:
+
+```json
+{ "app.interrupt": ["ctrl+escape"] }
+```
+
 #### ex mini-mode
 
 Limited ex support is implemented for quit-only flows.
@@ -107,8 +113,10 @@ Limited ex support is implemented for quit-only flows.
 | `Enter` | Execute pending ex command |
 | `Esc` | Cancel EX mini-mode |
 | `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
-| `:q` / `:q!` | Quit the current Pi session |
-| `:qa` / `:qa!` | Quit the current Pi session |
+| `:q` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
+| `:q!` | Force quit the current Pi session even when the prompt has text |
+| `:qa` | Same safe quit policy as `:q` |
+| `:qa!` | Same force quit policy as `:q!` |
 | unsupported `:{cmd}` | Show warning notification; no quit |
 
 Insert-mode shortcuts (stay in Insert mode):
