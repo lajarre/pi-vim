@@ -2551,6 +2551,49 @@ describe("yank operator — yy / yw / ye / yb / y$ / y0", () => {
 // ---------------------------------------------------------------------------
 
 describe("put — character-wise", () => {
+  it("P uses the internal register while a local clipboard mirror is pending", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    const activeWrite = deferred();
+    const writes: string[] = [];
+
+    editor.setClipboardFn(async (text) => {
+      writes.push(text);
+      await activeWrite.promise;
+    });
+    editor.setClipboardReadFn(() => "OLD");
+
+    try {
+      sendKeys(editor, ["d", "w", "P"]);
+
+      assert.equal(editor.getText(), "foo bar");
+      assert.equal(editor.getRegister(), "foo ");
+      assert.deepEqual(writes, ["foo "]);
+    } finally {
+      activeWrite.resolve();
+      await nextImmediate();
+    }
+  });
+
+  it("P reads the OS clipboard again after a local mirror settles", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    const writes: string[] = [];
+
+    editor.setClipboardFn((text) => {
+      writes.push(text);
+    });
+    editor.setClipboardReadFn(() => "OLD");
+
+    sendKeys(editor, ["d", "w"]);
+    await nextImmediate();
+
+    editor.setClipboardReadFn(() => "SYS");
+    sendKeys(editor, ["P"]);
+
+    assert.equal(editor.getText(), "SYSbar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(writes, ["foo "]);
+  });
+
   it("p reads OS clipboard text instead of stale internal register", () => {
     const { editor } = createEditorWithSpy("ab");
     editor.setRegister("shadow");

@@ -349,6 +349,7 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
 
 class ClipboardMirror {
   private activeController: AbortController | null = null;
+  private activeText: string | null = null;
   private draining = false;
   private pendingText: string | null = null;
 
@@ -366,6 +367,10 @@ class ClipboardMirror {
 
   setTimeoutMs(timeoutMs: number): void {
     this.timeoutMs = Math.max(0, timeoutMs);
+  }
+
+  hasPendingWrite(): boolean {
+    return this.activeText !== null || this.pendingText !== null || this.draining;
   }
 
   mirror(text: string): void {
@@ -388,6 +393,7 @@ class ClipboardMirror {
         this.pendingText = null;
         const controller = new AbortController();
         this.activeController = controller;
+        this.activeText = text;
 
         try {
           await this.writeWithTimeout(text, controller);
@@ -399,6 +405,7 @@ class ClipboardMirror {
           if (this.activeController === controller) {
             this.activeController = null;
           }
+          this.activeText = null;
         }
       }
 
@@ -2523,6 +2530,10 @@ export class ModalEditor extends CustomEditor {
   private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
 
   private getPasteRegisterText(): string {
+    if (this.clipboardMirror.hasPendingWrite()) {
+      return this.unnamedRegister;
+    }
+
     try {
       const clipboardText = this.clipboardReadFn();
       return clipboardText ?? this.unnamedRegister;

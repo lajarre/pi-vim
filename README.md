@@ -317,6 +317,7 @@ Line-wise detection: paste text ending in `\n` is treated as line-wise.
 - Rapid register writes are coalesced. After writes settle, the mirror attempts
   only the latest pending value; intermediate OS clipboard values are not guaranteed.
 - `p` / `P` read the OS clipboard first. If the read fails or times out, they fall back to the internal shadow register.
+- While a local register write is still mirroring to the OS clipboard, `p` / `P` use the internal shadow so immediate yank/delete → put sequences stay ordered.
 - Pi owns OS and terminal clipboard backend behavior.
 
 Future option stub: a later release may expose a setting to choose between OS-backed unnamed registers and internal-only registers. This release keeps the Vim-like OS-backed default.
