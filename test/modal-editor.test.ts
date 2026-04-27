@@ -2512,6 +2512,108 @@ describe("yank operator — yy / yw / ye / yb / y$ / y0", () => {
 // ---------------------------------------------------------------------------
 
 describe("put — character-wise", () => {
+  it("p reads OS clipboard text instead of stale internal register", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "SYS");
+
+    sendKeys(editor, ["p"]);
+
+    assert.equal(editor.getText(), "aSYSb");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+
+  it("P reads OS clipboard text instead of stale internal register", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "SYS");
+
+    sendKeys(editor, ["P"]);
+
+    assert.equal(editor.getText(), "SYSab");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("p falls back to internal register when OS clipboard read returns null", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => null);
+
+    sendKeys(editor, ["p"]);
+
+    assert.equal(editor.getText(), "ashadowb");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("p falls back to internal register when OS clipboard read throws", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => {
+      throw new Error("clipboard read failed");
+    });
+
+    sendKeys(editor, ["p"]);
+
+    assert.equal(editor.getText(), "ashadowb");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("p treats empty OS clipboard as successful empty paste", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "");
+
+    sendKeys(editor, ["p"]);
+
+    assert.equal(editor.getText(), "ab");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("counted empty OS clipboard paste consumes the count", () => {
+    const { editor } = createEditorWithSpy("abcd");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "");
+
+    sendKeys(editor, ["3", "p", "l"]);
+
+    assert.equal(editor.getText(), "abcd");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("3p repeats OS clipboard text instead of stale internal register", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "ab");
+
+    sendKeys(editor, ["3", "p"]);
+
+    assert.equal(editor.getText(), "Xababab");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("3P repeats OS clipboard text instead of stale internal register", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "ab");
+
+    sendKeys(editor, ["3", "P"]);
+
+    assert.equal(editor.getText(), "abababX");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("p inserts register content after cursor", () => {
     const { editor } = createEditorWithSpy("ab");
     editor.setRegister("X");
@@ -2559,6 +2661,30 @@ describe("put — character-wise", () => {
 // ---------------------------------------------------------------------------
 
 describe("put — line-wise", () => {
+  it("p treats OS clipboard text ending in newline as linewise", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "X\n");
+
+    sendKeys(editor, ["p"]);
+
+    assert.equal(editor.getText(), "a\nX\nb");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("P treats OS clipboard text ending in newline as linewise", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("shadow");
+    editor.setClipboardReadFn(() => "X\n");
+
+    sendKeys(editor, ["P"]);
+
+    assert.equal(editor.getText(), "X\na\nb");
+    assert.equal(editor.getRegister(), "shadow");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("p with line-wise register inserts new line below", () => {
     const { editor } = createEditorWithSpy("bar");
     editor.setRegister("foo\n");

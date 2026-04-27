@@ -291,8 +291,8 @@ Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
 | `{count}p`   | Put `{count}` times after cursor                            |
 | `{count}P`   | Put `{count}` times before cursor                           |
 
-Put reads from the **unnamed register** (not OS clipboard).  
-Line-wise detection: register content ending in `\n` is treated as line-wise.
+Put reads the OS clipboard first. If OS clipboard text cannot be read quickly, pi-vim falls back to the internal unnamed-register shadow.
+Line-wise detection: paste text ending in `\n` is treated as line-wise.
 
 ---
 
@@ -310,15 +310,16 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 
 ## register and clipboard policy
 
-- One unnamed register (like Vim's `""` register).
+- By default, the unnamed register is OS-backed, matching Vim's `set clipboard=unnamed` behavior.
 - Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
   (including `dd`/`d_`, `{count}dd`, `d{count}j/k`, `dG`, `yy`/`y_`, `{count}yy`,
-  `y{count}j/k`, `yG`) writes to the register and mirrors to the OS clipboard
-  (via Pi's `copyToClipboard`, best-effort).
+  `y{count}j/k`, `yG`) writes to an internal shadow register synchronously and mirrors that text to the OS clipboard best-effort.
 - Rapid register writes are coalesced. After writes settle, the mirror attempts
   only the latest pending value; intermediate OS clipboard values are not guaranteed.
-- `p` / `P` read from the unnamed register only (not the OS clipboard).
-- Pi's `copyToClipboard` owns OS and terminal clipboard backend behavior.
+- `p` / `P` read the OS clipboard first. If the read fails or times out, they fall back to the internal shadow register.
+- Pi owns OS and terminal clipboard backend behavior.
+
+Future option stub: a later release may expose a setting to choose between OS-backed unnamed registers and internal-only registers. This release keeps the Vim-like OS-backed default.
 
 ---
 

@@ -49,6 +49,7 @@ export function createEditorWithSpy(initialText: string): {
   const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
 
   editor.setClipboardFn((text) => clipboardWrites.push(text));
+  editor.setClipboardReadFn(() => null);
 
   // Populate buffer in insert mode (editor starts in insert)
   for (const char of initialText) {
@@ -75,6 +76,7 @@ export function createMultiLineEditor(text: string): {
   const clipboardWrites: string[] = [];
   const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
   editor.setClipboardFn((t) => clipboardWrites.push(t));
+  editor.setClipboardReadFn(() => null);
 
   // Type text in insert mode (newlines create new lines)
   for (const char of text) {

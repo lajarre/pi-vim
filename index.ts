@@ -49,7 +49,7 @@
  *   (home-manager/modules/share/ai/pi/.pi/agent/extensions/vim-mode)
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 import {
   CustomEditor,
@@ -106,6 +106,8 @@ const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
 // a small grace so the parent does not kill the helper and discard stdout.
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
 const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
+const CLIPBOARD_READ_TIMEOUT_MS = 750;
+const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
 
 type EditorSnapshot = {
   text: string;
@@ -127,6 +129,7 @@ type ModalEditorInternals = {
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
+type ClipboardReadFn = () => string | null;
 type ClipboardProcess = ReturnType<typeof spawn>;
 
 type ClipboardCircuitBreaker = {
@@ -183,6 +186,38 @@ try {
   // helper exit non-zero and trip the parent spawn/environment breaker.
 }
 `;
+
+const CLIPBOARD_READ_HELPER_SOURCE = `
+import { createRequire } from "node:module";
+
+const require = createRequire(${JSON.stringify(PI_CODING_AGENT_MODULE_URL)});
+const clipboard = require("@mariozechner/clipboard");
+const text = await clipboard.getText();
+if (typeof text === "string") {
+  process.stdout.write(text);
+}
+`;
+
+function readClipboardInChildProcess(): string | null {
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", CLIPBOARD_READ_HELPER_SOURCE],
+      {
+        encoding: "utf8",
+        maxBuffer: CLIPBOARD_READ_MAX_BUFFER_BYTES,
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: CLIPBOARD_READ_TIMEOUT_MS,
+        windowsHide: true,
+      },
+    );
+
+    if (result.error || result.status !== 0 || result.signal) return null;
+    return result.stdout ?? "";
+  } catch {
+    return null;
+  }
+}
 
 function createClipboardAbortError(message: string): Error {
   const error = new Error(message);
@@ -429,6 +464,7 @@ export class ModalEditor extends CustomEditor {
   // Unnamed register
   private unnamedRegister: string = "";
   private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
+  private clipboardReadFn: ClipboardReadFn = readClipboardInChildProcess;
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -448,6 +484,9 @@ export class ModalEditor extends CustomEditor {
   }
   setClipboardWriteTimeoutMs(timeoutMs: number): void {
     this.clipboardMirror.setTimeoutMs(timeoutMs);
+  }
+  setClipboardReadFn(fn: ClipboardReadFn): void {
+    this.clipboardReadFn = fn;
   }
   getRegister(): string { return this.unnamedRegister; }
   setRegister(text: string): void { this.unnamedRegister = text; }
@@ -2480,9 +2519,18 @@ export class ModalEditor extends CustomEditor {
 
   private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
 
+  private getPasteRegisterText(): string {
+    try {
+      const clipboardText = this.clipboardReadFn();
+      return clipboardText ?? this.unnamedRegister;
+    } catch {
+      return this.unnamedRegister;
+    }
+  }
+
   private putAfter(): void {
     const count = this.takeTotalCount(1);
-    const text = this.unnamedRegister;
+    const text = this.getPasteRegisterText();
     if (!text) return;
     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
@@ -2512,7 +2560,7 @@ export class ModalEditor extends CustomEditor {
 
   private putBefore(): void {
     const count = this.takeTotalCount(1);
-    const text = this.unnamedRegister;
+    const text = this.getPasteRegisterText();
     if (!text) return;
     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
 
