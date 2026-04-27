@@ -88,7 +88,7 @@ extended ex-commands, etc.).
 | key      | action                                 |
 |----------|----------------------------------------|
 | `Esc` / `Ctrl+[` | Insert → Normal mode                   |
-| `Esc` / `Ctrl+[` | Normal mode → pass to Pi (abort agent) |
+| `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
 | `:`      | Normal → EX mini-mode                   |
 | `i`      | Normal → Insert at cursor              |
 | `a`      | Normal → Insert after cursor           |
@@ -97,11 +97,7 @@ extended ex-commands, etc.).
 | `o`      | Normal → open line below + Insert      |
 | `O`      | Normal → open line above + Insert      |
 
-Optional Pi keybinding note: if you use pi-vim heavily, consider remapping Pi's `app.interrupt` away from bare `escape` in `~/.pi/agent/keybindings.json`; user config overrides defaults. Minimal remap:
-
-```json
-{ "app.interrupt": ["ctrl+escape"] }
-```
+Optional Pi keybinding note: heavy pi-vim users may prefer to move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json`, since the default binding overlaps with the Insert-to-Normal switch. The right replacement depends on your own muscle memory; user config overrides defaults.
 
 #### ex mini-mode
 
