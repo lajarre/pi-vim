@@ -102,8 +102,8 @@ const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
 const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
-// Match Pi's native clipboard timeout and leave a small grace for helper
-// startup/teardown before treating a mirror as stale.
+// Pi emits OSC52 before its native clipboard fallback. Give that 5s fallback
+// a small grace so the parent does not kill the helper and discard stdout.
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
 const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 const CLIPBOARD_READ_TIMEOUT_MS = 750;
@@ -171,132 +171,8 @@ function isClipboardEnvironmentFailure(error: unknown): boolean {
 }
 
 const PI_CODING_AGENT_MODULE_URL = import.meta.resolve("@mariozechner/pi-coding-agent");
-const CLIPBOARD_NATIVE_MODULE_URL = new URL(
-  "./utils/clipboard-native.js",
-  PI_CODING_AGENT_MODULE_URL,
-).href;
-const CLIPBOARD_IMAGE_MODULE_URL = new URL(
-  "./utils/clipboard-image.js",
-  PI_CODING_AGENT_MODULE_URL,
-).href;
 const CLIPBOARD_HELPER_SOURCE = `
-import { execSync, spawn } from "node:child_process";
-import { platform } from "node:os";
-import { clipboard } from ${JSON.stringify(CLIPBOARD_NATIVE_MODULE_URL)};
-import { isWaylandSession } from ${JSON.stringify(CLIPBOARD_IMAGE_MODULE_URL)};
-
-function copyToX11Clipboard(options) {
-  try {
-    execSync("xclip -selection clipboard", options);
-  } catch {
-    execSync("xsel --clipboard --input", options);
-  }
-}
-
-async function copyToWaylandClipboard(text) {
-  execSync("which wl-copy", { stdio: "ignore" });
-
-  await new Promise((resolve, reject) => {
-    const proc = spawn("wl-copy", ["--foreground"], {
-      stdio: ["pipe", "ignore", "ignore"],
-    });
-    let readySent = false;
-    let settled = false;
-
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    };
-
-    proc.once("error", (error) => {
-      finish(error);
-    });
-
-    proc.once("close", (code) => {
-      if (readySent || code === 0) {
-        finish();
-        return;
-      }
-
-      finish(new Error("wl-copy failed with exit code " + (code ?? "null")));
-    });
-
-    proc.stdin.on("error", () => {
-      // The close handler decides whether the write succeeded.
-    });
-
-    try {
-      proc.stdin.end(text, () => {
-        queueMicrotask(() => {
-          if (readySent || settled) return;
-          if (proc.exitCode !== null || proc.signalCode !== null) return;
-          readySent = true;
-          process.send?.({ type: "ready", keepAlive: true });
-        });
-      });
-    } catch (error) {
-      finish(error);
-    }
-  });
-}
-
-async function copyText(text) {
-  if (process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE !== "1") {
-    try {
-      if (clipboard) {
-        await clipboard.setText(text);
-        return;
-      }
-    } catch {
-      // Fall through to platform-specific clipboard tools.
-    }
-  }
-
-  const p = platform();
-  const options = { input: text, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] };
-
-  if (p === "darwin") {
-    execSync("pbcopy", options);
-    return;
-  }
-
-  if (p === "win32") {
-    execSync("clip", options);
-    return;
-  }
-
-  if (process.env.TERMUX_VERSION) {
-    try {
-      execSync("termux-clipboard-set", options);
-      return;
-    } catch {
-      // Fall back to Wayland or X11 tools.
-    }
-  }
-
-  const hasWaylandDisplay = Boolean(process.env.WAYLAND_DISPLAY);
-  const hasX11Display = Boolean(process.env.DISPLAY);
-  if (isWaylandSession() && hasWaylandDisplay) {
-    try {
-      await copyToWaylandClipboard(text);
-      return;
-    } catch {
-      if (hasX11Display) {
-        copyToX11Clipboard(options);
-      }
-      return;
-    }
-  }
-
-  if (hasX11Display) {
-    copyToX11Clipboard(options);
-  }
-}
+import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
 
 const chunks = [];
 for await (const chunk of process.stdin) {
@@ -304,10 +180,10 @@ for await (const chunk of process.stdin) {
 }
 
 try {
-  await copyText(Buffer.concat(chunks).toString("utf8"));
+  await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
 } catch {
-  // Clipboard writes are best-effort. Backend failures must not make the helper
-  // exit non-zero and trip the parent spawn/environment breaker.
+  // Pi clipboard writes are best-effort. Backend failures must not make the
+  // helper exit non-zero and trip the parent spawn/environment breaker.
 }
 `;
 
@@ -358,55 +234,13 @@ function getAbortError(signal: AbortSignal): Error {
     : createClipboardAbortError("clipboard write aborted");
 }
 
-type ClipboardHelperReadyMessage = {
-  type: "ready";
-  keepAlive?: boolean;
-};
-
-function isClipboardHelperReadyMessage(message: unknown): message is ClipboardHelperReadyMessage {
-  return typeof message === "object"
-    && message !== null
-    && "type" in message
-    && message.type === "ready";
-}
-
-function emitOsc52(text: string): void {
-  const encoded = Buffer.from(text).toString("base64");
-  process.stdout.write(`\x1b]52;c;${encoded}\x07`);
-}
-
 function killClipboardProcess(child: ClipboardProcess): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
-
-  try {
-    if (process.platform !== "win32" && typeof child.pid === "number") {
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    }
-  } catch {
-    // Fall through to direct child kill.
-  }
 
   try {
     child.kill("SIGKILL");
   } catch {
     // Best effort only; clipboard mirroring must not affect editing.
-  }
-}
-
-let activeClipboardHelper: ClipboardProcess | null = null;
-
-function clearActiveClipboardHelper(child: ClipboardProcess): void {
-  if (activeClipboardHelper === child) {
-    activeClipboardHelper = null;
-  }
-}
-
-function killActiveClipboardHelper(): void {
-  const child = activeClipboardHelper;
-  activeClipboardHelper = null;
-  if (child) {
-    killClipboardProcess(child);
   }
 }
 
@@ -419,7 +253,7 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
 
     let child: ClipboardProcess | null = null;
     let settled = false;
-    let completedViaReadyMessage = false;
+    const stdoutChunks: Buffer[] = [];
 
     function finish(error?: unknown): void {
       if (settled) return;
@@ -432,17 +266,6 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
       }
     }
 
-    function finishSuccess(): void {
-      try {
-        emitOsc52(text);
-      } catch (error) {
-        finish(error);
-        return;
-      }
-
-      finish();
-    }
-
     function onAbort(): void {
       if (child) {
         killClipboardProcess(child);
@@ -450,12 +273,9 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
       finish(getAbortError(signal));
     }
 
-    killActiveClipboardHelper();
-
     try {
       child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "ignore", "ignore", "ipc"],
+        stdio: ["pipe", "pipe", "ignore"],
         windowsHide: true,
       });
     } catch (error) {
@@ -465,20 +285,11 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
 
     signal.addEventListener("abort", onAbort, { once: true });
 
-    child.on("message", (message) => {
-      if (!isClipboardHelperReadyMessage(message) || completedViaReadyMessage) {
-        return;
-      }
-
-      completedViaReadyMessage = true;
-      if (message.keepAlive === true) {
-        activeClipboardHelper = child;
-      }
-      if (typeof child.disconnect === "function" && child.connected) {
-        child.disconnect();
-      }
-      child.unref();
-      finishSuccess();
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+    child.stdout?.on("error", (error) => {
+      finish(error);
     });
 
     child.once("error", (error) => {
@@ -486,8 +297,7 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
     });
 
     child.once("close", (code) => {
-      clearActiveClipboardHelper(child);
-      if (settled || completedViaReadyMessage) return;
+      if (settled) return;
 
       if (signal.aborted) {
         finish(getAbortError(signal));
@@ -495,7 +305,15 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
       }
 
       if (code === 0) {
-        finishSuccess();
+        try {
+          for (const chunk of stdoutChunks) {
+            process.stdout.write(chunk);
+          }
+        } catch (error) {
+          finish(error);
+          return;
+        }
+        finish();
         return;
       }
 

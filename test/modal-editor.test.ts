@@ -7,9 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { WordMotionClass } from "../motions.js";
@@ -113,22 +111,31 @@ type HelperRunResult = {
 
 const CLIPBOARD_HELPER_TEST_TIMEOUT_MS = 5_000;
 
-async function getClipboardHelperSource(): Promise<string> {
+async function getClipboardHelperSourceWithMock(mockModuleSource: string): Promise<string> {
   const indexSource = await readFile(new URL("../index.ts", import.meta.url), "utf8");
   const match = /const CLIPBOARD_HELPER_SOURCE = `([\s\S]*?)`;/.exec(indexSource);
 
   assert.ok(match, "CLIPBOARD_HELPER_SOURCE not found");
   assert.ok(match[1], "CLIPBOARD_HELPER_SOURCE was empty");
 
-  const piModuleUrl = import.meta.resolve("@mariozechner/pi-coding-agent");
-  const nativeModuleUrl = new URL("./utils/clipboard-native.js", piModuleUrl).href;
-  const imageModuleUrl = new URL("./utils/clipboard-image.js", piModuleUrl).href;
-  const nativePlaceholder = ["$", "{JSON.stringify(CLIPBOARD_NATIVE_MODULE_URL)}"].join("");
-  const imagePlaceholder = ["$", "{JSON.stringify(CLIPBOARD_IMAGE_MODULE_URL)}"].join("");
+  const mockModuleUrl = `data:text/javascript,${encodeURIComponent(mockModuleSource)}`;
+  const helperImportLine = [
+    "import { copyToClipboard } from ",
+    "$",
+    "{JSON.stringify(PI_CODING_AGENT_MODULE_URL)};",
+  ].join("");
+  const replacementImportLine = `import { copyToClipboard } from ${JSON.stringify(mockModuleUrl)};`;
+  const helperSource = match[1];
 
-  return match[1]
-    .replace(nativePlaceholder, JSON.stringify(nativeModuleUrl))
-    .replace(imagePlaceholder, JSON.stringify(imageModuleUrl));
+  assert.equal(helperSource.includes(helperImportLine), true, "clipboard helper import not found");
+
+  const mockedSource = helperSource.replace(helperImportLine, replacementImportLine);
+
+  assert.notEqual(mockedSource, helperSource, "clipboard helper import was not replaced");
+  assert.equal(mockedSource.includes(helperImportLine), false, "real clipboard helper import remains");
+  assert.equal(mockedSource.includes(replacementImportLine), true, "mock clipboard import missing");
+
+  return mockedSource;
 }
 
 async function getClipboardReadHelperSourceWithMock(mockClipboardExpression: string): Promise<string> {
@@ -155,14 +162,9 @@ async function getClipboardReadHelperSourceWithMock(mockClipboardExpression: str
   return mockedSource;
 }
 
-function runClipboardHelperSource(
-  source: string,
-  input: string,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<HelperRunResult> {
+function runClipboardHelperSource(source: string, input: string): Promise<HelperRunResult> {
   return new Promise<HelperRunResult>((resolve, reject) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
-      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdoutChunks: Buffer[] = [];
@@ -524,21 +526,19 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.deepEqual(rejections, []);
   });
 
-  it("clipboard helper treats missing native backends as best-effort", async () => {
-    const helperSource = await getClipboardHelperSource();
-    const helperEnv = {
-      ...process.env,
-      DISPLAY: "",
-      PI_VIM_CLIPBOARD_SKIP_NATIVE: "1",
-      WAYLAND_DISPLAY: "",
-      XDG_SESSION_TYPE: "",
-    };
+  it("clipboard helper treats Pi copyToClipboard throws as best-effort", async () => {
+    const helperSource = await getClipboardHelperSourceWithMock([
+      "export function copyToClipboard(text) {",
+      "  process.stdout.write(\"copy:\" + text);",
+      "  throw new Error(\"clipboard backend failed\");",
+      "}",
+    ].join("\n"));
 
-    const result = await runClipboardHelperSource(helperSource, "payload", helperEnv);
+    const result = await runClipboardHelperSource(helperSource, "payload");
 
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.signal, null);
-    assert.equal(result.stdout, "");
+    assert.equal(result.stdout, "copy:payload");
   });
 
   it("clipboard read helper treats no text as an empty successful read", async () => {
@@ -663,121 +663,6 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
       "start:baz ",
       "end:baz ",
     ]);
-  });
-
-  it("kills stale Wayland helpers before older wl-copy owners can write", async () => {
-    if (process.platform !== "linux") return;
-
-    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
-    for (const char of "foo bar baz") {
-      editor.handleInput(char);
-    }
-    editor.handleInput("\x1b");
-    editor.handleInput("0");
-
-    const binDir = await mkdtemp(join(tmpdir(), "pi-vim-wayland-clipboard-"));
-    const clipboardFile = join(binDir, "clipboard.txt");
-    const originalEnv = {
-      DISPLAY: process.env.DISPLAY,
-      PATH: process.env.PATH,
-      PI_VIM_CLIPBOARD_SKIP_NATIVE: process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE,
-      PI_VIM_CLIPBOARD_TEST_FILE: process.env.PI_VIM_CLIPBOARD_TEST_FILE,
-      TERMUX_VERSION: process.env.TERMUX_VERSION,
-      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
-      XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
-    };
-    const originalStdoutWrite = process.stdout.write;
-    const stdoutWrites: string[] = [];
-    const backendScript = `#!/bin/sh
-text="$(cat)"
-if [ "$1" != "--foreground" ]; then
-  exit 2
-fi
-if [ "$text" = "foo " ]; then
-  (
-    sleep 0.25
-    printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
-  ) &
-  sleep 5
-  exit 0
-fi
-printf '%s' "$text" > "$PI_VIM_CLIPBOARD_TEST_FILE"
-sleep 0.5
-`;
-
-    await writeFile(join(binDir, "wl-copy"), backendScript);
-    await chmod(join(binDir, "wl-copy"), 0o755);
-    await writeFile(clipboardFile, "");
-
-    process.env.DISPLAY = "";
-    process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
-    process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = "1";
-    process.env.PI_VIM_CLIPBOARD_TEST_FILE = clipboardFile;
-    delete process.env.TERMUX_VERSION;
-    process.env.WAYLAND_DISPLAY = "wayland-0";
-    process.env.XDG_SESSION_TYPE = "wayland";
-    process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-      stdoutWrites.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
-      const callback = args.find((arg): arg is (error?: Error) => void => typeof arg === "function");
-      callback?.();
-      return true;
-    }) as typeof process.stdout.write;
-
-    editor.setClipboardWriteTimeoutMs(1500);
-
-    try {
-      sendKeys(editor, ["d", "w", "d", "w"]);
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 350));
-      await nextImmediate();
-
-      assert.equal(editor.getText(), "baz");
-      assert.equal(editor.getRegister(), "bar ");
-      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 350));
-      await nextImmediate();
-
-      assert.equal(await readFile(clipboardFile, "utf8"), "bar ");
-      assert.equal(stdoutWrites.length, 2);
-    } finally {
-      process.stdout.write = originalStdoutWrite;
-      if (originalEnv.DISPLAY === undefined) {
-        delete process.env.DISPLAY;
-      } else {
-        process.env.DISPLAY = originalEnv.DISPLAY;
-      }
-      if (originalEnv.PATH === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalEnv.PATH;
-      }
-      if (originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE === undefined) {
-        delete process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE;
-      } else {
-        process.env.PI_VIM_CLIPBOARD_SKIP_NATIVE = originalEnv.PI_VIM_CLIPBOARD_SKIP_NATIVE;
-      }
-      if (originalEnv.PI_VIM_CLIPBOARD_TEST_FILE === undefined) {
-        delete process.env.PI_VIM_CLIPBOARD_TEST_FILE;
-      } else {
-        process.env.PI_VIM_CLIPBOARD_TEST_FILE = originalEnv.PI_VIM_CLIPBOARD_TEST_FILE;
-      }
-      if (originalEnv.TERMUX_VERSION === undefined) {
-        delete process.env.TERMUX_VERSION;
-      } else {
-        process.env.TERMUX_VERSION = originalEnv.TERMUX_VERSION;
-      }
-      if (originalEnv.WAYLAND_DISPLAY === undefined) {
-        delete process.env.WAYLAND_DISPLAY;
-      } else {
-        process.env.WAYLAND_DISPLAY = originalEnv.WAYLAND_DISPLAY;
-      }
-      if (originalEnv.XDG_SESSION_TYPE === undefined) {
-        delete process.env.XDG_SESSION_TYPE;
-      } else {
-        process.env.XDG_SESSION_TYPE = originalEnv.XDG_SESSION_TYPE;
-      }
-    }
   });
 
   it("clipboard timeouts do not trip the spawn failure circuit breaker", async () => {
