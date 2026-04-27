@@ -101,7 +101,11 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
-const CLIPBOARD_WRITE_TIMEOUT_MS = 5000;
+const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
+// Pi emits OSC52 before its native clipboard fallback. Give that 5s fallback
+// a small grace so the parent does not kill the helper and discard stdout.
+const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
+const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 
 type EditorSnapshot = {
   text: string;
@@ -125,6 +129,44 @@ type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 type ClipboardProcess = ReturnType<typeof spawn>;
 
+type ClipboardCircuitBreaker = {
+  consecutiveEnvironmentFailures: number;
+  disabled: boolean;
+};
+
+const processClipboardCircuitBreaker: ClipboardCircuitBreaker = {
+  consecutiveEnvironmentFailures: 0,
+  disabled: false,
+};
+
+function resetClipboardCircuitBreaker(): void {
+  processClipboardCircuitBreaker.consecutiveEnvironmentFailures = 0;
+  processClipboardCircuitBreaker.disabled = false;
+}
+
+class ClipboardSpawnError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ClipboardSpawnError";
+  }
+}
+
+type SpawnErrnoLike = Error & { code?: unknown; syscall?: unknown };
+
+function isNodeSpawnErrno(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const candidate = error as SpawnErrnoLike;
+  return typeof candidate.code === "string"
+    && candidate.code.length > 0
+    && typeof candidate.syscall === "string"
+    && candidate.syscall.startsWith("spawn");
+}
+
+function isClipboardEnvironmentFailure(error: unknown): boolean {
+  return error instanceof ClipboardSpawnError || isNodeSpawnErrno(error);
+}
+
 const PI_CODING_AGENT_MODULE_URL = import.meta.resolve("@mariozechner/pi-coding-agent");
 const CLIPBOARD_HELPER_SOURCE = `
 import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
@@ -134,7 +176,12 @@ for await (const chunk of process.stdin) {
   chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
 }
 
-await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
+try {
+  await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
+} catch {
+  // Pi clipboard writes are best-effort. Backend failures must not make the
+  // helper exit non-zero and trip the parent spawn/environment breaker.
+}
 `;
 
 function createClipboardAbortError(message: string): Error {
@@ -166,8 +213,11 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
       return;
     }
 
+    let child: ClipboardProcess | null = null;
     let settled = false;
-    const finish = (error?: unknown): void => {
+    const stdoutChunks: Buffer[] = [];
+
+    function finish(error?: unknown): void {
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", onAbort);
@@ -176,40 +226,65 @@ function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promis
       } else {
         resolve();
       }
-    };
+    }
 
-    const child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
-      stdio: ["pipe", "inherit", "ignore"],
-      windowsHide: true,
-    });
-
-    const onAbort = (): void => {
-      killClipboardProcess(child);
+    function onAbort(): void {
+      if (child) {
+        killClipboardProcess(child);
+      }
       finish(getAbortError(signal));
-    };
+    }
+
+    try {
+      child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
+        stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
+      });
+    } catch (error) {
+      finish(new ClipboardSpawnError("clipboard helper spawn failed", { cause: error }));
+      return;
+    }
 
     signal.addEventListener("abort", onAbort, { once: true });
 
-    child.once("error", (error) => {
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+    child.stdout?.on("error", (error) => {
       finish(error);
     });
 
+    child.once("error", (error) => {
+      finish(new ClipboardSpawnError("clipboard helper spawn failed", { cause: error }));
+    });
+
     child.once("close", (code) => {
+      if (settled) return;
+
       if (signal.aborted) {
         finish(getAbortError(signal));
         return;
       }
 
       if (code === 0) {
+        try {
+          for (const chunk of stdoutChunks) {
+            process.stdout.write(chunk);
+          }
+        } catch (error) {
+          finish(error);
+          return;
+        }
         finish();
         return;
       }
 
-      finish(new Error(`clipboard helper failed with exit code ${code ?? "null"}`));
+      finish(new ClipboardSpawnError(`clipboard helper failed with exit code ${code ?? "null"}`));
     });
 
     if (!child.stdin) {
-      finish(new Error("clipboard helper stdin unavailable"));
+      killClipboardProcess(child);
+      finish(new ClipboardSpawnError("clipboard helper stdin unavailable"));
       return;
     }
 
@@ -242,11 +317,13 @@ class ClipboardMirror {
   constructor(
     private writeFn: ClipboardWriteFn,
     private timeoutMs: number = CLIPBOARD_WRITE_TIMEOUT_MS,
+    private readonly circuitBreaker: ClipboardCircuitBreaker = processClipboardCircuitBreaker,
   ) {}
 
   setWriteFn(writeFn: ClipboardWriteFn): void {
     this.activeController?.abort(createClipboardAbortError("clipboard writer replaced"));
     this.writeFn = writeFn;
+    resetClipboardCircuitBreaker();
   }
 
   setTimeoutMs(timeoutMs: number): void {
@@ -254,8 +331,9 @@ class ClipboardMirror {
   }
 
   mirror(text: string): void {
+    if (this.circuitBreaker.disabled) return;
+
     this.pendingText = text;
-    this.activeController?.abort(createClipboardAbortError("clipboard write superseded"));
 
     if (!this.draining) {
       void this.drain();
@@ -267,7 +345,7 @@ class ClipboardMirror {
     this.draining = true;
 
     try {
-      while (this.pendingText !== null) {
+      while (this.pendingText !== null && !this.circuitBreaker.disabled) {
         const text = this.pendingText;
         this.pendingText = null;
         const controller = new AbortController();
@@ -275,7 +353,9 @@ class ClipboardMirror {
 
         try {
           await this.writeWithTimeout(text, controller);
-        } catch {
+          this.circuitBreaker.consecutiveEnvironmentFailures = 0;
+        } catch (error) {
+          this.recordWriteFailure(error);
           // Clipboard mirroring is best-effort; the register is authoritative.
         } finally {
           if (this.activeController === controller) {
@@ -283,11 +363,28 @@ class ClipboardMirror {
           }
         }
       }
+
+      if (this.circuitBreaker.disabled) {
+        this.pendingText = null;
+      }
     } finally {
       this.draining = false;
-      if (this.pendingText !== null) {
+      if (this.pendingText !== null && !this.circuitBreaker.disabled) {
         void this.drain();
       }
+    }
+  }
+
+  private recordWriteFailure(error: unknown): void {
+    if (!isClipboardEnvironmentFailure(error)) {
+      this.circuitBreaker.consecutiveEnvironmentFailures = 0;
+      return;
+    }
+
+    this.circuitBreaker.consecutiveEnvironmentFailures += 1;
+    if (this.circuitBreaker.consecutiveEnvironmentFailures >= CLIPBOARD_SPAWN_FAILURE_LIMIT) {
+      this.circuitBreaker.disabled = true;
+      this.pendingText = null;
     }
   }
 
@@ -299,6 +396,11 @@ class ClipboardMirror {
 
     try {
       await this.writeFn(text, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw getAbortError(controller.signal);
+      }
+      throw error;
     } finally {
       clearTimeout(timeoutId);
     }

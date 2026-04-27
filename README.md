@@ -314,9 +314,11 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
 - Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
   (including `dd`/`d_`, `{count}dd`, `d{count}j/k`, `dG`, `yy`/`y_`, `{count}yy`,
   `y{count}j/k`, `yG`) writes to the register and mirrors to the OS clipboard
-  (via `copyToClipboard`, best-effort).
+  (via Pi's `copyToClipboard`, best-effort).
+- Rapid register writes are coalesced. After writes settle, the mirror attempts
+  only the latest pending value; intermediate OS clipboard values are not guaranteed.
 - `p` / `P` read from the unnamed register only (not the OS clipboard).
-- This gives stable behaviour across local terminals and SSH / OSC52 setups.
+- Pi's `copyToClipboard` owns OS and terminal clipboard backend behavior.
 
 ---
 

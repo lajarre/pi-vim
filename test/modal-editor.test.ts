@@ -6,6 +6,8 @@
  * blocks where state inspection requires nuance.
  */
 
+import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { WordMotionClass } from "../motions.js";
@@ -58,6 +60,137 @@ type TryFindTargetArgs = Parameters<ModalEditorWordBoundaryCacheInternals["tryFi
 
 function getRawEditor(editor: ModalEditor): ModalEditorTestInternals {
   return editor as unknown as ModalEditorTestInternals;
+}
+
+function createSpawnErrno(message: string): Error {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = "ENOENT";
+  error.syscall = "spawn clipboard-helper";
+  return error;
+}
+
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise();
+  });
+
+  if (resolve === undefined) {
+    throw new Error("deferred promise was not initialized");
+  }
+
+  return { promise, resolve };
+}
+
+function nextImmediate(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  });
+}
+
+type HelperRunResult = {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+};
+
+const CLIPBOARD_HELPER_TEST_TIMEOUT_MS = 5_000;
+
+async function getClipboardHelperSourceWithMock(mockModuleSource: string): Promise<string> {
+  const indexSource = await readFile(new URL("../index.ts", import.meta.url), "utf8");
+  const match = /const CLIPBOARD_HELPER_SOURCE = `([\s\S]*?)`;/.exec(indexSource);
+
+  assert.ok(match, "CLIPBOARD_HELPER_SOURCE not found");
+  assert.ok(match[1], "CLIPBOARD_HELPER_SOURCE was empty");
+
+  const mockModuleUrl = `data:text/javascript,${encodeURIComponent(mockModuleSource)}`;
+  const helperImportLine = [
+    "import { copyToClipboard } from ",
+    "$",
+    "{JSON.stringify(PI_CODING_AGENT_MODULE_URL)};",
+  ].join("");
+  const replacementImportLine = `import { copyToClipboard } from ${JSON.stringify(mockModuleUrl)};`;
+  const helperSource = match[1];
+
+  assert.equal(helperSource.includes(helperImportLine), true, "clipboard helper import not found");
+
+  const mockedSource = helperSource.replace(helperImportLine, replacementImportLine);
+
+  assert.notEqual(mockedSource, helperSource, "clipboard helper import was not replaced");
+  assert.equal(mockedSource.includes(helperImportLine), false, "real clipboard helper import remains");
+  assert.equal(mockedSource.includes(replacementImportLine), true, "mock clipboard import missing");
+
+  return mockedSource;
+}
+
+function runClipboardHelperSource(source: string, input: string): Promise<HelperRunResult> {
+  return new Promise<HelperRunResult>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let settled = false;
+
+    function finish(error: unknown, result?: HelperRunResult): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (result === undefined) {
+        reject(new Error("clipboard helper result missing"));
+        return;
+      }
+
+      resolve(result);
+    }
+
+    const timeoutId = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Best effort: the timeout already fails the helper-source test.
+      }
+      finish(new Error(`clipboard helper timed out after ${CLIPBOARD_HELPER_TEST_TIMEOUT_MS}ms`));
+    }, CLIPBOARD_HELPER_TEST_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdoutChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderrChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+    child.once("error", (error) => finish(error));
+    child.once("close", (code, signal) => {
+      finish(null, {
+        code,
+        signal,
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
+      });
+    });
+
+    child.stdin.end(input);
+  });
 }
 
 /** Run keys on a fresh single-line editor and check text + optional register. */
@@ -369,38 +502,246 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.deepEqual(rejections, []);
   });
 
-  it("coalesces clipboard mirrors to the latest register text", async () => {
+  it("clipboard helper treats Pi copyToClipboard throws as best-effort", async () => {
+    const helperSource = await getClipboardHelperSourceWithMock([
+      "export function copyToClipboard(text) {",
+      "  process.stdout.write(\"copy:\" + text);",
+      "  throw new Error(\"clipboard backend failed\");",
+      "}",
+    ].join("\n"));
+
+    const result = await runClipboardHelperSource(helperSource, "payload");
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, "copy:payload");
+  });
+
+  it("active clipboard write receives no abort event when superseded", async () => {
     const { editor } = createEditorWithSpy("foo bar baz");
+    const activeWrite = deferred();
     const events: string[] = [];
 
-    editor.setClipboardFn((text, signal) => new Promise<void>((resolve, reject) => {
+    editor.setClipboardFn(async (text, signal) => {
       events.push(`start:${text}`);
+      signal?.addEventListener("abort", () => {
+        events.push(`abort:${text}`);
+      }, { once: true });
 
       if (text === "foo ") {
-        signal?.addEventListener("abort", () => {
-          events.push(`abort:${text}`);
-          reject(signal.reason ?? new Error("clipboard aborted"));
-        }, { once: true });
+        await activeWrite.promise;
+      }
+
+      events.push(`end:${text}`);
+    });
+
+    sendKeys(editor, ["d", "w", "d", "w"]);
+
+    try {
+      await nextImmediate();
+
+      assert.deepEqual(events, ["start:foo "]);
+    } finally {
+      activeWrite.resolve();
+      await nextImmediate();
+    }
+  });
+
+  it("three rapid clipboard writes keep first active and final pending text", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz qux");
+    const firstWrite = deferred();
+    const events: string[] = [];
+
+    editor.setClipboardFn(async (text, signal) => {
+      events.push(`start:${text}`);
+      signal?.addEventListener("abort", () => {
+        events.push(`abort:${text}`);
+      }, { once: true });
+
+      if (text === "foo ") {
+        await firstWrite.promise;
+        if (signal?.aborted) {
+          throw signal.reason ?? new Error("clipboard aborted");
+        }
+      }
+
+      events.push(`end:${text}`);
+    });
+
+    sendKeys(editor, ["d", "w", "d", "w", "d", "w"]);
+    firstWrite.resolve();
+    await nextImmediate();
+
+    assert.equal(editor.getText(), "qux");
+    assert.equal(editor.getRegister(), "baz ");
+    assert.deepEqual(events, [
+      "start:foo ",
+      "end:foo ",
+      "start:baz ",
+      "end:baz ",
+    ]);
+  });
+
+  it("clipboard timeout abort still drains the latest pending text", async () => {
+    const { editor } = createEditorWithSpy("foo bar baz qux");
+    const finalWrite = deferred();
+    const events: string[] = [];
+
+    editor.setClipboardWriteTimeoutMs(5);
+    editor.setClipboardFn((text, signal) => new Promise<void>((resolve, reject) => {
+      events.push(`start:${text}`);
+      signal?.addEventListener("abort", () => {
+        const reason = signal.reason instanceof Error
+          ? signal.reason.message
+          : String(signal.reason);
+        events.push(`abort:${text}:${reason}`);
+        reject(signal.reason ?? new Error("clipboard aborted"));
+      }, { once: true });
+
+      if (text === "foo ") {
         return;
       }
 
       events.push(`end:${text}`);
+      if (text === "baz ") {
+        finalWrite.resolve();
+      }
       resolve();
     }));
 
-    sendKeys(editor, ["d", "w", "d", "w"]);
+    sendKeys(editor, ["d", "w", "d", "w", "d", "w"]);
+    await withTimeout(
+      finalWrite.promise,
+      100,
+      "timed out waiting for clipboard drain to write latest pending text",
+    );
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    assert.equal(editor.getText(), "baz");
-    assert.equal(editor.getRegister(), "bar ");
+    assert.equal(editor.getText(), "qux");
+    assert.equal(editor.getRegister(), "baz ");
     assert.deepEqual(events, [
       "start:foo ",
-      "abort:foo ",
-      "start:bar ",
-      "end:bar ",
+      "abort:foo :clipboard write timed out",
+      "start:baz ",
+      "end:baz ",
     ]);
+  });
+
+  it("clipboard timeouts do not trip the spawn failure circuit breaker", async () => {
+    const { editor } = createEditorWithSpy("one two three four five");
+    const attempts: string[] = [];
+    const expectedRegisters = ["one ", "two ", "three ", "four "];
+    const aborts = new Map(expectedRegisters.map((text) => [text, deferred()]));
+
+    editor.setClipboardWriteTimeoutMs(0);
+    editor.setClipboardFn((text, signal) => new Promise<void>((_resolve, reject) => {
+      attempts.push(text);
+      const onAbort = () => {
+        aborts.get(text)?.resolve();
+        reject(createSpawnErrno("late spawn after timeout"));
+      };
+
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+    }));
+
+    for (const expectedRegister of expectedRegisters) {
+      sendKeys(editor, ["d", "w"]);
+      const abort = aborts.get(expectedRegister);
+      assert.ok(abort, `abort deferred for ${expectedRegister}`);
+      await withTimeout(
+        abort.promise,
+        100,
+        `timed out waiting for clipboard timeout abort for ${expectedRegister}`,
+      );
+      assert.equal(editor.getRegister(), expectedRegister);
+    }
+
+    assert.equal(editor.getText(), "five");
+    assert.deepEqual(attempts, expectedRegisters);
+  });
+
+  it("repeated spawn-classified clipboard failures stop mirroring while register writes continue", async () => {
+    const { editor } = createEditorWithSpy("one two three four five");
+    const attempts: string[] = [];
+
+    try {
+      editor.setClipboardFn(async (text) => {
+        attempts.push(text);
+        throw createSpawnErrno("spawn failed");
+      });
+
+      for (const expectedRegister of ["one ", "two ", "three "]) {
+        sendKeys(editor, ["d", "w"]);
+        await nextImmediate();
+        assert.equal(editor.getRegister(), expectedRegister);
+      }
+
+      assert.deepEqual(attempts, ["one ", "two ", "three "]);
+
+      sendKeys(editor, ["d", "w"]);
+      await nextImmediate();
+
+      assert.equal(editor.getText(), "five");
+      assert.equal(editor.getRegister(), "four ");
+      assert.deepEqual(attempts, ["one ", "two ", "three "]);
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("spawn-classified clipboard failures stop mirroring across editor instances", async () => {
+    const first = createEditorWithSpy("one two three four five");
+    const second = createEditorWithSpy("alpha beta");
+    const attempts: string[] = [];
+    const failSpawn = async (text: string) => {
+      attempts.push(text);
+      throw createSpawnErrno("spawn failed");
+    };
+
+    try {
+      first.editor.setClipboardFn(failSpawn);
+      second.editor.setClipboardFn(failSpawn);
+
+      for (const expectedRegister of ["one ", "two ", "three "]) {
+        sendKeys(first.editor, ["d", "w"]);
+        await nextImmediate();
+        assert.equal(first.editor.getRegister(), expectedRegister);
+      }
+
+      assert.deepEqual(attempts, ["one ", "two ", "three "]);
+
+      sendKeys(second.editor, ["d", "w"]);
+      await nextImmediate();
+
+      assert.equal(second.editor.getText(), "beta");
+      assert.equal(second.editor.getRegister(), "alpha ");
+      assert.deepEqual(attempts, ["one ", "two ", "three "]);
+    } finally {
+      first.editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("repeated generic clipboard failures do not trip the spawn failure circuit breaker", async () => {
+    const { editor } = createEditorWithSpy("one two three four five");
+    const attempts: string[] = [];
+
+    editor.setClipboardFn(async (text) => {
+      attempts.push(text);
+      throw new Error("clipboard backend failed");
+    });
+
+    for (const expectedRegister of ["one ", "two ", "three ", "four "]) {
+      sendKeys(editor, ["d", "w"]);
+      await nextImmediate();
+      assert.equal(editor.getRegister(), expectedRegister);
+    }
+
+    assert.equal(editor.getText(), "five");
+    assert.deepEqual(attempts, ["one ", "two ", "three ", "four "]);
   });
 
   it("de deletes to end of word (inclusive), updates register", () => {
