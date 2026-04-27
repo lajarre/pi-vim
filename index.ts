@@ -192,6 +192,9 @@ import { createRequire } from "node:module";
 
 const require = createRequire(${JSON.stringify(PI_CODING_AGENT_MODULE_URL)});
 const clipboard = require("@mariozechner/clipboard");
+if (!await clipboard.hasText()) {
+  process.exit(0);
+}
 const text = await clipboard.getText();
 if (typeof text === "string") {
   process.stdout.write(text);

@@ -138,6 +138,30 @@ async function getClipboardHelperSourceWithMock(mockModuleSource: string): Promi
   return mockedSource;
 }
 
+async function getClipboardReadHelperSourceWithMock(mockClipboardExpression: string): Promise<string> {
+  const indexSource = await readFile(new URL("../index.ts", import.meta.url), "utf8");
+  const match = /const CLIPBOARD_READ_HELPER_SOURCE = `([\s\S]*?)`;/.exec(indexSource);
+
+  assert.ok(match, "CLIPBOARD_READ_HELPER_SOURCE not found");
+  assert.ok(match[1], "CLIPBOARD_READ_HELPER_SOURCE was empty");
+
+  const requireLine = [
+    "const require = createRequire(",
+    "$",
+    "{JSON.stringify(PI_CODING_AGENT_MODULE_URL)});",
+  ].join("");
+  const clipboardLine = 'const clipboard = require("@mariozechner/clipboard");';
+  const replacement = `const clipboard = ${mockClipboardExpression};`;
+  const helperSource = match[1];
+  const mockedSource = helperSource.replace(`${requireLine}\n${clipboardLine}`, replacement);
+
+  assert.notEqual(mockedSource, helperSource, "clipboard read helper require was not replaced");
+  assert.equal(mockedSource.includes(clipboardLine), false, "real clipboard read helper require remains");
+  assert.equal(mockedSource.includes(replacement), true, "mock clipboard object missing");
+
+  return mockedSource;
+}
+
 function runClipboardHelperSource(source: string, input: string): Promise<HelperRunResult> {
   return new Promise<HelperRunResult>((resolve, reject) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
@@ -515,6 +539,21 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.signal, null);
     assert.equal(result.stdout, "copy:payload");
+  });
+
+  it("clipboard read helper treats no text as an empty successful read", async () => {
+    const helperSource = await getClipboardReadHelperSourceWithMock([
+      "{",
+      "  async hasText() { return false; },",
+      "  async getText() { throw new Error(\"No string found\"); },",
+      "}",
+    ].join("\n"));
+
+    const result = await runClipboardHelperSource(helperSource, "");
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, "");
   });
 
   it("active clipboard write receives no abort event when superseded", async () => {
