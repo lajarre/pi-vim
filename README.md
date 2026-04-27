@@ -318,7 +318,7 @@ Line-wise detection: paste text ending in `\n` is treated as line-wise.
   only the latest pending value; intermediate OS clipboard values are not guaranteed.
 - `p` / `P` read the OS clipboard first. If the read fails or times out, they fall back to the internal shadow register.
 - While a local register write is still mirroring to the OS clipboard, `p` / `P` use the internal shadow so immediate yank/delete → put sequences stay ordered.
-- Pi owns OS and terminal clipboard backend behavior.
+- pi-vim uses Pi-compatible OS and terminal clipboard backends while owning helper lifetimes so superseded mirrors can be stopped.
 
 Future option stub: a later release may expose a setting to choose between OS-backed unnamed registers and internal-only registers. This release keeps the Vim-like OS-backed default.
 
