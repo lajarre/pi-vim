@@ -1,6 +1,6 @@
 {
   "name": "pi-vim",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Vim-style modal editing for Pi's TUI editor",
   "type": "module",
   "keywords": [
