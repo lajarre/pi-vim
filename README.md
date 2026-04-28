@@ -2,10 +2,6 @@
 
 Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% command surface.
 
-## why
-
-You love Pi, you love Vim, you'll love pi-vim.
-
 ## install
 
 ```bash
@@ -16,14 +12,7 @@ Restart Pi after install.
 
 ## contributor setup
 
-Git hooks are contributor-only setup, not part of package install.
-After cloning the repo:
-
-```bash
-npm install
-```
-
-If you need to wire hooks explicitly, run:
+Hooks install with `npm install` after cloning. To wire them explicitly:
 
 ```bash
 npm run hooks:install
@@ -48,22 +37,18 @@ u          # undo
 2}         # jump two paragraphs forward
 ```
 
-Mode indicator (`INSERT` / `NORMAL` / `EX`) appears at bottom-right.
-Its label is theme-colored: reverse-video `borderMuted` for
-INSERT, `borderAccent` for NORMAL, and `warning` for EX.
+Mode indicator (`INSERT` / `NORMAL` / `EX`) appears at bottom-right,
+theme-colored (reverse `borderMuted` / `borderAccent` / `warning`).
 
 ## why pi-vim
 
 - Fast modal editing without leaving Pi.
 - Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
-- Strong REPL-focused defaults; safe out-of-scope boundaries documented.
+- REPL-focused defaults; out-of-scope boundaries documented.
 - Clipboard/register behavior is explicit and tested.
 
-## for you / not for you
-
-Use pi-vim if you want fast Vim muscle-memory in Pi prompts.
-Skip it if you need full Vim feature parity (visual mode, macros, search,
-extended ex-commands, etc.).
+Use pi-vim for fast Vim muscle-memory in Pi prompts. Skip it if you need
+full Vim parity (visual mode, macros, search, extended ex-commands, …).
 
 ## common recipes
 
@@ -97,11 +82,11 @@ extended ex-commands, etc.).
 | `o`      | Normal → open line below + Insert      |
 | `O`      | Normal → open line above + Insert      |
 
-Optional Pi keybinding note: heavy pi-vim users may prefer to move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json`, since the default binding overlaps with the Insert-to-Normal switch. The right replacement depends on your own muscle memory; user config overrides defaults.
+Optional: heavy users may want to move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` since it overlaps with Insert→Normal. Pick your own replacement; user config overrides defaults.
 
 #### ex mini-mode
 
-Limited ex support is implemented for quit-only flows.
+Quit-only ex flows.
 
 | key / command | action |
 |---------------|--------|
@@ -162,14 +147,12 @@ A `{count}` prefix can be prepended to any navigation key (max: `9999`).
 `word` (`w/b/e`) splits punctuation from keyword chars. `WORD` (`W/B/E`)
 treats any non-whitespace run as one token (`foo-bar`, `path/to`, `x.y`).
 
-Paragraph boundary definition (this extension wave):
-- blank line: matches `^\s*$`
-- paragraph start: non-blank line at BOF, or non-blank line immediately after a blank line
+Paragraph boundary:
+- blank line matches `^\s*$`
+- paragraph start = non-blank at BOF, or non-blank line after a blank line
 
-Standalone `{` / `}` motions are navigation-only (no text/register mutation).
-Counted forms (`{count}{`, `{count}}`) step paragraph-by-paragraph.
-If no further paragraph boundary exists, motions clamp at BOF/EOF.
-Operator forms with braces (`d{`, `d}`, `c{`, `c}`, `y{`, `y}`) are out of scope for this wave.
+`{` / `}` are navigation-only (no text/register mutation); counted forms step
+paragraph-by-paragraph and clamp at BOF/EOF. Brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
 
 ---
 
@@ -295,9 +278,9 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 | `yiw`        | Inner word                                        |
 | `yaw`        | Around word (includes spaces)                     |
 
-Counted yank caveat: counted `word`/`WORD` yank motions are intentionally not
-implemented (`y2w`, `2yw`, `y2W`, `2yW`, etc. cancel the pending operator).
-Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
+Counted `word`/`WORD` yank (`y2w`, `2yw`, `y2W`, `2yW`, …) is intentionally
+not implemented and cancels the pending operator. Linewise counted yank
+(`{count}yy`, `y{count}j/k`) is supported.
 
 ---
 
@@ -310,8 +293,8 @@ Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
 | `{count}p`   | Put `{count}` times after cursor                            |
 | `{count}P`   | Put `{count}` times before cursor                           |
 
-Put reads the OS clipboard first. If OS clipboard text cannot be read quickly, pi-vim falls back to the internal unnamed-register shadow.
-Line-wise detection: paste text ending in `\n` is treated as line-wise.
+Put reads the OS clipboard first, falling back to the internal unnamed-register shadow on slow read.
+Paste text ending in `\n` is treated as line-wise.
 
 ---
 
@@ -329,61 +312,46 @@ Line-wise detection: paste text ending in `\n` is treated as line-wise.
 
 ## register and clipboard policy
 
-- By default, the unnamed register is OS-backed, matching Vim's `set clipboard=unnamed` behavior.
-- Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
-  (including `dd`/`d_`, `{count}dd`, `d{count}j/k`, `dG`, `yy`/`y_`, `{count}yy`,
-  `y{count}j/k`, `yG`) writes to an internal shadow register synchronously and mirrors that text to the OS clipboard best-effort.
-- Rapid register writes are coalesced. After writes settle, the mirror attempts
-  only the latest pending value; intermediate OS clipboard values are not guaranteed.
-- `p` / `P` read the OS clipboard first. If the read fails or times out, they fall back to the internal shadow register.
-- While a local register write is still mirroring to the OS clipboard, `p` / `P` use the internal shadow so immediate yank/delete → put sequences stay ordered.
-- Pi owns OS and terminal clipboard backend behavior.
-- Wayland `wl-copy` fallback mirroring is best-effort. Rapid local register writes
-  may leave the external OS clipboard stale, but pi-vim's internal shadow remains
-  authoritative for immediate `p` / `P`.
-
-Future option stub: a later release may expose a setting to choose between OS-backed unnamed registers and internal-only registers. This release keeps the Vim-like OS-backed default.
+- Unnamed register is OS-backed by default (roughly Vim's `clipboard=unnamed`).
+- `d` / `c` / `y` write a synchronous internal shadow, then mirror to the OS clipboard best-effort.
+- Rapid writes coalesce: only the latest pending value is guaranteed to be mirrored.
+- `p` / `P` read the OS clipboard first, falling back to the shadow on read failure/timeout.
+- While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
+- Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
 
 ---
 
 ## known differences from full Vim
 
-| area                  | this extension                         | full Vim                      |
-|-----------------------|----------------------------------------|-------------------------------|
-| `$` motion            | Moves past last char (readline CTRL+E) | Moves to last char            |
-| `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for `word` + `WORD` motions | Cross-line                    |
-| `0` / `$` operators   | Exclusive of anchor col                | `0` inclusive of col 0        |
-| Undo depth            | Delegates to underlying readline undo  | Full per-change undo tree     |
-| Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo is stepwise, clamps to available history, and preserves single-step undo granularity) | `<C-r>`                       |
-| Visual mode           | Not implemented                        | `v`, `V`, `<C-v>`            |
-| Text objects          | Supports `iw`/`aw` only               | Full text-object set           |
-| Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `r`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
-| Named registers       | Not implemented (`"a`, etc.)           | Supported                     |
-| Macros                | Not implemented (`q`, `@`)             | Supported                     |
-| Search                | Not implemented (`/`, `?`, `n`, `N`)   | Supported                     |
-| Ex commands           | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
-| Multi-line operators  | Supports `d/c/y` with `w/e/b` and `W/E/B`, plus `j/k` counts and `G`; not full Vim motion matrix | Rich cross-line semantics |
+| area | this extension | full Vim |
+|------|----------------|----------|
+| `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
+| `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
+| `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
+| Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
+| Visual mode | Not implemented | `v`, `V`, `<C-v>` |
+| Text objects | `iw` / `aw` only | Full text-object set |
+| Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
+| Registers / macros / search | Not implemented | Supported |
+| Ex commands | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
+| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---
 
 ## out of scope
 
-These are **explicitly deferred** and not planned for this feature:
+Explicitly deferred:
 
 - Visual modes (`v`, `V`, block visual)
-- Extended text objects beyond word (`ip`, `i"`, `i(`, etc.)
-- Named registers (`"a`, `"b`, …)
-- Macros (`q{char}`, `@{char}`)
-- Extended ex command surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
-- Search mode (`/`, `?`, `n`, `N`)
-- Repeat (`.`)
-- Replace mode (`R`) — only single-char `r{char}` is supported
-- Extended count prefix beyond currently supported motions (e.g. `:`, global operator counts)
-- No insert-mode `<C-r>` feature expansion beyond current underlying-editor behavior.
-- No cross-session redo persistence.
-- No upstream `pi-tui` redo prerequisite in this wave.
-- Window / tab / buffer management
-- Plugin / runtime ecosystem compatibility
+- Text objects beyond word (`ip`, `i"`, `i(`, …)
+- Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
+- Ex surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
+- Search (`/`, `?`, `n`, `N`), repeat (`.`)
+- Replace mode (`R`) — only `r{char}` is supported
+- Count prefix beyond currently supported motions
+- No insert-mode `<C-r>` expansion, no cross-session redo persistence
+- No upstream `pi-tui` redo prerequisite
+- Window / tab / buffer management, plugin ecosystem compatibility
 
 ---
 
