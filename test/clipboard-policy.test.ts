@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_CLIPBOARD_MIRROR_POLICY,
+  readPiVimBooleanSetting,
   readPiVimClipboardMirrorSetting,
+  readPiVimModeColorSettings,
   resolveClipboardMirrorPolicy,
 } from "../clipboard-policy.js";
 
@@ -90,5 +92,90 @@ describe("piVim clipboard mirror settings reader", () => {
     assert.equal(result.policy, "all");
     assert.match(result.warning ?? "", /bad/);
     assert.match(result.warning ?? "", /all, yank, never/);
+  });
+});
+
+describe("piVim mode color settings reader", () => {
+  it("returns undefined when color settings are missing", () => {
+    assert.equal(readPiVimModeColorSettings(undefined, undefined, "modeIndicatorColors"), undefined);
+    assert.equal(readPiVimModeColorSettings({}, {}, "inputBorderModeColors"), undefined);
+  });
+
+  it("reads all mode color definitions", () => {
+    assert.deepEqual(
+      readPiVimModeColorSettings(
+        { piVim: { modeIndicatorColors: { insert: "borderMuted", normal: "#88C0D0", ex: "warning" } } },
+        {},
+        "modeIndicatorColors",
+      ),
+      { insert: "borderMuted", normal: "#88C0D0", ex: "warning" },
+    );
+  });
+
+  it("lets project mode color definitions override global per mode", () => {
+    assert.deepEqual(
+      readPiVimModeColorSettings(
+        { piVim: { modeIndicatorColors: { insert: "globalInsert", normal: "globalNormal", ex: "globalEx" } } },
+        { piVim: { modeIndicatorColors: { normal: "projectNormal" } } },
+        "modeIndicatorColors",
+      ),
+      { insert: "globalInsert", normal: "projectNormal", ex: "globalEx" },
+    );
+  });
+
+  it("ignores non-string, blank, and unsafe mode color values", () => {
+    assert.deepEqual(
+      readPiVimModeColorSettings(
+        { piVim: { modeIndicatorColors: { insert: "globalInsert", normal: "globalNormal" } } },
+        { piVim: { modeIndicatorColors: { insert: "", normal: 42, ex: " projectEx ", unsafe: "\x1b[31m" } } },
+        "modeIndicatorColors",
+      ),
+      { insert: "globalInsert", normal: "globalNormal", ex: "projectEx" },
+    );
+
+    assert.deepEqual(
+      readPiVimModeColorSettings(
+        {},
+        { piVim: { modeIndicatorColors: { insert: "bad token", normal: "#12345g", ex: "#123456" } } },
+        "modeIndicatorColors",
+      ),
+      { ex: "#123456" },
+    );
+  });
+
+  it("reads input border mode colors with the same per-mode override behavior", () => {
+    assert.deepEqual(
+      readPiVimModeColorSettings(
+        { piVim: { inputBorderModeColors: { insert: "globalInsert", normal: "globalNormal" } } },
+        { piVim: { inputBorderModeColors: { ex: "projectEx" } } },
+        "inputBorderModeColors",
+      ),
+      { insert: "globalInsert", normal: "globalNormal", ex: "projectEx" },
+    );
+  });
+});
+
+describe("piVim boolean settings reader", () => {
+  it("reads global booleans and lets project booleans override", () => {
+    assert.equal(readPiVimBooleanSetting({ piVim: { syncBorderColorWithMode: true } }, {}, "syncBorderColorWithMode"), true);
+    assert.equal(
+      readPiVimBooleanSetting(
+        { piVim: { syncBorderColorWithMode: true } },
+        { piVim: { syncBorderColorWithMode: false } },
+        "syncBorderColorWithMode",
+      ),
+      false,
+    );
+  });
+
+  it("treats malformed project boolean settings as an override instead of falling back to global", () => {
+    assert.equal(
+      readPiVimBooleanSetting(
+        { piVim: { syncBorderColorWithMode: true } },
+        { piVim: { syncBorderColorWithMode: "true" } },
+        "syncBorderColorWithMode",
+      ),
+      undefined,
+    );
   });
 });

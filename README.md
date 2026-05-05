@@ -32,6 +32,30 @@ Clipboard write mirroring is controlled by `piVim.clipboardMirror`:
 
 The setting controls write mirroring only. `p` / `P` keep the paste policy documented below.
 
+Mode indicator and optional input-border colors are controlled by `piVim.modeIndicatorColors`, `piVim.syncBorderColorWithMode`, and `piVim.inputBorderModeColors`:
+
+```json
+{
+  "piVim": {
+    "modeIndicatorColors": {
+      "insert": "borderMuted",
+      "normal": "borderAccent",
+      "ex": "warning"
+    },
+    "syncBorderColorWithMode": true,
+    "inputBorderModeColors": {
+      "insert": "borderMuted",
+      "normal": "borderAccent",
+      "ex": "warning"
+    }
+  }
+}
+```
+
+Each color object may define `insert`, `normal`, and `ex`. Project settings override global settings per mode. Color values may be Pi theme color tokens or `#RRGGBB` hex colors.
+
+Input-border color syncing is disabled by default and requires `syncBorderColorWithMode: true`. When enabled, the editor border follows mode indicator colors unless `inputBorderModeColors` defines separate per-mode colors.
+
 ## contributor setup
 
 Hooks install with `npm install` after cloning. To wire them explicitly:
@@ -59,7 +83,7 @@ u          # undo
 2}         # jump two paragraphs forward
 ```
 
-Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored.
+Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored and configurable.
 
 Requires `@mariozechner/pi-tui >= 0.47.0`. With `pi-tui >= 0.49.3` and DECSCUSR support, cursor shape follows mode; otherwise software cursor remains.
 

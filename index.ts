@@ -51,6 +51,7 @@ import {
   readPiVimSettings,
   resolveClipboardMirrorPolicy,
   type ClipboardMirrorPolicy,
+  type ModeColorSettings,
   type RegisterWriteSource,
 } from "./clipboard-policy.js";
 import {
@@ -101,10 +102,22 @@ type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 type ClipboardReadFn = () => string | null;
 type ClipboardProcess = ReturnType<typeof spawn>;
 
-type ModeLabelColorizers = {
+type ModeColorizers = {
   insert: (s: string) => string;
   normal: (s: string) => string;
   ex: (s: string) => string;
+};
+
+type RequiredModeColors = Required<ModeColorSettings>;
+
+type ModeLabelColorizers = ModeColorizers;
+
+type ThemeLike = {
+  fg(color: string, text: string): string;
+};
+
+type ModalEditorOptions = {
+  borderColorizers?: ModeColorizers | null;
 };
 
 type CursorShapeSequence =
@@ -206,6 +219,65 @@ function stripSoftwareCursorAfterMarker(line: string): string {
   return line.slice(0, cursorStart)
     + line.slice(cursorContentStart, reset.index)
     + line.slice(reset.index + reset.sequence.length);
+}
+
+function normalizeHexColor(value: string): string | undefined {
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : undefined;
+}
+
+function fgHex(hex: string, text: string): string {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return text;
+
+  const r = Number.parseInt(normalized.slice(1, 3), 16);
+  const g = Number.parseInt(normalized.slice(3, 5), 16);
+  const b = Number.parseInt(normalized.slice(5, 7), 16);
+  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+}
+
+function isSafeThemeToken(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value.trim());
+}
+
+function colorizeWithThemeOrHex(theme: ThemeLike, color: string, fallbackColor: string, text: string): string {
+  const explicitHex = normalizeHexColor(color);
+  if (explicitHex) return fgHex(explicitHex, text);
+  if (!isSafeThemeToken(color)) return theme.fg(fallbackColor, text);
+
+  try {
+    return theme.fg(color.trim(), text);
+  } catch {
+    return theme.fg(fallbackColor, text);
+  }
+}
+
+const DEFAULT_MODE_COLORS: RequiredModeColors = {
+  insert: "borderMuted",
+  normal: "borderAccent",
+  ex: "warning",
+};
+
+function resolveModeColors(colors?: ModeColorSettings, fallback: RequiredModeColors = DEFAULT_MODE_COLORS): RequiredModeColors {
+  return {
+    insert: colors?.insert ?? fallback.insert,
+    normal: colors?.normal ?? fallback.normal,
+    ex: colors?.ex ?? fallback.ex,
+  };
+}
+
+function buildModeColorizers(
+  theme: ThemeLike | null | undefined,
+  colors: RequiredModeColors,
+  transform: (text: string) => string = (text) => text,
+): ModeColorizers | null {
+  if (!theme) return null;
+
+  return {
+    insert: (text: string) => colorizeWithThemeOrHex(theme, colors.insert, DEFAULT_MODE_COLORS.insert, transform(text)),
+    normal: (text: string) => colorizeWithThemeOrHex(theme, colors.normal, DEFAULT_MODE_COLORS.normal, transform(text)),
+    ex: (text: string) => colorizeWithThemeOrHex(theme, colors.ex, DEFAULT_MODE_COLORS.ex, transform(text)),
+  };
 }
 
 type ClipboardCircuitBreaker = {
@@ -549,6 +621,7 @@ export class ModalEditor extends CustomEditor {
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: ModeLabelColorizers | null;
+  private readonly borderColorizers: ModeColorizers | null;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
 
@@ -565,10 +638,13 @@ export class ModalEditor extends CustomEditor {
     theme: CustomEditorConstructorArgs[1],
     kb: CustomEditorConstructorArgs[2],
     labelColorizers?: ModeLabelColorizers | null,
+    options?: ModalEditorOptions,
   ) {
     super(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.labelColorizers = labelColorizers ?? null;
+    this.borderColorizers = options?.borderColorizers ?? null;
+    this.syncBorderColorForMode();
   }
 
   // Test seams
@@ -783,15 +859,18 @@ export class ModalEditor extends CustomEditor {
     this.pendingExCommand = ":";
     this.acceptingBracketedPasteInExCommand = false;
     this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    this.syncBorderColorForMode();
   }
 
   private clearPendingExCommand(): void {
+    const wasInExMode = this.pendingExCommand !== null;
     const shouldDiscardBracketedPasteTail = this.acceptingBracketedPasteInExCommand
       || this.pendingEscWhileAcceptingBracketedPasteInExCommand;
 
     this.pendingExCommand = null;
     this.acceptingBracketedPasteInExCommand = false;
     this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    if (wasInExMode) this.syncBorderColorForMode();
 
     if (shouldDiscardBracketedPasteTail) {
       this.discardingBracketedPasteInNormalMode = true;
@@ -1078,7 +1157,7 @@ export class ModalEditor extends CustomEditor {
     }
     if (this.mode === "insert") {
       this.clearUnderlyingPasteStateIfActive();
-      this.mode = "normal";
+      this.setMode("normal");
     } else {
       super.handleInput("\x1b"); // pass escape to abort agent
     }
@@ -1286,7 +1365,7 @@ export class ModalEditor extends CustomEditor {
     } else if (this.pendingOperator === "c") {
       this.deleteWithCharMotion(pendingMotion, data);
       this.pendingOperator = null;
-      this.mode = "insert";
+      this.setMode("insert");
     } else if (this.pendingOperator === "y") {
       this.yankWithCharMotion(pendingMotion, data);
       this.pendingOperator = null;
@@ -1353,7 +1432,7 @@ export class ModalEditor extends CustomEditor {
     if (range.endAbs === range.startAbs) {
       if (pendingOperator === "c") {
         this.moveCursorToAbsoluteIndex(range.startAbs);
-        this.mode = "insert";
+        this.setMode("insert");
       }
       return;
     }
@@ -1365,7 +1444,7 @@ export class ModalEditor extends CustomEditor {
 
     if (pendingOperator === "c") {
       this.deleteRangeByAbsolute(range.startAbs, range.endAbs);
-      this.mode = "insert";
+      this.setMode("insert");
       return;
     }
 
@@ -1480,7 +1559,7 @@ export class ModalEditor extends CustomEditor {
 
       this.cutLine();
       this.pendingOperator = null;
-      this.mode = "insert";
+      this.setMode("insert");
       return;
     }
 
@@ -1501,7 +1580,7 @@ export class ModalEditor extends CustomEditor {
         this.replaceTextInBuffer(newText, cursorAbs);
       }
       this.pendingOperator = null;
-      this.mode = "insert";
+      this.setMode("insert");
       return;
     }
 
@@ -1537,7 +1616,7 @@ export class ModalEditor extends CustomEditor {
       : data;
     if (this.deleteWithMotion(effectiveMotion, motionCount)) {
       this.pendingOperator = null;
-      this.mode = "insert";
+      this.setMode("insert");
       return;
     }
 
@@ -1830,29 +1909,29 @@ export class ModalEditor extends CustomEditor {
     const seq = NORMAL_KEYS[key];
     switch (key) {
       case "i":
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "a":
-        this.mode = "insert";
+        this.setMode("insert");
         if (!this.isCursorAtOrPastEol()) {
           super.handleInput(ESC_RIGHT);
         }
         break;
       case "A":
-        this.mode = "insert";
+        this.setMode("insert");
         super.handleInput(CTRL_E);
         break;
       case "I":
-        this.mode = "insert";
+        this.setMode("insert");
         this.moveCursorToFirstNonWhitespace();
         break;
       case "o":
         this.openLineBelow();
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "O":
         this.openLineAbove();
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "D":
         this.takeTotalCount(1);
@@ -1861,16 +1940,16 @@ export class ModalEditor extends CustomEditor {
       case "C":
         this.takeTotalCount(1);
         this.cutToEndOfLine();
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "S":
         this.takeTotalCount(1);
         this.cutCurrentLineContent();
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "s":
         this.cutCharUnderCursor();
-        this.mode = "insert";
+        this.setMode("insert");
         break;
       case "x":
         this.cutCharUnderCursor();
@@ -3028,10 +3107,24 @@ export class ModalEditor extends CustomEditor {
     return lines;
   }
 
+  private getActiveMode(): Mode | "ex" {
+    if (this.pendingExCommand !== null) return "ex";
+    return this.mode;
+  }
+
+  private setMode(mode: Mode): void {
+    this.mode = mode;
+    this.syncBorderColorForMode();
+  }
+
   private getModeLabelColorizer(): ((s: string) => string) | null {
     if (!this.labelColorizers) return null;
-    if (this.pendingExCommand !== null) return this.labelColorizers.ex;
-    return this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal;
+    return this.labelColorizers[this.getActiveMode()];
+  }
+
+  private syncBorderColorForMode(): void {
+    if (!this.borderColorizers) return;
+    this.borderColor = this.borderColorizers[this.getActiveMode()];
   }
 
   private getModeLabel(): string {
@@ -3074,15 +3167,16 @@ export default function (pi: ExtensionAPI) {
     }
 
     const t = ctx.ui.theme;
+    const modeIndicatorColors = resolveModeColors(piVimSettings.modeIndicatorColors);
+    const borderColors = resolveModeColors(piVimSettings.inputBorderModeColors, modeIndicatorColors);
     const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
-    const colorizers = t ? {
-      insert: (s: string) => t.fg("borderMuted", reverseVideo(s)),
-      normal: (s: string) => t.fg("borderAccent", reverseVideo(s)),
-      ex: (s: string) => t.fg("warning", reverseVideo(s)),
-    } : null;
+    const colorizers = buildModeColorizers(t, modeIndicatorColors, reverseVideo);
+    const borderColorizers = piVimSettings.syncBorderColorWithMode === true
+      ? buildModeColorizers(t, borderColors)
+      : null;
     ctx.ui.setEditorComponent((tui, theme, kb) => {
       cursorShapeCleanup = enableCursorShapeSupport(tui);
-      const editor = new ModalEditor(tui, theme, kb, colorizers);
+      const editor = new ModalEditor(tui, theme, kb, colorizers, { borderColorizers });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));

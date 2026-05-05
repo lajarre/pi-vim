@@ -132,7 +132,7 @@ type InstalledExtension = {
   readonly sessionEndHandlerCount: number;
 };
 
-async function installExtensionWithEditorFactory(): Promise<InstalledExtension> {
+async function installExtensionWithEditorFactory(theme: typeof stubTheme = stubTheme): Promise<InstalledExtension> {
   const pi = createExtensionApiHarness();
   let editorFactory: EditorFactory | null = null;
   let notificationCalls = 0;
@@ -142,7 +142,7 @@ async function installExtensionWithEditorFactory(): Promise<InstalledExtension> 
     cwd: process.cwd(),
     hasUI: true,
     ui: {
-      theme: stubTheme,
+      theme,
       setEditorComponent(factory: EditorFactory): void {
         editorFactory = factory;
       },
@@ -663,6 +663,178 @@ describe("ex mini-mode", () => {
     assert.deepEqual(calls, ["ex: EX :_ "]);
     assert.ok(footer.includes(" EX :_ "));
     assert.ok(footer.endsWith("\x1b[35m EX :_ \x1b[39m"));
+  });
+
+  it("uses configured mode indicator colors from piVim settings", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeIndicatorColors: {
+        insert: "#112233",
+        normal: "normalToken",
+        ex: "exToken",
+      },
+    }));
+    const themeCalls: string[] = [];
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        themeCalls.push(color);
+        if (color.startsWith("#")) throw new Error("Unknown theme color");
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("\x1b[38;2;17;34;51m\x1b[7m INSERT \x1b[27m\x1b[39m"));
+
+      editor.handleInput("\x1b");
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<normalToken>\x1b[7m NORMAL \x1b[27m</normalToken>"));
+
+      editor.handleInput(":");
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<exToken>\x1b[7m EX :_ \x1b[27m</exToken>"));
+      assert.ok(!themeCalls.includes("#112233"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("falls back for unknown or unsafe configured color tokens", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeIndicatorColors: {
+        insert: "unknownToken",
+        normal: "bad token",
+      },
+    }));
+    const themeCalls: string[] = [];
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        themeCalls.push(color);
+        if (color === "unknownToken") throw new Error("Unknown theme color: unknownToken");
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<borderMuted>\x1b[7m INSERT \x1b[27m</borderMuted>"));
+
+      editor.handleInput("\x1b");
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<borderAccent>\x1b[7m NORMAL \x1b[27m</borderAccent>"));
+      assert.ok(!themeCalls.includes("bad token"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("falls back when a configured theme color throws", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeIndicatorColors: { insert: "brokenToken" },
+    }));
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        if (color === "brokenToken") throw new Error("theme exploded");
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<borderMuted>\x1b[7m INSERT \x1b[27m</borderMuted>"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves the editor border color unchanged unless border sync is explicitly enabled", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeIndicatorColors: { insert: "insertMode" },
+      inputBorderModeColors: { insert: "insertBorder" },
+    }));
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.equal(editor.render(8)[0], "─".repeat(8));
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncs the editor border color with the active mode when enabled", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      syncBorderColorWithMode: true,
+      modeIndicatorColors: {
+        insert: "insertMode",
+        normal: "normalMode",
+        ex: "exMode",
+      },
+    }));
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.ok(editor.render(8)[0]?.includes("<insertMode>─</insertMode>"));
+
+      editor.handleInput("\x1b");
+      assert.ok(editor.render(8)[0]?.includes("<normalMode>─</normalMode>"));
+
+      editor.handleInput(":");
+      assert.ok(editor.render(8)[0]?.includes("<exMode>─</exMode>"));
+
+      editor.handleInput("\x1b");
+      assert.ok(editor.render(8)[0]?.includes("<normalMode>─</normalMode>"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("lets input border colors override mode indicator colors per mode", async () => {
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      syncBorderColorWithMode: true,
+      modeIndicatorColors: { insert: "insertMode", normal: "normalMode", ex: "exMode" },
+      inputBorderModeColors: { normal: "normalBorder" },
+    }));
+    const theme = {
+      ...stubTheme,
+      fg(color: string, text: string) {
+        return `<${color}>${text}</${color}>`;
+      },
+    } as typeof stubTheme;
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(stubTui, theme, stubKeybindings);
+
+      assert.ok(editor.render(8)[0]?.includes("<insertMode>─</insertMode>"));
+
+      editor.handleInput("\x1b");
+      assert.ok(editor.render(8)[0]?.includes("<normalBorder>─</normalBorder>"));
+      assert.ok((editor.render(80).at(-1) ?? "").endsWith("<normalMode>\x1b[7m NORMAL \x1b[27m</normalMode>"));
+    } finally {
+      restore();
+    }
   });
 
   it(":q refuses to quit when prompt has non-whitespace text", () => {
