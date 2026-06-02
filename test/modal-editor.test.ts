@@ -4069,6 +4069,62 @@ describe("single-key edits — x / s / S / D / C", () => {
   });
 });
 
+describe("dot repeat — .", () => {
+  it("repeats the last single-key normal-mode edit", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "."]);
+
+    assert.equal(editor.getText(), "cd");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("replays the original command count when repeating a counted edit", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "x", "."]);
+
+    assert.equal(editor.getText(), "ef");
+    assert.equal(editor.getRegister(), "cd");
+  });
+
+  it("uses a count before . to repeat the stored change multiple times", () => {
+    const { editor } = createEditorWithSpy("abcde");
+
+    sendKeys(editor, ["x", "3", "."]);
+
+    assert.equal(editor.getText(), "e");
+    assert.equal(editor.getRegister(), "d");
+  });
+
+  it("repeats operator-pending changes including their motions", () => {
+    const { editor } = createEditorWithSpy("one two three");
+
+    sendKeys(editor, ["d", "w", "."]);
+
+    assert.equal(editor.getText(), "three");
+    assert.equal(editor.getRegister(), "two ");
+  });
+
+  it("repeats insert text captured by an insert-mode change", () => {
+    const { editor } = createEditorWithSpy("X");
+
+    sendKeys(editor, ["i", "a", "b", "c", "\x1b", "0", "."]);
+
+    assert.equal(editor.getText(), "abcabcX");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("does not let non-mutating yanks replace the last repeatable change", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["x", "Y", "."]);
+
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getRegister(), "b");
+  });
+});
+
 describe("Universal Counts: Edits and Put", () => {
   it("3x deletes three chars under cursor", () => {
     const { editor } = createEditorWithSpy("abcdef");
