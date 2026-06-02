@@ -4106,6 +4106,57 @@ describe("dot repeat — .", () => {
     assert.equal(editor.getRegister(), "two ");
   });
 
+  it("repeats text-object deletes", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["d", "i", "w", "."]);
+
+    assert.equal(editor.getText(), "  baz");
+    assert.equal(editor.getRegister(), "bar");
+  });
+
+  it("repeats text-object changes with captured insert text", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["c", "i", "w", "X", "\x1b", "."]);
+
+    assert.equal(editor.getText(), "X X baz");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats put commands", () => {
+    const p = createEditorWithSpy("abc").editor;
+    p.setRegister("X");
+    sendKeys(p, ["p", "."]);
+
+    const P = createEditorWithSpy("abc").editor;
+    P.setRegister("X");
+    sendKeys(P, ["P", "."]);
+
+    assert.equal(p.getText(), "aXbXc");
+    assert.equal(P.getText(), "XXabc");
+  });
+
+  it("repeats line joins", () => {
+    const join = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(join, ["J", "."]);
+
+    const rawJoin = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(rawJoin, ["g", "J", "."]);
+
+    assert.equal(join.getText(), "a b c");
+    assert.equal(rawJoin.getText(), "abc");
+  });
+
+  it("repeats replace commands with their replacement character", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["r", "Z", "l", "."]);
+
+    assert.equal(editor.getText(), "ZZc");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("repeats insert text captured by an insert-mode change", () => {
     const { editor } = createEditorWithSpy("X");
 
