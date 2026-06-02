@@ -1227,6 +1227,10 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (this.shouldInsertNewLineInsteadOfSubmit(data)) {
+          super.handleInput(NEWLINE);
+          return;
+        }
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           super.handleInput(CTRL_E);
           return;
@@ -1371,6 +1375,10 @@ export class ModalEditor extends CustomEditor {
       matchesKey(data, "enter") ||
       matchesKey(data, "return")
     );
+  }
+
+  private shouldInsertNewLineInsteadOfSubmit(data: string): boolean {
+    return !this.isShowingAutocomplete() && this.isEnterLikeInput(data);
   }
 
   private isBackspaceLikeInput(data: string): boolean {

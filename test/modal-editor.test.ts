@@ -883,6 +883,34 @@ describe("mode transitions", () => {
     assert.equal(editor.getMode(), "normal");
   });
 
+  it("insert-mode submit key inserts a newline instead of submitting", () => {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    let submitted: string | null = null;
+    editor.onSubmit = (text) => {
+      submitted = text;
+    };
+
+    sendKeys(editor, ["h", "e", "l", "l", "o", "\r", "w", "o", "r", "l", "d"]);
+
+    assert.equal(editor.getText(), "hello\nworld");
+    assert.equal(editor.getMode(), "insert");
+    assert.equal(submitted, null);
+  });
+
+  it("normal-mode submit key still submits the prompt", () => {
+    const { editor } = createEditorWithSpy("hello");
+    let submitted: string | null = null;
+    editor.onSubmit = (text) => {
+      submitted = text;
+    };
+
+    sendKeys(editor, ["\r"]);
+
+    assert.equal(submitted, "hello");
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("insert mode keeps bracketed paste payload text", () => {
     const { editor } = createEditorWithSpy("abc");
     sendKeys(editor, ["i", "\x1b[200~PASTE\x1b[201~"]);
