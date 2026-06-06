@@ -88,10 +88,8 @@ const INSERT_CURSOR_SHAPE = "\x1b[5 q";
 const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
 const SOFTWARE_CURSOR_SPACE = "\x1b[7m \x1b[0m";
-/* eslint-disable no-control-regex -- DECSCUSR uses ESC. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: DECSCUSR uses ESC.
+/* eslint-disable-next-line no-control-regex */
 const DECSCUSR_PATTERN = /\x1b\[[015] q/;
-/* eslint-enable no-control-regex */
 
 function focusEditor(editor: ModalEditor): void {
   editor.focused = true;
@@ -891,6 +889,34 @@ describe("mode transitions", () => {
     assert.equal(editor.getMode(), "normal");
   });
 
+  it("insert-mode submit key inserts a newline instead of submitting", () => {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    let submitted: string | null = null;
+    editor.onSubmit = (text) => {
+      submitted = text;
+    };
+
+    sendKeys(editor, ["h", "e", "l", "l", "o", "\r", "w", "o", "r", "l", "d"]);
+
+    assert.equal(editor.getText(), "hello\nworld");
+    assert.equal(editor.getMode(), "insert");
+    assert.equal(submitted, null);
+  });
+
+  it("normal-mode submit key still submits the prompt", () => {
+    const { editor } = createEditorWithSpy("hello");
+    let submitted: string | null = null;
+    editor.onSubmit = (text) => {
+      submitted = text;
+    };
+
+    sendKeys(editor, ["\r"]);
+
+    assert.equal(submitted, "hello");
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("insert mode keeps bracketed paste payload text", () => {
     const { editor } = createEditorWithSpy("abc");
     sendKeys(editor, ["i", "\x1b[200~PASTE\x1b[201~"]);
@@ -1256,7 +1282,7 @@ describe("clipboard mirror policy settings", () => {
 });
 
 describe("mode color settings", () => {
-  const reverseInsertLabel = "\x1b[7m INSERT \x1b[27m";
+  const reverseInsertLabel = "\x1b[48;2;255;255;255;1;7m INSERT \x1b[27;22;49m";
 
   it("mode label uses default insert, normal, and EX mode color tokens", async () => {
     const theme = createRecordingTheme();
@@ -1278,7 +1304,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["borderMuted", "borderAccent", "warning"],
+        ["magenta", "normalBlue", "warning"],
       );
     } finally {
       restore();
@@ -1331,7 +1357,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["primary", "borderAccent", "warning"],
+        ["primary", "normalBlue", "warning"],
       );
     } finally {
       restore();
@@ -1364,6 +1390,35 @@ describe("mode color settings", () => {
     }
   });
 
+  it("mode label falls back to ANSI color code when default magenta color token is unknown/throws in theme", async () => {
+    const theme = createRecordingTheme(["magenta"]);
+    const restore = setPiVimSettingsReaderForTests(() => ({}));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+
+      const lines = editor.render(80);
+      const footer = lines.at(-1) ?? "";
+
+      assert.deepEqual(
+        theme.fgCalls.map((call) => call.token),
+        ["magenta"],
+      );
+      assert.ok(footer.includes("\x1b[38;2;255;0;255m"));
+      assert.ok(footer.includes(reverseInsertLabel));
+      assert.ok(
+        footer.includes(`\x1b[38;2;255;0;255m${reverseInsertLabel}\x1b[39m`),
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("mode label passes reverse-video text to theme.fg", async () => {
     const theme = createRecordingTheme();
     const restore = setPiVimSettingsReaderForTests(() => ({}));
@@ -1379,7 +1434,7 @@ describe("mode color settings", () => {
       editor.render(80);
 
       assert.deepEqual(theme.fgCalls, [
-        { token: "borderMuted", text: reverseInsertLabel },
+        { token: "magenta", text: reverseInsertLabel },
       ]);
     } finally {
       restore();
@@ -4093,6 +4148,113 @@ describe("single-key edits — x / s / S / D / C", () => {
     assert.equal(editor.getRegister(), "hello world");
     assert.equal(editor.getText(), "");
     assert.equal(editor.getMode(), "insert");
+  });
+});
+
+describe("dot repeat — .", () => {
+  it("repeats the last single-key normal-mode edit", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "."]);
+
+    assert.equal(editor.getText(), "cd");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("replays the original command count when repeating a counted edit", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "x", "."]);
+
+    assert.equal(editor.getText(), "ef");
+    assert.equal(editor.getRegister(), "cd");
+  });
+
+  it("uses a count before . to repeat the stored change multiple times", () => {
+    const { editor } = createEditorWithSpy("abcde");
+
+    sendKeys(editor, ["x", "3", "."]);
+
+    assert.equal(editor.getText(), "e");
+    assert.equal(editor.getRegister(), "d");
+  });
+
+  it("repeats operator-pending changes including their motions", () => {
+    const { editor } = createEditorWithSpy("one two three");
+
+    sendKeys(editor, ["d", "w", "."]);
+
+    assert.equal(editor.getText(), "three");
+    assert.equal(editor.getRegister(), "two ");
+  });
+
+  it("repeats text-object deletes", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["d", "i", "w", "."]);
+
+    assert.equal(editor.getText(), "  baz");
+    assert.equal(editor.getRegister(), "bar");
+  });
+
+  it("repeats text-object changes with captured insert text", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["c", "i", "w", "X", "\x1b", "."]);
+
+    assert.equal(editor.getText(), "X X baz");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats put commands", () => {
+    const p = createEditorWithSpy("abc").editor;
+    p.setRegister("X");
+    sendKeys(p, ["p", "."]);
+
+    const P = createEditorWithSpy("abc").editor;
+    P.setRegister("X");
+    sendKeys(P, ["P", "."]);
+
+    assert.equal(p.getText(), "aXbXc");
+    assert.equal(P.getText(), "XXabc");
+  });
+
+  it("repeats line joins", () => {
+    const join = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(join, ["J", "."]);
+
+    const rawJoin = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(rawJoin, ["g", "J", "."]);
+
+    assert.equal(join.getText(), "a b c");
+    assert.equal(rawJoin.getText(), "abc");
+  });
+
+  it("repeats replace commands with their replacement character", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["r", "Z", "l", "."]);
+
+    assert.equal(editor.getText(), "ZZc");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats insert text captured by an insert-mode change", () => {
+    const { editor } = createEditorWithSpy("X");
+
+    sendKeys(editor, ["i", "a", "b", "c", "\x1b", "0", "."]);
+
+    assert.equal(editor.getText(), "abcabcX");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("does not let non-mutating yanks replace the last repeatable change", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["x", "Y", "."]);
+
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getRegister(), "b");
   });
 });
 

@@ -73,8 +73,8 @@ const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 const CLIPBOARD_READ_TIMEOUT_MS = 750;
 const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
 const MODE_COLORS = {
-  insert: "borderMuted",
-  normal: "borderAccent",
+  insert: "magenta",
+  normal: "normalBlue",
   ex: "warning",
 } as const;
 const TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -82,6 +82,15 @@ const TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 type EditorSnapshot = {
   text: string;
   cursor: { line: number; col: number };
+};
+
+type RepeatRecording = {
+  /** Raw key inputs that reconstruct one repeatable normal-mode change. */
+  keys: string[];
+  /** Text before the command started; used to avoid recording no-op changes. */
+  startText: string;
+  /** True while the command is collecting insert-mode input until Escape. */
+  captureInsert: boolean;
 };
 
 type TransitionState = "none" | "undo" | "redo";
@@ -132,6 +141,30 @@ function resolveModeColors(
     ex: colors?.ex ?? MODE_COLORS.ex,
   };
 }
+const ANSI_COLORS: Record<string, string> = {
+  black: "30",
+  red: "31",
+  green: "32",
+  yellow: "33",
+  blue: "34",
+  magenta: "38;2;255;0;255",
+  normalblue: "38;2;0;122;204",
+  cyan: "36",
+  white: "37",
+  gray: "90",
+  grey: "90",
+  brightblack: "90",
+  darkgray: "90",
+  darkgrey: "90",
+  brightred: "91",
+  brightgreen: "92",
+  brightyellow: "93",
+  brightblue: "94",
+  brightmagenta: "38;2;255;0;255",
+  brightcyan: "96",
+  brightwhite: "97",
+};
+
 function colorizeWithTheme(
   theme: ThemeLike,
   token: string,
@@ -139,14 +172,40 @@ function colorizeWithTheme(
   text: string,
 ): string {
   const trimmedToken = token.trim();
+
+  const applyCustomColor = (color: string): string | null => {
+    const lower = color.toLowerCase();
+    if (lower in ANSI_COLORS) {
+      return `\x1b[${ANSI_COLORS[lower]}m${text}\x1b[39m`;
+    }
+    if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+    }
+    return null;
+  };
+
   if (TOKEN.test(trimmedToken)) {
     try {
       return theme.fg(trimmedToken, text);
     } catch {
-      return theme.fg(fallback, text);
+      const custom = applyCustomColor(trimmedToken);
+      if (custom !== null) return custom;
     }
+  } else {
+    const custom = applyCustomColor(trimmedToken);
+    if (custom !== null) return custom;
   }
-  return theme.fg(fallback, text);
+
+  try {
+    return theme.fg(fallback, text);
+  } catch {
+    const customFallback = applyCustomColor(fallback);
+    if (customFallback !== null) return customFallback;
+    return text;
+  }
 }
 function buildModeColorizers(
   theme: ThemeLike,
@@ -625,6 +684,9 @@ export class ModalEditor extends CustomEditor {
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
+  private lastRepeatableCommand: string[] | null = null;
+  private repeatRecording: RepeatRecording | null = null;
+  private replayingRepeat: boolean = false;
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: ModeColorizers | null;
@@ -867,6 +929,128 @@ export class ModalEditor extends CustomEditor {
     this.clearRedoStack();
   }
 
+  private isRepeatRecordingInProgress(): boolean {
+    return (
+      this.pendingMotion !== null ||
+      this.pendingTextObject !== null ||
+      this.pendingOperator !== null ||
+      this.pendingG ||
+      this.pendingReplace
+    );
+  }
+
+  private isRepeatableCommandStart(key: string): boolean {
+    return (
+      key === "d" ||
+      key === "c" ||
+      key === "r" ||
+      key === "p" ||
+      key === "P" ||
+      key === "J" ||
+      key === "g" ||
+      key === "i" ||
+      key === "a" ||
+      key === "A" ||
+      key === "I" ||
+      key === "o" ||
+      key === "O" ||
+      key === "D" ||
+      key === "C" ||
+      key === "S" ||
+      key === "s" ||
+      key === "x"
+    );
+  }
+
+  /**
+   * Dot-repeat is recorded by watching the key stream for one normal-mode
+   * change. Counts are already buffered in prefixCount when the command key
+   * arrives, so the stored replay sequence can be rebuilt from the count prefix
+   * plus the command and any pending/insert continuations.
+   */
+  private prepareRepeatRecordingForInput(key: string): void {
+    if (this.replayingRepeat || this.pendingExCommand !== null) return;
+
+    if (this.mode === "insert") {
+      if (this.repeatRecording?.captureInsert) {
+        this.repeatRecording.keys.push(key);
+      }
+      return;
+    }
+
+    if (this.repeatRecording) {
+      this.repeatRecording.keys.push(key);
+      return;
+    }
+
+    if (this.isRepeatRecordingInProgress()) return;
+    if (!this.isRepeatableCommandStart(key)) return;
+
+    this.repeatRecording = {
+      keys: [...this.prefixCount, key],
+      startText: this.getText(),
+      captureInsert: false,
+    };
+  }
+
+  private cancelRepeatableCommand(): void {
+    if (this.replayingRepeat) return;
+    this.repeatRecording = null;
+  }
+
+  /**
+   * Commit only after the watched command has completed and changed the buffer.
+   * This naturally ignores motions, yanks, failed edits, and aborted pending
+   * commands while keeping insert-mode changes open until Escape returns to
+   * normal mode.
+   */
+  private finishRepeatRecordingAfterInput(): void {
+    if (this.replayingRepeat) return;
+
+    const recording = this.repeatRecording;
+    if (!recording) return;
+
+    if (this.mode === "insert") {
+      recording.captureInsert = true;
+      return;
+    }
+
+    if (this.isRepeatRecordingInProgress()) return;
+
+    this.repeatRecording = null;
+    if (recording.keys.length === 0) return;
+
+    if (this.getText() !== recording.startText) {
+      this.lastRepeatableCommand = [...recording.keys];
+    }
+  }
+
+  /**
+   * Replay the last committed change. A count before `.` repeats the stored key
+   * sequence multiple times; replay runs with recording disabled so `.` itself
+   * never changes what is stored as the last repeatable command.
+   */
+  private repeatLastCommand(): void {
+    const command = this.lastRepeatableCommand;
+    const repeatCount = Math.max(
+      1,
+      Math.min(MAX_COUNT, this.takeTotalCount(1)),
+    );
+    if (!command || command.length === 0) return;
+
+    this.repeatRecording = null;
+    this.replayingRepeat = true;
+    try {
+      for (let i = 0; i < repeatCount; i++) {
+        for (const key of command) {
+          this.handleInput(key);
+        }
+      }
+    } finally {
+      this.replayingRepeat = false;
+    }
+  }
+
   private applySyntheticEdit(mutation: () => void): void {
     const editor = this as unknown as ModalEditorInternals;
     if (!editor.state || !Array.isArray(editor.state.lines)) {
@@ -1085,94 +1269,107 @@ export class ModalEditor extends CustomEditor {
       data = filtered;
     }
 
-    if (this.isEscapeLikeInput(data)) {
-      this.handleEscape();
-      return;
-    }
-
-    if ("insert" === this.mode) {
-      if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
-        super.handleInput(CTRL_E);
-        return;
-      }
-      if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
-        super.handleInput(CTRL_A);
-        return;
-      }
-      if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
-        this.openLineBelow();
-        return;
-      }
-      if (matchesKey(data, Key.shiftAlt("o")) || data === "\x1bO") {
-        this.openLineAbove();
-        return;
-      }
-      super.handleInput(data);
-      return;
-    }
-
-    if (this.pendingReplace) {
-      this.pendingReplace = false;
-      if (!this.isPrintableInput(data)) {
-        this.prefixCount = "";
-        this.operatorCount = "";
+    this.prepareRepeatRecordingForInput(data);
+    try {
+      if (this.isEscapeLikeInput(data)) {
+        this.handleEscape();
         return;
       }
 
-      const count = this.takeTotalCount(1);
-      const cursor = this.getCursor();
-      const line = this.getLines()[cursor.line] ?? "";
-      const range = this.getGraphemeRangeAtCol(line, cursor.col, count);
-      if (!range) return;
+      if ("insert" === this.mode) {
+        if (this.shouldInsertNewLineInsteadOfSubmit(data)) {
+          super.handleInput(NEWLINE);
+          return;
+        }
+        if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
+          super.handleInput(CTRL_E);
+          return;
+        }
+        if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
+          super.handleInput(CTRL_A);
+          return;
+        }
+        if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
+          this.openLineBelow();
+          return;
+        }
+        if (matchesKey(data, Key.shiftAlt("o")) || data === "\x1bO") {
+          this.openLineAbove();
+          return;
+        }
+        super.handleInput(data);
+        return;
+      }
 
-      const before = line.slice(0, range.start);
-      const after = line.slice(range.end);
-      const replacement = data.repeat(count);
-      const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
-      const text = this.getText();
-      const newText =
-        text.slice(0, lineStartAbs) +
-        before +
-        replacement +
-        after +
-        text.slice(lineStartAbs + line.length);
-      const newCursorAbs =
-        lineStartAbs + before.length + data.length * (count - 1);
-      this.replaceTextInBuffer(newText, newCursorAbs);
-      return;
+      if (this.pendingReplace) {
+        this.pendingReplace = false;
+        if (!this.isPrintableInput(data)) {
+          this.prefixCount = "";
+          this.operatorCount = "";
+          this.cancelRepeatableCommand();
+          return;
+        }
+
+        const count = this.takeTotalCount(1);
+        const cursor = this.getCursor();
+        const line = this.getLines()[cursor.line] ?? "";
+        const range = this.getGraphemeRangeAtCol(line, cursor.col, count);
+        if (!range) {
+          this.cancelRepeatableCommand();
+          return;
+        }
+
+        const before = line.slice(0, range.start);
+        const after = line.slice(range.end);
+        const replacement = data.repeat(count);
+        const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
+        const text = this.getText();
+        const newText =
+          text.slice(0, lineStartAbs) +
+          before +
+          replacement +
+          after +
+          text.slice(lineStartAbs + line.length);
+        const newCursorAbs =
+          lineStartAbs + before.length + data.length * (count - 1);
+        this.replaceTextInBuffer(newText, newCursorAbs);
+        return;
+      }
+
+      if (this.pendingExCommand !== null) {
+        this.handlePendingExCommand(data);
+        return;
+      }
+
+      if (this.pendingTextObject) {
+        this.handlePendingTextObject(data);
+        return;
+      }
+
+      if (this.pendingMotion) {
+        this.handlePendingMotion(data);
+        return;
+      }
+
+      if (this.pendingOperator === "d") {
+        this.handlePendingDelete(data);
+        return;
+      }
+
+      if (this.pendingOperator === "c") {
+        this.handlePendingChange(data);
+        return;
+      }
+
+      if (this.pendingOperator === "y") {
+        this.handlePendingYank(data);
+        return;
+      }
+
+      this.handleNormalMode(data);
+    } finally {
+      this.finishRepeatRecordingAfterInput();
     }
-
-    if (this.pendingExCommand !== null) {
-      this.handlePendingExCommand(data);
-      return;
-    }
-
-    if (this.pendingTextObject) {
-      this.handlePendingTextObject(data);
-      return;
-    }
-
-    if (this.pendingMotion) {
-      this.handlePendingMotion(data);
-      return;
-    }
-
-    if (this.pendingOperator === "d") {
-      this.handlePendingDelete(data);
-      return;
-    }
-
-    if (this.pendingOperator === "c") {
-      this.handlePendingChange(data);
-      return;
-    }
-
-    if (this.pendingOperator === "y") {
-      this.handlePendingYank(data);
-      return;
-    }
-
-    this.handleNormalMode(data);
   }
 
   private clearUnderlyingPasteStateIfActive(): void {
@@ -1210,6 +1407,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingReplace
     ) {
       this.clearPendingState();
+      this.cancelRepeatableCommand();
       return;
     }
     if ("insert" === this.mode) {
@@ -1228,6 +1426,10 @@ export class ModalEditor extends CustomEditor {
       matchesKey(data, "enter") ||
       matchesKey(data, "return")
     );
+  }
+
+  private shouldInsertNewLineInsteadOfSubmit(data: string): boolean {
+    return !this.isShowingAutocomplete() && this.isEnterLikeInput(data);
   }
 
   private isBackspaceLikeInput(data: string): boolean {
@@ -1421,6 +1623,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
+    this.cancelRepeatableCommand();
     if (!this.isPrintableChunk(data)) {
       super.handleInput(data);
     }
@@ -1458,6 +1661,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingTextObject = null;
     if (!pendingTextObject) {
       this.pendingOperator = null;
+      this.cancelRepeatableCommand();
       return;
     }
 
@@ -1478,6 +1682,7 @@ export class ModalEditor extends CustomEditor {
       );
       if (!range || !this.pendingOperator) {
         this.pendingOperator = null;
+        this.cancelRepeatableCommand();
         return;
       }
 
@@ -1508,12 +1713,17 @@ export class ModalEditor extends CustomEditor {
     const pendingOperator = this.pendingOperator;
     this.pendingOperator = null;
 
-    if (!pendingOperator || range.endAbs < range.startAbs) return;
+    if (!pendingOperator || range.endAbs < range.startAbs) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     if (range.endAbs === range.startAbs) {
       if (pendingOperator === "c") {
         this.moveCursorToAbsoluteIndex(range.startAbs);
         this.setMode();
+      } else {
+        this.cancelRepeatableCommand();
       }
       return;
     }
@@ -1714,6 +1924,7 @@ export class ModalEditor extends CustomEditor {
       }
 
       this.clearPendingState();
+      this.cancelRepeatableCommand();
       return;
     }
 
@@ -1762,6 +1973,7 @@ export class ModalEditor extends CustomEditor {
         data === "P" ||
         data === "Y" ||
         data === "J" ||
+        data === "." ||
         data === "u" ||
         data === CTRL_UNDERSCORE ||
         matchesKey(data, "ctrl+_") ||
@@ -1905,6 +2117,11 @@ export class ModalEditor extends CustomEditor {
 
     if (data === CTRL_R || matchesKey(data, "ctrl+r")) {
       this.performRedo();
+      return;
+    }
+
+    if (data === ".") {
+      this.repeatLastCommand();
       return;
     }
 
@@ -2336,10 +2553,16 @@ export class ModalEditor extends CustomEditor {
     const op = this.pendingOperator;
     const counted = this.hasPendingCount();
     this.clearPendingState();
-    if (!op || counted) return;
+    if (!op || counted) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     const t = this.getMatchingPairMotionTarget();
-    if (!t) return;
+    if (!t) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     if (op === "y") {
       this.yankRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
@@ -2347,7 +2570,10 @@ export class ModalEditor extends CustomEditor {
     }
 
     this.deleteRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
-    if (op === "c") this.mode = "insert";
+    if (op === "c") {
+      this.mode = "insert";
+      return;
+    }
   }
 
   private getDelimitedTextObjectCursorAbs(): number {
@@ -3380,7 +3606,8 @@ export default function (pi: ExtensionAPI) {
 
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
-    const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
+    const reverseVideo = (s: string) =>
+      `\x1b[48;2;255;255;255;1;7m${s}\x1b[27;22;49m`;
     const labelColorizers = t
       ? buildModeColorizers(t, modeColors, reverseVideo)
       : null;
