@@ -87,6 +87,7 @@ const INSERT_CURSOR_SHAPE = "\x1b[5 q";
 const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
 const SOFTWARE_CURSOR_SPACE = "\x1b[7m \x1b[0m";
+/* eslint-disable-next-line no-control-regex */
 const DECSCUSR_PATTERN = /\x1b\[[015] q/;
 
 function focusEditor(editor: ModalEditor): void {

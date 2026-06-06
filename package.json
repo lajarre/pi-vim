@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "echo 'nothing to build'",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
     "check": "npm run lint && npm run typecheck && npm run test",
