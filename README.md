@@ -21,7 +21,7 @@ Default-equivalent `settings.json`:
   "piVim": {
     "clipboardMirror": "all",
     "modeColors": {
-      "insert": "borderMuted",
+      "insert": "magenta",
       "normal": "borderAccent",
       "ex": "warning"
     },

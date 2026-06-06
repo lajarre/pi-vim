@@ -73,7 +73,7 @@ const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 const CLIPBOARD_READ_TIMEOUT_MS = 750;
 const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
 const MODE_COLORS = {
-  insert: "borderMuted",
+  insert: "magenta",
   normal: "borderAccent",
   ex: "warning",
 } as const;
@@ -141,6 +141,29 @@ function resolveModeColors(
     ex: colors?.ex ?? MODE_COLORS.ex,
   };
 }
+const ANSI_COLORS: Record<string, string> = {
+  black: "30",
+  red: "31",
+  green: "32",
+  yellow: "33",
+  blue: "34",
+  magenta: "38;2;255;0;255",
+  cyan: "36",
+  white: "37",
+  gray: "90",
+  grey: "90",
+  brightblack: "90",
+  darkgray: "90",
+  darkgrey: "90",
+  brightred: "91",
+  brightgreen: "92",
+  brightyellow: "93",
+  brightblue: "94",
+  brightmagenta: "38;2;255;0;255",
+  brightcyan: "96",
+  brightwhite: "97",
+};
+
 function colorizeWithTheme(
   theme: ThemeLike,
   token: string,
@@ -148,14 +171,40 @@ function colorizeWithTheme(
   text: string,
 ): string {
   const trimmedToken = token.trim();
+
+  const applyCustomColor = (color: string): string | null => {
+    const lower = color.toLowerCase();
+    if (lower in ANSI_COLORS) {
+      return `\x1b[${ANSI_COLORS[lower]}m${text}\x1b[39m`;
+    }
+    if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+    }
+    return null;
+  };
+
   if (TOKEN.test(trimmedToken)) {
     try {
       return theme.fg(trimmedToken, text);
     } catch {
-      return theme.fg(fallback, text);
+      const custom = applyCustomColor(trimmedToken);
+      if (custom !== null) return custom;
     }
+  } else {
+    const custom = applyCustomColor(trimmedToken);
+    if (custom !== null) return custom;
   }
-  return theme.fg(fallback, text);
+
+  try {
+    return theme.fg(fallback, text);
+  } catch {
+    const customFallback = applyCustomColor(fallback);
+    if (customFallback !== null) return customFallback;
+    return text;
+  }
 }
 function buildModeColorizers(
   theme: ThemeLike,

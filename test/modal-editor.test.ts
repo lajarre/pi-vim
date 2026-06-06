@@ -1298,7 +1298,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["borderMuted", "borderAccent", "warning"],
+        ["magenta", "borderAccent", "warning"],
       );
     } finally {
       restore();
@@ -1384,6 +1384,35 @@ describe("mode color settings", () => {
     }
   });
 
+  it("mode label falls back to ANSI color code when default magenta color token is unknown/throws in theme", async () => {
+    const theme = createRecordingTheme(["magenta"]);
+    const restore = setPiVimSettingsReaderForTests(() => ({}));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+
+      const lines = editor.render(80);
+      const footer = lines.at(-1) ?? "";
+
+      assert.deepEqual(
+        theme.fgCalls.map((call) => call.token),
+        ["magenta"],
+      );
+      assert.ok(footer.includes("\x1b[38;2;255;0;255m"));
+      assert.ok(footer.includes(reverseInsertLabel));
+      assert.ok(
+        footer.includes(`\x1b[38;2;255;0;255m${reverseInsertLabel}\x1b[39m`),
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("mode label passes reverse-video text to theme.fg", async () => {
     const theme = createRecordingTheme();
     const restore = setPiVimSettingsReaderForTests(() => ({}));
@@ -1399,7 +1428,7 @@ describe("mode color settings", () => {
       editor.render(80);
 
       assert.deepEqual(theme.fgCalls, [
-        { token: "borderMuted", text: reverseInsertLabel },
+        { token: "magenta", text: reverseInsertLabel },
       ]);
     } finally {
       restore();
