@@ -1125,6 +1125,8 @@ export class ModalEditor extends CustomEditor {
   }
 
   private isEscapeLikeInput(data: string): boolean {
+    if (data === "\x1b") return true;
+    if (data.length === 1) return false;
     return matchesKey(data, "escape") || matchesKey(data, "ctrl+[");
   }
 
@@ -1419,25 +1421,19 @@ export class ModalEditor extends CustomEditor {
   }
 
   private isEnterLikeInput(data: string): boolean {
-    return (
-      data === "\r" ||
-      data === "\n" ||
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return")
-    );
+    if (data === "\r" || data === "\n") return true;
+    if (data.length === 1) return false;
+    return matchesKey(data, "enter") || matchesKey(data, "return");
   }
 
   private shouldInsertNewLineInsteadOfSubmit(data: string): boolean {
-    return !this.isShowingAutocomplete() && this.isEnterLikeInput(data);
+    return this.isEnterLikeInput(data) && !this.isShowingAutocomplete();
   }
 
   private isBackspaceLikeInput(data: string): boolean {
-    return (
-      data === "\x7f" ||
-      data === "\x08" ||
-      matchesKey(data, "backspace") ||
-      matchesKey(data, "ctrl+h")
-    );
+    if (data === "\x7f" || data === "\x08") return true;
+    if (data.length === 1) return false;
+    return matchesKey(data, "backspace") || matchesKey(data, "ctrl+h");
   }
 
   private deleteLastPendingExCommandGrapheme(): void {
@@ -3497,30 +3493,26 @@ export class ModalEditor extends CustomEditor {
       : BLOCK_CURSOR_SHAPE;
   }
 
-  private hasPromptCursorMarker(lines: string[]): boolean {
-    return lines.some((line) => line.includes(CURSOR_MARKER));
-  }
-
-  private stripSoftwareCursorWhenHardwareCursorIsUsed(lines: string[]): void {
+  private stripSoftwareCursorAtPromptMarker(lines: string[]): boolean {
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
       if (!line?.includes(CURSOR_MARKER)) continue;
 
       lines[i] = stripSoftwareCursorAfterMarker(line);
-      return;
+      return true;
     }
+    return false;
   }
 
   private syncCursorShapeForRender(lines: string[]): void {
     if (!this.cursorShapeRuntime) return;
-    if (!this.hasPromptCursorMarker(lines)) return;
 
     if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
       this.lastCursorShapeSequence = null;
       return;
     }
 
-    this.stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
+    if (!this.stripSoftwareCursorAtPromptMarker(lines)) return;
 
     const sequence = this.getDesiredCursorShapeSequence();
     if (sequence === this.lastCursorShapeSequence) return;
@@ -3535,13 +3527,13 @@ export class ModalEditor extends CustomEditor {
     if (lines.length === 0) return lines;
 
     const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
+    const labelWidth = visibleWidth(rawLabel);
     const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;
     const last = lines.length - 1;
     const lastLine = lines[last];
-    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
-      lines[last] =
-        truncateToWidth(lastLine, width - visibleWidth(rawLabel), "") + label;
+    if (lastLine && visibleWidth(lastLine) >= labelWidth) {
+      lines[last] = truncateToWidth(lastLine, width - labelWidth, "") + label;
     } else {
       lines[last] = label;
     }
