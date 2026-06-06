@@ -100,7 +100,6 @@ type WrapperFacingEditor = ModalEditor & {
   onChange: (text: string) => unknown;
   onEscape: () => unknown;
   onCtrlD: () => unknown;
-  onPasteImage: (path: string) => unknown;
   onExtensionShortcut: (shortcut: string) => unknown;
   focused: boolean;
   disableSubmit: boolean;
@@ -130,7 +129,6 @@ const WRAPPER_FACING_FIELDS = [
   "onChange",
   "onEscape",
   "onCtrlD",
-  "onPasteImage",
   "onExtensionShortcut",
   "actionHandlers",
   "focused",
@@ -181,7 +179,7 @@ function assertWrapperFacingSurface(
   );
 }
 
-function decorateLikeImageAttachments(editor: ModalEditor): DecoratedCall[] {
+function decorateInPlace(editor: ModalEditor): DecoratedCall[] {
   assertWrapperFacingSurface(editor);
   const calls: DecoratedCall[] = [];
   const originalInsertTextAtCursor = editor.insertTextAtCursor.bind(editor);
@@ -755,7 +753,7 @@ describe("wrapper-facing editor surface", () => {
 
   it("keeps modal behavior when a later decorator patches core methods in place", () => {
     const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
-    const calls = decorateLikeImageAttachments(editor);
+    const calls = decorateInPlace(editor);
 
     editor.insertTextAtCursor("abc");
     assert.equal(editor.getText(), "abc");

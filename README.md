@@ -1,11 +1,11 @@
-# pi-vim
+# pi-vim-mode
 
 Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% command surface.
 
 ## install
 
 ```bash
-pi install npm:pi-vim
+pi install npm:pi-vim-mode
 ```
 
 Restart Pi after install.
@@ -42,19 +42,6 @@ All keys are optional; omitting `piVim` is equivalent. Project overrides global;
 
 Usual/safest: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 
-## wrapping pi-vim
-
-Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). Inverse order, insert delegates, and generic composition are unsupported.
-
-Smoke:
-
-```bash
-pi -e ./index.ts -e ../pi-image-attachments/index.ts
-pi -e ./index.ts -e ../../../pi-image-attachments/index.ts
-```
-
-Check: insert text; add/paste image path; see `[Image #1]`; submit text+image stripped; switch INSERT/NORMAL.
-
 ## contributor setup
 
 Hooks install with `npm install` after cloning. To wire them explicitly:
@@ -86,14 +73,14 @@ Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored 
 
 Requires `@mariozechner/pi-tui >= 0.47.0`. With `pi-tui >= 0.49.3` and DECSCUSR support, cursor shape follows mode; otherwise software cursor remains.
 
-## why pi-vim
+## why pi-vim-mode
 
 - Fast modal editing without leaving Pi.
 - Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
 - REPL-focused defaults; out-of-scope boundaries documented.
 - Clipboard/register behavior is explicit and tested.
 
-Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim parity (visual mode, macros, search, extended ex-commands, …).
+Use pi-vim-mode for Vim muscle-memory in Pi prompts. Skip it if you need full Vim parity (visual mode, macros, search, extended ex-commands, …).
 
 ## common recipes
 
@@ -329,7 +316,7 @@ Repeat tracks changes only; motions and yanks do not replace the previous repeat
 ## register and clipboard policy
 
 - `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
-- `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim's internal shadow.
+- `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim-mode's internal shadow.
 - `piVim.clipboardMirror = "never"` disables write mirroring while keeping internal register writes synchronous.
 - Rapid mirrored writes coalesce: only the latest pending value is guaranteed to be mirrored.
 - `p` / `P` read the OS clipboard first when no local write was skipped by policy, falling back to the shadow on read failure/timeout.
