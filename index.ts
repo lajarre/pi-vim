@@ -74,7 +74,7 @@ const CLIPBOARD_READ_TIMEOUT_MS = 750;
 const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
 const MODE_COLORS = {
   insert: "magenta",
-  normal: "borderAccent",
+  normal: "normalBlue",
   ex: "warning",
 } as const;
 const TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -148,6 +148,7 @@ const ANSI_COLORS: Record<string, string> = {
   yellow: "33",
   blue: "34",
   magenta: "38;2;255;0;255",
+  normalblue: "38;2;0;122;204",
   cyan: "36",
   white: "37",
   gray: "90",
@@ -3594,7 +3595,8 @@ export default function (pi: ExtensionAPI) {
 
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
-    const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
+    const reverseVideo = (s: string) =>
+      `\x1b[48;2;255;255;255;1;7m${s}\x1b[27;22;49m`;
     const labelColorizers = t
       ? buildModeColorizers(t, modeColors, reverseVideo)
       : null;

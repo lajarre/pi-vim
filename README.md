@@ -22,7 +22,7 @@ Default-equivalent `settings.json`:
     "clipboardMirror": "all",
     "modeColors": {
       "insert": "magenta",
-      "normal": "borderAccent",
+      "normal": "normalBlue",
       "ex": "warning"
     },
     "syncBorderColorWithMode": false

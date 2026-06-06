@@ -1276,7 +1276,7 @@ describe("clipboard mirror policy settings", () => {
 });
 
 describe("mode color settings", () => {
-  const reverseInsertLabel = "\x1b[7m INSERT \x1b[27m";
+  const reverseInsertLabel = "\x1b[48;2;255;255;255;1;7m INSERT \x1b[27;22;49m";
 
   it("mode label uses default insert, normal, and EX mode color tokens", async () => {
     const theme = createRecordingTheme();
@@ -1298,7 +1298,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["magenta", "borderAccent", "warning"],
+        ["magenta", "normalBlue", "warning"],
       );
     } finally {
       restore();
@@ -1351,7 +1351,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["primary", "borderAccent", "warning"],
+        ["primary", "normalBlue", "warning"],
       );
     } finally {
       restore();
