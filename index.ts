@@ -669,7 +669,7 @@ export class ModalEditor extends CustomEditor {
     kb: CustomEditorConstructorArgs[2],
     opts?: ModalEditorOptions,
   ) {
-    super(tui, theme, kb);
+    super(theme);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
