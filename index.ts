@@ -674,6 +674,17 @@ export class ModalEditor extends CustomEditor {
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
     this.installModeBorderColorizer();
+    // Guard against omp's magic-keyword shimmer calling theme.getColorMode()
+    // before initTheme() completes. The base CustomEditor.decorateText reaches
+    // into the global theme singleton which may not be ready at first render.
+    // Delegate once theme is available; return plain text until then.
+    this.decorateText = (text: string): string => {
+      try {
+        return (super.decorateText as ((t: string) => string) | undefined)?.(text) ?? text;
+      } catch {
+        return text;
+      }
+    };
   }
 
   setClipboardFn(fn: (text: string, signal?: AbortSignal) => unknown): void {
