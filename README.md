@@ -186,6 +186,7 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; line moves clamp to the buffer |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
+| `gM` | Halfway the text of the current line |
 | `w` / `b` / `e`; `{count}w/b/e` | `word` start/back/end motions |
 | `W` / `B` / `E`; `{count}W/B/E` | whitespace-delimited `WORD` motions |
 | `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |

@@ -1742,6 +1742,14 @@ export class ModalEditor extends CustomEditor {
           this.joinLines(false);
           return;
         }
+
+        if (data === "M") {
+          const { line } = this.getCurrentLineAndCol();
+          const graphemes = getLineGraphemes(line);
+          const middle = Math.floor(graphemes.length / 2);
+          this.moveCursorToCol(graphemes[middle]?.start ?? 0);
+          return;
+        }
       }
 
       this.clearPendingState();

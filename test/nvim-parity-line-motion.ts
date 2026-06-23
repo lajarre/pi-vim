@@ -68,6 +68,21 @@ const LINE_MOTION_PARITY_CASES: NvimParityCase[] = [
     keys: ["$"],
   },
   {
+    name: "gM: moves to halfway the text of the line (even length)",
+    initial: { text: "0123456789", cursor: { line: 0, col: 0 } },
+    keys: ["g", "M"],
+  },
+  {
+    name: "gM: moves to halfway the text of the line (odd length)",
+    initial: { text: "abcde", cursor: { line: 0, col: 0 } },
+    keys: ["g", "M"],
+  },
+  {
+    name: "gM: counts leading whitespace toward the halfway position",
+    initial: { text: "   hello world   ", cursor: { line: 0, col: 0 } },
+    keys: ["g", "M"],
+  },
+  {
     name: "gg: moves to the first line with nvim cursor placement",
     initial: { text: "one\ntwo\nthree", cursor: { line: 2, col: 2 } },
     keys: ["g", "g"],
