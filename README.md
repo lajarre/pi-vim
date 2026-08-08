@@ -439,6 +439,16 @@ Give insert a solid mode color, let normal defer to thinking, and make both mode
 
 Usual/safest tokens: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 
+### escapeSequence
+
+`piVim.escapeSequence` lets Insert mode also be left by typing a short character sequence (default `jk`) within a timeout, mirroring Vim's `inoremap {seq} <Esc>` + `timeoutlen`. There's no `enabled` flag: setting it at all turns it on, and leaving it unset keeps it off.
+
+```json
+{ "piVim": { "escapeSequence": "jk" } }
+```
+
+Use an object to also override the timeout: `{ "escapeSequence": { "sequence": "jk", "timeoutMs": 300 } }`. `sequence` must be 2–8 printable non-whitespace ASCII characters (e.g. `kj`, `jj`, `fd`, `;;`); an invalid value falls back to `"jk"` with a warning. `timeoutMs` defaults to `300`, clamped `50–2000`. A mismatched key, the timeout elapsing, or a real `Esc` types the buffered prefix as ordinary text instead of escaping. Read from project settings too, like `exCommand.piDispatch`.
+
 ### modeChange
 
 `modeChange`: user-global shell commands run on mode transitions. `insert` runs on every transition into Insert; `normal` runs on every transition into a non-Insert editing mode — Normal, Visual, and V-Line alike. Both keys are optional. The command runs asynchronously via the system shell, stdio is discarded, failures are silenced, and a hung command is timed out so editing never blocks or breaks. If mode changes happen while a hook command is still running, pi-vim keeps only the latest pending command. Hooks fire only on actual transitions: not on the initial mode, not on EX entry/exit (EX is a sub-state of normal), and not on no-op `Esc` from normal. Because this is arbitrary shell, project `.pi/settings.json` values are ignored. pi-vim also emits `pi-vim:mode-change` on `pi.events` with `{ mode, previousMode }` for other extensions.
