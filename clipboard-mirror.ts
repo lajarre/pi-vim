@@ -1,4 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
@@ -53,9 +56,29 @@ function isClipboardEnvironmentFailure(error: unknown): boolean {
   return error instanceof ClipboardSpawnError || isNodeSpawnErrno(error);
 }
 
-const PI_CODING_AGENT_MODULE_URL = import.meta.resolve(
-  "@earendil-works/pi-coding-agent",
-);
+function resolvePiCodingAgentModuleUrl(): string {
+  try {
+    return import.meta.resolve("@earendil-works/pi-coding-agent");
+  } catch (resolveError) {
+    const cliPath = process.argv[1];
+    if (cliPath && existsSync(cliPath)) {
+      let distDir = dirname(realpathSync(cliPath));
+      if (basename(distDir) === "bundle") distDir = dirname(distDir);
+      const modulePath = join(distDir, "index.js");
+
+      if (
+        basename(distDir) === "dist" &&
+        basename(dirname(distDir)) === "pi-coding-agent" &&
+        existsSync(modulePath)
+      ) {
+        return pathToFileURL(modulePath).href;
+      }
+    }
+    throw resolveError;
+  }
+}
+
+const PI_CODING_AGENT_MODULE_URL = resolvePiCodingAgentModuleUrl();
 const CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE = 2;
 const CLIPBOARD_HELPER_SOURCE = `
 import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};

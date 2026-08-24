@@ -17,8 +17,7 @@ jobs:
       - run: npm run check
       - run: npm run test:nvim
       - run: npm run pack:check
-  # Installs the packed tarball into a throwaway consumer project with the
-  # real @earendil-works/pi-* peers and asserts it loads/activates (#33).
+  # Loads the packed tarball with real peers and with Pi-style virtual peers.
   consumer-smoke:
     runs-on: ubuntu-latest
     steps:

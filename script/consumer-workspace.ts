@@ -174,9 +174,12 @@ export function packLocalPackage(
   }
 }
 
-export function runNpmInstall(workspace: string): void {
+export function runNpmInstall(
+  workspace: string,
+  extraArgs: string[] = [],
+): void {
   try {
-    execFileSync("npm", ["install", "--ignore-scripts"], {
+    execFileSync("npm", ["install", "--ignore-scripts", ...extraArgs], {
       cwd: workspace,
       encoding: "utf8",
       env: {
@@ -193,7 +196,7 @@ export function runNpmInstall(workspace: string): void {
           .join("\n")
       : "";
     throw new Error(
-      `FAIL-INFRA: npm install --ignore-scripts failed${output ? `\n${output}` : ""}`,
+      `FAIL-INFRA: npm install failed${output ? `\n${output}` : ""}`,
     );
   }
 }

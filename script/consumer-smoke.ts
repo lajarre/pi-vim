@@ -1,13 +1,12 @@
 /**
  * Published-package consumer smoke test (issue #33).
  *
- * Packs this repo with `npm pack`, installs the tarball into a throwaway
- * consumer workspace next to the real @earendil-works/pi-* peers, then loads
- * the package the way Pi does — via the installed package.json's
- * "pi"."extensions" entries — and asserts the extension activates and modal
- * editing works. This catches the publish-only regression class from PR #27
- * (stale old-name imports, files missing from the tarball, peer renames)
- * that test/ cannot see because test/ is not published.
+ * Packs this repo with `npm pack` and installs the tarball in two throwaway
+ * consumer workspaces. One provides real @earendil-works/pi-* peers. The other
+ * matches Pi's managed install, which omits host peers and supplies them as
+ * Jiti virtual modules. Both load the installed package.json extension entries
+ * and probe modal editing. This catches publish-only failures that test/ cannot
+ * see because test/ is not published.
  */
 
 import { existsSync, realpathSync } from "node:fs";
@@ -16,6 +15,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
+import * as piTui from "@earendil-works/pi-tui";
 
 import {
   findPackageRoot,
@@ -34,6 +36,16 @@ const OLD_NAME_PACKAGES = [
 ] as const;
 
 type PiExtension = (pi: unknown) => void;
+type CreateJiti = (
+  baseUrl: string,
+  options: {
+    moduleCache: boolean;
+    tryNative: boolean;
+    virtualModules: Record<string, unknown>;
+  },
+) => {
+  import(path: string, options: { default: boolean }): Promise<unknown>;
+};
 
 type EditorFactory = (
   tui: unknown,
@@ -79,24 +91,29 @@ async function readPackageJson(
   return parsed;
 }
 
-async function createWorkspace(packageName: string): Promise<string> {
+async function createWorkspace(
+  packageName: string,
+  includePeers: boolean,
+): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), "pi-vim-consumer-smoke-"));
-  const packageJson = {
-    private: true,
-    type: "module",
-    dependencies: {
-      [packageName]: packLocalPackage(projectRoot, workspace, packageName),
-      "@earendil-works/pi-ai": `file:${findPackageRoot("@earendil-works/pi-ai")}`,
-      "@earendil-works/pi-coding-agent": `file:${findPackageRoot("@earendil-works/pi-coding-agent")}`,
-      "@earendil-works/pi-tui": `file:${findPackageRoot("@earendil-works/pi-tui")}`,
-    },
+  const dependencies: Record<string, string> = {
+    [packageName]: packLocalPackage(projectRoot, workspace, packageName),
   };
+
+  if (includePeers) {
+    dependencies["@earendil-works/pi-ai"] =
+      `file:${findPackageRoot("@earendil-works/pi-ai")}`;
+    dependencies["@earendil-works/pi-coding-agent"] =
+      `file:${findPackageRoot("@earendil-works/pi-coding-agent")}`;
+    dependencies["@earendil-works/pi-tui"] =
+      `file:${findPackageRoot("@earendil-works/pi-tui")}`;
+  }
 
   await writeFile(
     join(workspace, "package.json"),
-    `${JSON.stringify(packageJson, null, 2)}\n`,
+    `${JSON.stringify({ private: true, type: "module", dependencies }, null, 2)}\n`,
   );
-  runNpmInstall(workspace);
+  runNpmInstall(workspace, includePeers ? [] : ["--legacy-peer-deps"]);
   return workspace;
 }
 
@@ -106,6 +123,17 @@ function assertNoOldNamePackages(workspace: string): void {
       fail(
         `consumer workspace contains ${oldName} — the packed tarball still references a pre-rename package`,
       );
+    }
+  }
+}
+
+function assertManagedPeersOmitted(workspace: string): void {
+  for (const peerName of [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+  ]) {
+    if (existsSync(join(workspace, "node_modules", ...peerName.split("/")))) {
+      fail(`managed consumer workspace unexpectedly contains ${peerName}`);
     }
   }
 }
@@ -178,6 +206,46 @@ async function importExtension(entryPath: string): Promise<PiExtension> {
     fail(`extension default export is not a function: ${entryPath}`);
   }
   return module.default as PiExtension;
+}
+
+async function importExtensionWithVirtualPeers(
+  entryPath: string,
+): Promise<PiExtension> {
+  const codingAgentRoot = findPackageRoot("@earendil-works/pi-coding-agent");
+  const requireFromCodingAgent = createRequire(
+    join(codingAgentRoot, "package.json"),
+  );
+  const { createJiti } = requireFromCodingAgent("jiti") as {
+    createJiti: CreateJiti;
+  };
+  const jiti = createJiti(import.meta.url, {
+    moduleCache: false,
+    tryNative: false,
+    virtualModules: {
+      "@earendil-works/pi-coding-agent": piCodingAgent,
+      "@earendil-works/pi-tui": piTui,
+    },
+  });
+  const originalArgv1 = process.argv[1];
+  process.argv[1] = join(codingAgentRoot, "dist", "cli.js");
+
+  try {
+    const extension = await jiti.import(entryPath, { default: true });
+    if (typeof extension !== "function") {
+      fail(`extension default export is not a function: ${entryPath}`);
+    }
+    return extension as PiExtension;
+  } catch (error) {
+    return fail(
+      `managed extension failed to import with virtual peers: ${entryPath}: ${formatUnknownError(error)}`,
+    );
+  } finally {
+    if (originalArgv1 === undefined) {
+      process.argv.splice(1, 1);
+    } else {
+      process.argv[1] = originalArgv1;
+    }
+  }
 }
 
 function createActivationHarness(workspace: string) {
@@ -287,8 +355,9 @@ function assertModalSmoke(editor: EditorSurface): void {
 async function activateAndProbe(
   workspace: string,
   entryPath: string,
+  importer: (path: string) => Promise<PiExtension> = importExtension,
 ): Promise<void> {
-  const extension = await importExtension(entryPath);
+  const extension = await importer(entryPath);
   const harness = createActivationHarness(workspace);
 
   extension(harness.pi);
@@ -318,7 +387,7 @@ async function main(): Promise<void> {
     fail("repo package.json is missing name or version");
   }
 
-  const workspace = await createWorkspace(packageName);
+  const workspace = await createWorkspace(packageName, true);
   console.log("consumer-smoke: npm install --ignore-scripts completed");
 
   // session_start reads user-global settings and modeChange may execute a
@@ -338,6 +407,32 @@ async function main(): Promise<void> {
   for (const entryPath of entries) {
     await activateAndProbe(workspace, entryPath);
     console.log(`PASS activate ${entryPath}`);
+  }
+
+  const managedWorkspace = await createWorkspace(packageName, false);
+  console.log(
+    "consumer-smoke: managed npm install --legacy-peer-deps completed",
+  );
+  process.env.HOME = managedWorkspace;
+  process.env.USERPROFILE = managedWorkspace;
+  assertManagedPeersOmitted(managedWorkspace);
+  const managedInstalledDir = resolveInstalledPackageDir(
+    managedWorkspace,
+    packageName,
+  );
+  const managedEntries = await readExtensionEntries(
+    managedInstalledDir,
+    packageName,
+    version,
+  );
+
+  for (const entryPath of managedEntries) {
+    await activateAndProbe(
+      managedWorkspace,
+      entryPath,
+      importExtensionWithVirtualPeers,
+    );
+    console.log(`PASS managed activate ${entryPath}`);
   }
 
   console.log("PASS consumer-smoke");
