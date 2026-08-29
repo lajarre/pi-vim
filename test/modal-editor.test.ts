@@ -16,6 +16,9 @@ import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import {
   buildClipboardReadHelperSource,
   buildClipboardWriteHelperSource,
+  canSpawnJavaScriptHelper,
+  getClipboardReadCommands,
+  writeClipboardInCurrentProcess,
 } from "../clipboard-mirror.js";
 import installPiVim, {
   ModalEditor,
@@ -3578,6 +3581,58 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.signal, null);
     assert.equal(result.stdout, "");
+  });
+
+  it("only reuses process.execPath for an ordinary Node runtime", () => {
+    assert.equal(canSpawnJavaScriptHelper({}, {}), true);
+    assert.equal(canSpawnJavaScriptHelper({ bun: "1.3.14" }, {}), false);
+    assert.equal(canSpawnJavaScriptHelper({}, { sea: true }), false);
+  });
+
+  it("selects standalone clipboard readers by platform", () => {
+    assert.deepEqual(getClipboardReadCommands("darwin", {}), [
+      { command: "/usr/bin/pbpaste", args: [] },
+    ]);
+    assert.deepEqual(
+      getClipboardReadCommands("linux", { TERMUX_VERSION: "1" }),
+      [{ command: "termux-clipboard-get", args: [] }],
+    );
+    assert.equal(
+      getClipboardReadCommands("win32", {})[0]?.command,
+      "powershell.exe",
+    );
+  });
+
+  it("standalone clipboard writes use Pi's injected copy function", async () => {
+    const writes: string[] = [];
+    await writeClipboardInCurrentProcess(
+      "payload",
+      new AbortController().signal,
+      async (text) => {
+        writes.push(text);
+      },
+    );
+    assert.deepEqual(writes, ["payload"]);
+  });
+
+  it("standalone clipboard writes stop waiting when aborted", async () => {
+    const started = deferred();
+    const release = deferred();
+    const controller = new AbortController();
+    const write = writeClipboardInCurrentProcess(
+      "payload",
+      controller.signal,
+      async () => {
+        started.resolve();
+        await release.promise;
+      },
+    );
+
+    await started.promise;
+    controller.abort(new Error("copy cancelled"));
+    await assert.rejects(write, /copy cancelled/);
+    release.resolve();
+    await nextImmediate();
   });
 
   it("active clipboard write receives no abort event when superseded", async () => {

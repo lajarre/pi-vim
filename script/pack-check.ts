@@ -245,9 +245,16 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
+  //
+  // Standalone-runtime clipboard backends: clipboard-mirror.ts uses Pi's
+  // injected copy API when the current executable is not a reusable JS runtime
+  // and reads through platform clipboard commands in that mode; README documents
+  // the standalone backends. Measured packed 59080 B, unpacked 233455 B. Budgets
+  // bumped 59000 -> 59500 and 231400 -> 234000, leaving ~420 B / ~545 B
+  // headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  maxSize: 59500,
+  maxUnpackedSize: 234000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

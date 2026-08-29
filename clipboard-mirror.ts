@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 
 const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
@@ -138,7 +139,68 @@ function getClipboardHelperSources(): ClipboardHelperSources | null {
   return clipboardHelperSources;
 }
 
+export function canSpawnJavaScriptHelper(
+  versions: { bun?: string } = process.versions as typeof process.versions & {
+    bun?: string;
+  },
+  features: { sea?: boolean } = process.features as typeof process.features & {
+    sea?: boolean;
+  },
+): boolean {
+  return !versions.bun && features.sea !== true;
+}
+
+export type ClipboardReadCommand = {
+  command: string;
+  args: string[];
+};
+
+export function getClipboardReadCommands(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): ClipboardReadCommand[] {
+  if (platform === "darwin") {
+    return [{ command: "/usr/bin/pbpaste", args: [] }];
+  }
+  if (platform === "win32") {
+    const script = "[Console]::Out.Write((Get-Clipboard -Raw))";
+    const args = ["-NoProfile", "-NonInteractive", "-Command", script];
+    return [
+      { command: "powershell.exe", args },
+      { command: "pwsh.exe", args },
+    ];
+  }
+  if (env.TERMUX_VERSION) {
+    return [{ command: "termux-clipboard-get", args: [] }];
+  }
+  return [
+    { command: "wl-paste", args: ["--no-newline", "--type", "text"] },
+    { command: "xclip", args: ["-selection", "clipboard", "-out"] },
+    { command: "xsel", args: ["--clipboard", "--output"] },
+  ];
+}
+
+function readClipboardWithPlatformCommand(): string | null {
+  for (const { command, args } of getClipboardReadCommands()) {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      maxBuffer: CLIPBOARD_READ_MAX_BUFFER_BYTES,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: CLIPBOARD_READ_TIMEOUT_MS,
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0 && !result.signal) {
+      return result.stdout ?? "";
+    }
+  }
+  return null;
+}
+
 export function readClipboardInChildProcess(): string | null {
+  if (!canSpawnJavaScriptHelper()) {
+    return readClipboardWithPlatformCommand();
+  }
+
   const helperSources = getClipboardHelperSources();
   if (!helperSources) return null;
 
@@ -184,10 +246,42 @@ function killClipboardProcess(child: ClipboardProcess): void {
   }
 }
 
+export function writeClipboardInCurrentProcess(
+  text: string,
+  signal: AbortSignal,
+  copy: (value: string) => Promise<void> = copyToClipboard,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(getAbortError(signal));
+      return;
+    }
+
+    let settled = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => finish(getAbortError(signal));
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    void Promise.resolve()
+      .then(() => copy(text))
+      .then(() => finish(), finish);
+  });
+}
+
 export function writeClipboardInChildProcess(
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
+  if (!canSpawnJavaScriptHelper()) {
+    return writeClipboardInCurrentProcess(text, signal);
+  }
+
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) {
       reject(getAbortError(signal));

@@ -470,6 +470,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 - If policy skipped the last local write, `p` / `P` use the shadow so delete/yank → put works without touching the OS clipboard.
 - While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
 - If the last mirror write failed or was skipped by the mirror circuit breaker, `p` / `P` use the non-empty shadow until a mirror write lands again, so put never trusts a stale OS clipboard.
+- Official standalone Pi binaries are supported: writes use Pi's clipboard API, while reads use `pbpaste`, PowerShell, `termux-clipboard-get`, `wl-paste`, `xclip`, or `xsel` as available.
 - Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
 
 ---
