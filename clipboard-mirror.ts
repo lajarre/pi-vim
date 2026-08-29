@@ -56,12 +56,14 @@ function isClipboardEnvironmentFailure(error: unknown): boolean {
   return error instanceof ClipboardSpawnError || isNodeSpawnErrno(error);
 }
 
-function resolvePiCodingAgentModuleUrl(): string {
+function tryResolvePiCodingAgentModuleUrl(): string | undefined {
   try {
     return import.meta.resolve("@earendil-works/pi-coding-agent");
-  } catch (resolveError) {
-    const cliPath = process.argv[1];
-    if (cliPath && existsSync(cliPath)) {
+  } catch {
+    try {
+      const cliPath = process.argv[1];
+      if (!cliPath || !existsSync(cliPath)) return undefined;
+
       let distDir = dirname(realpathSync(cliPath));
       if (basename(distDir) === "bundle") distDir = dirname(distDir);
       const modulePath = join(distDir, "index.js");
@@ -73,15 +75,26 @@ function resolvePiCodingAgentModuleUrl(): string {
       ) {
         return pathToFileURL(modulePath).href;
       }
+    } catch {
+      // Compiled runtimes may expose virtual entrypoints through existsSync()
+      // that cannot be resolved through the host filesystem.
     }
-    throw resolveError;
+    return undefined;
   }
 }
 
-const PI_CODING_AGENT_MODULE_URL = resolvePiCodingAgentModuleUrl();
 const CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE = 2;
-const CLIPBOARD_HELPER_SOURCE = `
-import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
+
+type ClipboardHelperSources = {
+  read: string;
+  write: string;
+};
+
+let clipboardHelperSources: ClipboardHelperSources | null | undefined;
+
+export function buildClipboardWriteHelperSource(moduleUrl: string): string {
+  return `
+import { copyToClipboard } from ${JSON.stringify(moduleUrl)};
 
 const chunks = [];
 for await (const chunk of process.stdin) {
@@ -94,11 +107,13 @@ try {
   process.exitCode = ${CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE};
 }
 `;
+}
 
-const CLIPBOARD_READ_HELPER_SOURCE = `
+export function buildClipboardReadHelperSource(moduleUrl: string): string {
+  return `
 import { createRequire } from "node:module";
 
-const require = createRequire(${JSON.stringify(PI_CODING_AGENT_MODULE_URL)});
+const require = createRequire(${JSON.stringify(moduleUrl)});
 const clipboard = require("@mariozechner/clipboard");
 if (!await clipboard.hasText()) {
   process.exit(0);
@@ -108,12 +123,29 @@ if (typeof text === "string") {
   process.stdout.write(text);
 }
 `;
+}
+
+function getClipboardHelperSources(): ClipboardHelperSources | null {
+  if (clipboardHelperSources !== undefined) return clipboardHelperSources;
+
+  const moduleUrl = tryResolvePiCodingAgentModuleUrl();
+  clipboardHelperSources = moduleUrl
+    ? {
+        read: buildClipboardReadHelperSource(moduleUrl),
+        write: buildClipboardWriteHelperSource(moduleUrl),
+      }
+    : null;
+  return clipboardHelperSources;
+}
 
 export function readClipboardInChildProcess(): string | null {
+  const helperSources = getClipboardHelperSources();
+  if (!helperSources) return null;
+
   try {
     const result = spawnSync(
       process.execPath,
-      ["--input-type=module", "-e", CLIPBOARD_READ_HELPER_SOURCE],
+      ["--input-type=module", "-e", helperSources.read],
       {
         encoding: "utf8",
         maxBuffer: CLIPBOARD_READ_MAX_BUFFER_BYTES,
@@ -162,6 +194,12 @@ export function writeClipboardInChildProcess(
       return;
     }
 
+    const helperSources = getClipboardHelperSources();
+    if (!helperSources) {
+      reject(new ClipboardSpawnError("clipboard helper module unavailable"));
+      return;
+    }
+
     let child: ClipboardProcess | null = null;
     let settled = false;
     const stdoutChunks: Buffer[] = [];
@@ -187,7 +225,7 @@ export function writeClipboardInChildProcess(
     try {
       child = spawn(
         process.execPath,
-        ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE],
+        ["--input-type=module", "-e", helperSources.write],
         {
           stdio: ["pipe", "pipe", "ignore"],
           windowsHide: true,

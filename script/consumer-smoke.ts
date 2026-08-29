@@ -210,6 +210,11 @@ async function importExtension(entryPath: string): Promise<PiExtension> {
 
 async function importExtensionWithVirtualPeers(
   entryPath: string,
+  hostEntrypoint = join(
+    findPackageRoot("@earendil-works/pi-coding-agent"),
+    "dist",
+    "cli.js",
+  ),
 ): Promise<PiExtension> {
   const codingAgentRoot = findPackageRoot("@earendil-works/pi-coding-agent");
   const requireFromCodingAgent = createRequire(
@@ -227,7 +232,7 @@ async function importExtensionWithVirtualPeers(
     },
   });
   const originalArgv1 = process.argv[1];
-  process.argv[1] = join(codingAgentRoot, "dist", "cli.js");
+  process.argv[1] = hostEntrypoint;
 
   try {
     const extension = await jiti.import(entryPath, { default: true });
@@ -433,6 +438,11 @@ async function main(): Promise<void> {
       importExtensionWithVirtualPeers,
     );
     console.log(`PASS managed activate ${entryPath}`);
+
+    await activateAndProbe(managedWorkspace, entryPath, (path) =>
+      importExtensionWithVirtualPeers(path, "/$bunfs/root/pi"),
+    );
+    console.log(`PASS standalone activate ${entryPath}`);
   }
 
   console.log("PASS consumer-smoke");
