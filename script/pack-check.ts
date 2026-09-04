@@ -239,11 +239,12 @@ const THRESHOLDS = {
   // Measured packed 57943 B, unpacked 228770 B. Budgets bumped 57300 -> 58500
   // and 226300 -> 229600, leaving ~557 B / ~830 B headroom. Files stay at 17.
   //
-  // Fail-soft host resolution: clipboard helper source is built lazily so
-  // virtual or non-filesystem Pi entrypoints cannot block extension activation;
-  // helper tests call the same source builders used at runtime. Measured packed
-  // 58363 B, unpacked 230546 B. Budgets bumped 58500 -> 59000 and 229600 ->
-  // 231400, leaving ~637 B / ~854 B headroom. Files stay at 17.
+  // Cursor reload plus managed/standalone startup fixes: clipboard helper source
+  // is built lazily so virtual or non-filesystem Pi entrypoints cannot block
+  // extension activation; helper tests call the same source builders used at
+  // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
+  // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
+  // 17.
   maxFiles: 17,
   maxSize: 59000,
   maxUnpackedSize: 231400,
