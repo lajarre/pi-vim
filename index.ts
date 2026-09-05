@@ -63,9 +63,12 @@ import {
   type WordMotionClass,
 } from "./motions.js";
 import {
+  DEFAULT_ESCAPE_SEQUENCE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
+  type EscapeSequenceSettings,
   type ExCommandSettings,
   readPiVimSettings,
+  resolveEscapeSequenceSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -278,6 +281,12 @@ export class ModalEditor extends CustomEditor {
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
+  // Opt-in jk-style Insert escape (piVim.escapeSequence).
+  private escapeSequenceSettings: EscapeSequenceSettings =
+    DEFAULT_ESCAPE_SEQUENCE_SETTINGS;
+  private pendingEscapeSequenceLen: number = 0;
+  private pendingEscapeSequenceTimer: ReturnType<typeof setTimeout> | null =
+    null;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
   private lastRepeatableCommand: RepeatableCommand | null = null;
@@ -398,6 +407,9 @@ export class ModalEditor extends CustomEditor {
   }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
+  }
+  setEscapeSequenceSettings(settings: EscapeSequenceSettings): void {
+    this.escapeSequenceSettings = settings;
   }
   getRegister(): string {
     return this.unnamedRegister;
@@ -1346,6 +1358,7 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (this.handleEscapeSequenceInput(data)) return;
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           super.handleInput(CTRL_E);
           return;
@@ -1459,7 +1472,72 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  // Opt-in jk-style Insert escape (piVim.escapeSequence). Returns true if
+  // data was consumed (buffered or triggered Escape).
+  private handleEscapeSequenceInput(data: string): boolean {
+    const { enabled, sequence, timeoutMs } = this.escapeSequenceSettings;
+    if (!enabled || sequence.length < 2) return false;
+    if (this.pendingEscapeSequenceLen > 0) {
+      if (this.pendingEscapeSequenceTimer !== null) {
+        clearTimeout(this.pendingEscapeSequenceTimer);
+      }
+      const matched = this.pendingEscapeSequenceLen;
+      this.pendingEscapeSequenceLen = 0;
+      this.pendingEscapeSequenceTimer = null;
+      if (data === sequence[matched]) {
+        if (matched + 1 === sequence.length) {
+          this.handleEscape();
+          return true;
+        }
+        this.pendingEscapeSequenceLen = matched + 1;
+        this.pendingEscapeSequenceTimer = setTimeout(
+          () => this.flushPendingEscapeSequence(),
+          timeoutMs,
+        );
+        return true;
+      }
+      // Mismatch: the buffered prefix was real text; flush it and let the
+      // caller handle the current chunk normally.
+      super.handleInput(sequence.slice(0, matched));
+      return false;
+    }
+    if (data === sequence) {
+      this.handleEscape();
+      return true;
+    }
+    if (data === sequence[0]) {
+      this.pendingEscapeSequenceLen = 1;
+      this.pendingEscapeSequenceTimer = setTimeout(
+        () => this.flushPendingEscapeSequence(),
+        timeoutMs,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private flushPendingEscapeSequence(): void {
+    const matched = this.pendingEscapeSequenceLen;
+    this.pendingEscapeSequenceLen = 0;
+    this.pendingEscapeSequenceTimer = null;
+    if (matched === 0) return;
+    super.handleInput(this.escapeSequenceSettings.sequence.slice(0, matched));
+    (
+      this as unknown as { tui?: { requestRender?: () => void } }
+    ).tui?.requestRender?.();
+  }
+
   private handleEscape(): void {
+    if (this.pendingEscapeSequenceLen > 0) {
+      const matched = this.pendingEscapeSequenceLen;
+      this.pendingEscapeSequenceLen = 0;
+      if (this.pendingEscapeSequenceTimer !== null) {
+        clearTimeout(this.pendingEscapeSequenceTimer);
+        this.pendingEscapeSequenceTimer = null;
+      }
+      // Real Esc while a prefix was buffered: keep the literal prefix.
+      super.handleInput(this.escapeSequenceSettings.sequence.slice(0, matched));
+    }
     if (this.pendingExCommand !== null) {
       this.clearPendingExCommand();
       return;
@@ -4182,6 +4260,12 @@ export default function (pi: ExtensionAPI) {
     if (exCommand.warning && ctx.hasUI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
+    const escapeSequence = resolveEscapeSequenceSettings(
+      piVimSettings.escapeSequence,
+    );
+    if (escapeSequence.warning && ctx.hasUI) {
+      ctx.ui.notify(escapeSequence.warning, "warning");
+    }
 
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
@@ -4216,6 +4300,7 @@ export default function (pi: ExtensionAPI) {
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
       editor.setExCommandSettings(exCommand.settings);
+      editor.setEscapeSequenceSettings(escapeSequence.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.
       editor.setCommandNamesFn(

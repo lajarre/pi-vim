@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_ESCAPE_SEQUENCE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   readPiVimBorderSync,
   readPiVimBorderSyncSetting,
   readPiVimClipboardMirrorSetting,
+  readPiVimEscapeSequenceSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
   readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
+  resolveEscapeSequenceSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -677,5 +680,147 @@ describe("piVim exCommand settings resolver", () => {
       resolved.warning,
       "Invalid piVim.exCommand copyInputToClipboard; expected a boolean.",
     );
+  });
+});
+
+describe("piVim escapeSequence settings reader", () => {
+  it("returns undefined when global and project settings are missing", () => {
+    assert.equal(
+      readPiVimEscapeSequenceSetting(undefined, undefined),
+      undefined,
+    );
+    assert.equal(
+      readPiVimEscapeSequenceSetting({ piVim: {} }, { piVim: {} }),
+      undefined,
+    );
+  });
+
+  it("reads global piVim escapeSequence when the project setting is missing", () => {
+    assert.equal(
+      readPiVimEscapeSequenceSetting({ piVim: { escapeSequence: "jk" } }, {}),
+      "jk",
+    );
+  });
+
+  it("lets project piVim escapeSequence override global", () => {
+    assert.equal(
+      readPiVimEscapeSequenceSetting(
+        { piVim: { escapeSequence: "jk" } },
+        { piVim: { escapeSequence: "kj" } },
+      ),
+      "kj",
+    );
+  });
+});
+
+describe("piVim escapeSequence settings resolver", () => {
+  it("defaults to disabled when unset", () => {
+    const resolved = resolveEscapeSequenceSettings(undefined);
+
+    assert.deepEqual(resolved.settings, {
+      enabled: false,
+      sequence: "jk",
+      timeoutMs: 300,
+    });
+    assert.equal(resolved.warning, undefined);
+  });
+
+  it("does not hand out the shared defaults object", () => {
+    const resolved = resolveEscapeSequenceSettings(undefined);
+
+    assert.notEqual(resolved.settings, DEFAULT_ESCAPE_SEQUENCE_SETTINGS);
+  });
+
+  it("enables with a bare string shorthand", () => {
+    const resolved = resolveEscapeSequenceSettings("kj");
+
+    assert.deepEqual(resolved.settings, {
+      enabled: true,
+      sequence: "kj",
+      timeoutMs: 300,
+    });
+    assert.equal(resolved.warning, undefined);
+  });
+
+  it("warns and stays disabled for an invalid string shorthand", () => {
+    for (const value of ["j", "a".repeat(9), "j k", ""]) {
+      const resolved = resolveEscapeSequenceSettings(value);
+
+      assert.deepEqual(resolved.settings, DEFAULT_ESCAPE_SEQUENCE_SETTINGS);
+      assert.equal(
+        resolved.warning,
+        `Invalid piVim.escapeSequence "${value}"; expected 2-8 printable, non-whitespace ASCII characters.`,
+      );
+    }
+  });
+
+  it("enables via object presence even with every key defaulted", () => {
+    const resolved = resolveEscapeSequenceSettings({});
+
+    assert.deepEqual(resolved.settings, {
+      enabled: true,
+      sequence: "jk",
+      timeoutMs: 300,
+    });
+    assert.equal(resolved.warning, undefined);
+  });
+
+  it("reads a custom sequence and timeoutMs from the object form", () => {
+    const resolved = resolveEscapeSequenceSettings({
+      sequence: "fd",
+      timeoutMs: 150,
+    });
+
+    assert.deepEqual(resolved.settings, {
+      enabled: true,
+      sequence: "fd",
+      timeoutMs: 150,
+    });
+    assert.equal(resolved.warning, undefined);
+  });
+
+  it("clamps timeoutMs to the supported range", () => {
+    assert.equal(
+      resolveEscapeSequenceSettings({ timeoutMs: 1 }).settings.timeoutMs,
+      50,
+    );
+    assert.equal(
+      resolveEscapeSequenceSettings({ timeoutMs: 5000 }).settings.timeoutMs,
+      2000,
+    );
+  });
+
+  it("stays enabled with a defaulted sequence when the object's sequence is invalid", () => {
+    const resolved = resolveEscapeSequenceSettings({ sequence: "j" });
+
+    assert.deepEqual(resolved.settings, {
+      enabled: true,
+      sequence: "jk",
+      timeoutMs: 300,
+    });
+    assert.equal(resolved.warning, "Invalid piVim.escapeSequence sequence.");
+  });
+
+  it("warns and defaults when the value is neither a string nor an object", () => {
+    for (const value of [1, null, [], true]) {
+      const resolved = resolveEscapeSequenceSettings(value);
+
+      assert.deepEqual(resolved.settings, DEFAULT_ESCAPE_SEQUENCE_SETTINGS);
+      assert.equal(
+        resolved.warning,
+        "Invalid piVim.escapeSequence; expected a string or an object.",
+      );
+    }
+  });
+
+  it("warns and defaults timeoutMs when it is not a positive number", () => {
+    const resolved = resolveEscapeSequenceSettings({ timeoutMs: "fast" });
+
+    assert.deepEqual(resolved.settings, {
+      enabled: true,
+      sequence: "jk",
+      timeoutMs: 300,
+    });
+    assert.equal(resolved.warning, "Invalid piVim.escapeSequence timeoutMs.");
   });
 });
