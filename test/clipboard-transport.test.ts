@@ -189,6 +189,41 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
     assert.deepEqual(calls, ["wl-paste", "xclip", "xsel"]);
   });
 
+  it("both PowerShell candidates explicitly emit non-ASCII text as BOM-free UTF-8", () => {
+    const text = "café 日本語 👩🏽‍💻\n";
+    for (const selected of ["powershell.exe", "pwsh.exe"]) {
+      const result = readClipboardInChildProcess({
+        ...standalone,
+        platform: "win32",
+        run: (command, args, options) => {
+          assert.deepEqual(args.slice(0, 3), [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+          ]);
+          const script = args[3];
+          assert.equal(
+            script,
+            "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::Out.Write((Get-Clipboard -Raw))",
+          );
+          if (command !== selected) return failure();
+          // Model Windows PowerShell's legacy output encoding unless the command
+          // explicitly sets it; no actual Windows process or host clipboard.
+          const encoding = script.includes(
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+          )
+            ? "utf8"
+            : "latin1";
+          return success(
+            Buffer.from(text, encoding).toString(options.encoding),
+          );
+        },
+      });
+      assert.equal(result, text);
+      assert.equal(result?.startsWith("\uFEFF"), false);
+    }
+  });
+
   it("ordinary Node keeps the Pi-owned read helper", () => {
     assert.equal(
       readClipboardInChildProcess({

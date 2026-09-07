@@ -33,7 +33,8 @@ export function getClipboardReadCommands(
     return [{ command: "/usr/bin/pbpaste", args: [] }];
   }
   if (platform === "win32") {
-    const script = "[Console]::Out.Write((Get-Clipboard -Raw))";
+    const script =
+      "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::Out.Write((Get-Clipboard -Raw))";
     const args = ["-NoProfile", "-NonInteractive", "-Command", script];
     return [
       { command: "powershell.exe", args },
