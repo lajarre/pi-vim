@@ -18,7 +18,7 @@ import {
   buildClipboardWriteHelperSource,
   canSpawnJavaScriptHelper,
   getClipboardReadCommands,
-  writeClipboardInCurrentProcess,
+  writeClipboardInChildProcess,
 } from "../clipboard-mirror.js";
 import installPiVim, {
   ModalEditor,
@@ -3584,9 +3584,18 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
   });
 
   it("only reuses process.execPath for an ordinary Node runtime", () => {
-    assert.equal(canSpawnJavaScriptHelper({}, {}), true);
-    assert.equal(canSpawnJavaScriptHelper({ bun: "1.3.14" }, {}), false);
-    assert.equal(canSpawnJavaScriptHelper({}, { sea: true }), false);
+    assert.equal(
+      canSpawnJavaScriptHelper({}, () => ({ isSea: () => false })),
+      true,
+    );
+    assert.equal(
+      canSpawnJavaScriptHelper({ bun: "1.3.14" }, () => undefined),
+      false,
+    );
+    assert.equal(
+      canSpawnJavaScriptHelper({}, () => ({ isSea: () => true })),
+      false,
+    );
   });
 
   it("selects standalone clipboard readers by platform", () => {
@@ -3603,36 +3612,47 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     );
   });
 
-  it("standalone clipboard writes use Pi's injected copy function", async () => {
-    const writes: string[] = [];
-    await writeClipboardInCurrentProcess(
-      "payload",
-      new AbortController().signal,
-      async (text) => {
-        writes.push(text);
-      },
+  it("standalone unavailable commands preserve best-effort editing and the unnamed register", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    editor.setClipboardFn((text, signal) =>
+      writeClipboardInChildProcess(
+        text,
+        signal ?? new AbortController().signal,
+        {
+          canSpawnHelper: () => false,
+          platform: "linux",
+          env: {},
+          spawn: () => assert.fail("headless environment has no commands"),
+        },
+      ),
     );
-    assert.deepEqual(writes, ["payload"]);
+    sendKeys(editor, ["d", "w"]);
+    await nextImmediate();
+    assert.equal(editor.getText(), "bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    editor.setClipboardReadFn(() =>
+      assert.fail("failed mirror must use shadow"),
+    );
+    sendKeys(editor, ["P"]);
+    assert.equal(editor.getText(), "foo bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "bar");
   });
 
-  it("standalone clipboard writes stop waiting when aborted", async () => {
-    const started = deferred();
-    const release = deferred();
+  it("standalone clipboard writes reject an already-aborted signal without spawning", async () => {
     const controller = new AbortController();
-    const write = writeClipboardInCurrentProcess(
-      "payload",
-      controller.signal,
-      async () => {
-        started.resolve();
-        await release.promise;
-      },
-    );
-
-    await started.promise;
     controller.abort(new Error("copy cancelled"));
-    await assert.rejects(write, /copy cancelled/);
-    release.resolve();
-    await nextImmediate();
+    await assert.rejects(
+      writeClipboardInChildProcess("payload", controller.signal, {
+        canSpawnHelper: () => false,
+        spawn: () => assert.fail("aborted writes never spawn"),
+      }),
+      /copy cancelled/,
+    );
   });
 
   it("active clipboard write receives no abort event when superseded", async () => {

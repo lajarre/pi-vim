@@ -1,16 +1,22 @@
-import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import {
   type ClipboardReadOptions,
+  ClipboardSpawnError,
+  type ClipboardWriteOptions,
+  canSpawnJavaScriptHelper,
+  createClipboardAbortError,
+  getAbortError,
   getClipboardReadCommands,
   readClipboardCommands,
+  spawnClipboardWrite,
+  writeClipboardWithPlatformCommands,
 } from "./clipboard-platform.js";
 
 export {
   type ClipboardReadCommand,
+  canSpawnJavaScriptHelper,
   getClipboardReadCommands,
 } from "./clipboard-platform.js";
 
@@ -23,7 +29,6 @@ export type ClipboardWriteFn = (
   signal: AbortSignal,
 ) => Promise<void>;
 export type ClipboardReadFn = () => string | null;
-type ClipboardProcess = ReturnType<typeof spawn>;
 
 type ClipboardCircuitBreaker = {
   consecutiveEnvironmentFailures: number;
@@ -38,13 +43,6 @@ const processClipboardCircuitBreaker: ClipboardCircuitBreaker = {
 function resetClipboardCircuitBreaker(): void {
   processClipboardCircuitBreaker.consecutiveEnvironmentFailures = 0;
   processClipboardCircuitBreaker.disabled = false;
-}
-
-class ClipboardSpawnError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ClipboardSpawnError";
-  }
 }
 
 type SpawnErrnoLike = Error & { code?: unknown; syscall?: unknown };
@@ -147,17 +145,6 @@ function getClipboardHelperSources(): ClipboardHelperSources | null {
   return clipboardHelperSources;
 }
 
-export function canSpawnJavaScriptHelper(
-  versions: { bun?: string } = process.versions as typeof process.versions & {
-    bun?: string;
-  },
-  features: { sea?: boolean } = process.features as typeof process.features & {
-    sea?: boolean;
-  },
-): boolean {
-  return !versions.bun && features.sea !== true;
-}
-
 export function readClipboardInChildProcess(
   options: ClipboardReadOptions = {},
 ): string | null {
@@ -181,194 +168,28 @@ export function readClipboardInChildProcess(
   );
 }
 
-function createClipboardAbortError(message: string): Error {
-  const error = new Error(message);
-  error.name = "AbortError";
-  return error;
-}
-
-function getAbortError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : createClipboardAbortError("clipboard write aborted");
-}
-
-function killClipboardProcess(child: ClipboardProcess): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    return;
-  }
-}
-
-export function writeClipboardInCurrentProcess(
+export async function writeClipboardInChildProcess(
   text: string,
   signal: AbortSignal,
-  copy: (value: string) => Promise<void> = copyToClipboard,
+  options: ClipboardWriteOptions = {},
 ): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(getAbortError(signal));
-      return;
-    }
-
-    let settled = false;
-    const finish = (error?: unknown) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onAbort = () => finish(getAbortError(signal));
-
-    signal.addEventListener("abort", onAbort, { once: true });
-    void Promise.resolve()
-      .then(() => copy(text))
-      .then(() => finish(), finish);
-  });
-}
-
-export function writeClipboardInChildProcess(
-  text: string,
-  signal: AbortSignal,
-): Promise<void> {
-  if (!canSpawnJavaScriptHelper()) {
-    return writeClipboardInCurrentProcess(text, signal);
+  if (signal.aborted) throw getAbortError(signal);
+  if (!(options.canSpawnHelper ?? canSpawnJavaScriptHelper)()) {
+    return writeClipboardWithPlatformCommands(text, signal, options);
   }
-
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(getAbortError(signal));
-      return;
-    }
-
-    const helperSources = getClipboardHelperSources();
-    if (!helperSources) {
-      reject(new ClipboardSpawnError("clipboard helper module unavailable"));
-      return;
-    }
-
-    let child: ClipboardProcess | null = null;
-    let settled = false;
-    const stdoutChunks: Buffer[] = [];
-
-    function finish(error?: unknown): void {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    }
-
-    function onAbort(): void {
-      if (child) {
-        killClipboardProcess(child);
-      }
-      finish(getAbortError(signal));
-    }
-
-    try {
-      child = spawn(
-        process.execPath,
-        ["--input-type=module", "-e", helperSources.write],
-        {
-          stdio: ["pipe", "pipe", "ignore"],
-          windowsHide: true,
-        },
-      );
-    } catch (error) {
-      finish(
-        new ClipboardSpawnError("clipboard helper spawn failed", {
-          cause: error,
-        }),
-      );
-      return;
-    }
-
-    signal.addEventListener("abort", onAbort, { once: true });
-
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      stdoutChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-    });
-    child.stdout?.on("error", (error) => {
-      finish(error);
-    });
-
-    child.once("error", (error) => {
-      finish(
-        new ClipboardSpawnError("clipboard helper spawn failed", {
-          cause: error,
-        }),
-      );
-    });
-
-    child.once("close", (code) => {
-      if (settled) return;
-
-      if (signal.aborted) {
-        finish(getAbortError(signal));
-        return;
-      }
-
-      if (code === 0) {
-        try {
-          for (const chunk of stdoutChunks) {
-            process.stdout.write(chunk);
-          }
-        } catch (error) {
-          finish(error);
-          return;
-        }
-        finish();
-        return;
-      }
-
-      // Exit code 2 means the helper ran but the copy itself failed; that is
-      // a clipboard-backend failure, not an environment failure, so it must
-      // not count toward the spawn circuit breaker.
-      if (code === CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE) {
-        finish(new Error("clipboard helper reported a failed copy"));
-        return;
-      }
-
-      finish(
-        new ClipboardSpawnError(
-          `clipboard helper failed with exit code ${code ?? "null"}`,
-        ),
-      );
-    });
-
-    if (!child.stdin) {
-      killClipboardProcess(child);
-      finish(new ClipboardSpawnError("clipboard helper stdin unavailable"));
-      return;
-    }
-
-    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-      if (signal.aborted) {
-        finish(getAbortError(signal));
-        return;
-      }
-
-      if (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED") {
-        return;
-      }
-
-      finish(error);
-    });
-
-    try {
-      child.stdin.end(text);
-    } catch (error) {
-      finish(error);
-    }
-  });
+  const helperSources = getClipboardHelperSources();
+  if (!helperSources)
+    throw new ClipboardSpawnError("clipboard helper module unavailable");
+  return spawnClipboardWrite(
+    {
+      command: process.execPath,
+      args: ["--input-type=module", "-e", helperSources.write],
+    },
+    text,
+    signal,
+    options,
+    true,
+  );
 }
 
 export class ClipboardMirror {

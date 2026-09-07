@@ -470,8 +470,9 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 - If policy skipped the last local write, `p` / `P` use the shadow so delete/yank → put works without touching the OS clipboard.
 - While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
 - If the last mirror write failed or was skipped by the mirror circuit breaker, `p` / `P` use the non-empty shadow until a mirror write lands again, so put never trusts a stale OS clipboard.
-- Official standalone Pi binaries are supported: writes use Pi's clipboard API, while reads use `pbpaste`, PowerShell, `termux-clipboard-get`, `wl-paste`, `xclip`, or `xsel` as available. PowerShell reads explicitly emit UTF-8 so non-ASCII clipboard text is preserved.
-- Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
+- Ordinary Node installs keep Pi's clipboard backend in a helper process, including Pi's terminal OSC52 fallback. Standalone Bun/Node SEA binaries instead spawn platform commands asynchronously for writes: `pbcopy`, PowerShell, `termux-clipboard-set`, `wl-copy` on Wayland, or `xclip` / `xsel` on X11. Clipboard text goes through stdin, never shell interpolation; command stdout/stderr are discarded. Standalone writes do not emit OSC52; unavailable or failed commands fall back to the internal shadow.
+- Standalone reads use `pbpaste`, PowerShell, `termux-clipboard-get`, `wl-paste`, `xclip`, or `xsel` as available. PowerShell reads and writes explicitly use UTF-8 to preserve non-ASCII clipboard text.
+- Write attempts share the existing 5500 ms timeout, kill the active child on abort, and wait for it to close before draining the latest pending write. Three consecutive environment failures disable mirroring; backend failures and timeouts do not. On Wayland external state may lag while the shadow stays authoritative for immediate puts.
 
 ---
 

@@ -259,9 +259,16 @@ const THRESHOLDS = {
   // 234119 B unpacked (119 B over its original budget), 17 files. This fix
   // measures 59878 B / 235379 B / 18 files. Budgets become 60300 / 236000 / 18,
   // leaving 422 B / 621 B headroom. No dependency or Vim semantic changes.
+  //
+  // Isolated standalone writes: shared abortable child lifecycle and fixed
+  // platform command vectors replace Pi's in-process blocking copy API; lazy
+  // node:sea.isSea detection handles compiled Node. Normal Node retains Pi's
+  // helper backend. README documents timeout, circuit and OSC52 boundaries.
+  // Measured 60736 B packed / 238258 B unpacked / 18 files; budgets become
+  // 61200 / 239000, leaving 464 B / 742 B headroom. No new dependency.
   maxFiles: 18,
-  maxSize: 60300,
-  maxUnpackedSize: 236000,
+  maxSize: 61200,
+  maxUnpackedSize: 239000,
 } as const;
 
 function compareStrings(a: string, b: string): number {
