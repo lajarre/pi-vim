@@ -231,6 +231,21 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
     }
   });
 
+  it("uses the real monotonic clock with its Performance receiver", () => {
+    assert.equal(
+      readClipboardInChildProcess({
+        canSpawnHelper: () => false,
+        platform: "darwin",
+        run: (_command, _args, options) => {
+          assert.ok((options.timeout ?? 0) > 0);
+          assert.ok((options.timeout ?? 0) <= 750);
+          return success("real clock");
+        },
+      }),
+      "real clock",
+    );
+  });
+
   it("ordinary Node keeps the Pi-owned read helper", () => {
     assert.equal(
       readClipboardInChildProcess({

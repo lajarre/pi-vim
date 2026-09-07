@@ -57,7 +57,7 @@ export function getClipboardReadCommands(
 
 export function readClipboardCommands(
   commands: ClipboardReadCommand[],
-  { run = spawnSync, now = performance.now }: ClipboardReadOptions = {},
+  { run = spawnSync, now = () => performance.now() }: ClipboardReadOptions = {},
 ): string | null {
   // Explicit puts remain synchronous, but all fallback attempts share one
   // monotonic deadline. Never pass timeout=0 (Node interprets it as unbounded).
