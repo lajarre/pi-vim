@@ -252,9 +252,16 @@ const THRESHOLDS = {
   // the standalone backends. Measured packed 59080 B, unpacked 233455 B. Budgets
   // bumped 59000 -> 59500 and 231400 -> 234000, leaving ~420 B / ~545 B
   // headroom. Files stay at 17.
-  maxFiles: 17,
-  maxSize: 59500,
-  maxUnpackedSize: 234000,
+  //
+  // One overall clipboard read deadline: extract platform read transport to
+  // clipboard-platform.ts to keep the mirror under ~500 LOC, and document the
+  // bound/fallback contract. Stacked contributor import measured 59360 B packed,
+  // 234119 B unpacked (119 B over its original budget), 17 files. This fix
+  // measures 59878 B / 235379 B / 18 files. Budgets become 60300 / 236000 / 18,
+  // leaving 422 B / 621 B headroom. No dependency or Vim semantic changes.
+  maxFiles: 18,
+  maxSize: 60300,
+  maxUnpackedSize: 236000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

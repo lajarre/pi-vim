@@ -466,7 +466,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 - `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim's internal shadow.
 - `piVim.clipboardMirror = "never"` disables write mirroring while keeping internal register writes synchronous.
 - Rapid mirrored writes coalesce: only the latest pending value is guaranteed to be mirrored.
-- `p` / `P` read the OS clipboard first when no local write was skipped by policy, falling back to the shadow on read failure/timeout.
+- `p` / `P` read the OS clipboard first when no local write was skipped by policy, falling back to the shadow on read failure/timeout. Reads share one monotonic 750 ms timeout budget across fallback commands, with at most 1 MiB of output; an empty successful read stays empty rather than pasting stale shadow text.
 - If policy skipped the last local write, `p` / `P` use the shadow so delete/yank → put works without touching the OS clipboard.
 - While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
 - If the last mirror write failed or was skipped by the mirror circuit breaker, `p` / `P` use the non-empty shadow until a mirror write lands again, so put never trusts a stale OS clipboard.
