@@ -12,6 +12,13 @@ import type { Mode } from "./types.js";
 
 export type VisualMode = "visual" | "visual-line";
 export type VisualPosition = { line: number; col: number };
+export type VisualLayoutLine = {
+  logicalLine: number;
+  startCol: number;
+  length: number;
+};
+
+export type VisualRenderSpan = { start: number; end: number };
 
 export function isVisualMode(mode: Mode): mode is VisualMode {
   return mode === "visual" || mode === "visual-line";
@@ -65,4 +72,111 @@ export function clampVisualPosition(
   const line = Math.max(0, Math.min(position.line, lines.length - 1));
   const col = Math.max(0, Math.min(position.col, (lines[line] ?? "").length));
   return { line, col };
+}
+
+/**
+ * Selected UTF-16 span within one host-wrapped layout line. The end may be one
+ * cell past the line text: that paints the selected newline/EOL on the final
+ * wrapped segment, including otherwise-empty lines.
+ */
+export function getVisualRenderSpan(
+  mode: VisualMode,
+  anchor: VisualPosition,
+  cursor: VisualPosition,
+  lines: string[],
+  layoutLine: VisualLayoutLine,
+): VisualRenderSpan | null {
+  const { logicalLine, startCol, length } = layoutLine;
+  const line = lines[logicalLine] ?? "";
+  const segmentEnd = startCol + length;
+  const isLastSegment = segmentEnd >= line.length;
+
+  if (mode === "visual-line") {
+    const { startLine, endLine } = getVisualLineRange(anchor, cursor);
+    if (logicalLine < startLine || logicalLine > endLine) return null;
+    return { start: 0, end: length + (isLastSegment ? 1 : 0) };
+  }
+
+  const { start, end } = orderVisualEndpoints(anchor, cursor);
+  if (logicalLine < start.line || logicalLine > end.line) return null;
+
+  const selectionStart = logicalLine === start.line ? start.col : 0;
+  const selectionEnd =
+    logicalLine === end.line
+      ? getInclusiveEndColumn(line, end.col)
+      : line.length;
+  const intersectionStart = Math.max(selectionStart, startCol);
+  const intersectionEnd = Math.min(selectionEnd, segmentEnd);
+  const includesEol =
+    isLastSegment &&
+    (logicalLine < end.line ||
+      (logicalLine === end.line &&
+        end.col >= line.length &&
+        logicalLine < lines.length - 1));
+
+  if (intersectionEnd > intersectionStart) {
+    return {
+      start: intersectionStart - startCol,
+      end: intersectionEnd - startCol + (includesEol ? 1 : 0),
+    };
+  }
+  if (includesEol && selectionStart <= line.length) {
+    return { start: length, end: length + 1 };
+  }
+
+  // A coincident selection on an empty final line still occupies the cursor
+  // cell even though it has no buffer text to span.
+  if (
+    isLastSegment &&
+    line.length === 0 &&
+    logicalLine === start.line &&
+    logicalLine === end.line
+  ) {
+    return { start: 0, end: 1 };
+  }
+  return null;
+}
+
+const CURSOR_MARKER = "\x1b_pi:c\x07";
+const CSI_PATTERN = new RegExp(
+  `^${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+);
+
+function rawIndexAtTextOffset(line: string, target: number): number {
+  let raw = 0;
+  let text = 0;
+  while (raw < line.length && text < target) {
+    if (line.startsWith(CURSOR_MARKER, raw)) {
+      raw += CURSOR_MARKER.length;
+      continue;
+    }
+    const ansi = line.slice(raw).match(CSI_PATTERN)?.[0];
+    if (ansi) {
+      raw += ansi.length;
+      continue;
+    }
+    raw++;
+    text++;
+  }
+  return raw;
+}
+
+/** Apply a colorizer without letting the host software-cursor reset cancel it. */
+export function highlightRenderedTextRange(
+  line: string,
+  start: number,
+  end: number,
+  colorize: (text: string) => string,
+): string {
+  if (end <= start) return line;
+  const rawStart = rawIndexAtTextOffset(line, start);
+  const rawEnd = rawIndexAtTextOffset(line, end);
+  if (rawEnd <= rawStart) return line;
+
+  const selected = line.slice(rawStart, rawEnd);
+  const highlighted = selected
+    .split("\x1b[0m")
+    .map((part) => colorize(part))
+    .join("\x1b[0m");
+  return line.slice(0, rawStart) + highlighted + line.slice(rawEnd);
 }

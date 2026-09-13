@@ -105,8 +105,11 @@ import {
   clampVisualPosition,
   getInclusiveEndColumn,
   getVisualLineRange,
+  getVisualRenderSpan,
+  highlightRenderedTextRange,
   isVisualMode,
   orderVisualEndpoints,
+  type VisualLayoutLine,
   type VisualMode,
   type VisualPosition,
 } from "./visual.js";
@@ -239,6 +242,9 @@ type ModalEditorInternals = {
   pushUndoSnapshot?: () => void;
   setCursorCol?: (col: number) => void;
   undoStack?: { readonly length: number; pop(): unknown; stack: unknown[] };
+  lastWidth?: number;
+  scrollOffset?: number;
+  buildVisualLineMap?: (width: number) => VisualLayoutLine[];
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
@@ -260,6 +266,7 @@ type ModalEditorOptions = {
   // Reverse-video transform applied to the label. When the label defers to the
   // host color it is wrapped with this so it keeps its block styling.
   labelTransform?: ((s: string) => string) | null;
+  selectionColorizer?: ((s: string) => string) | null;
 };
 
 export class ModalEditor extends CustomEditor {
@@ -313,6 +320,7 @@ export class ModalEditor extends CustomEditor {
   // Reverse-video transform used by the label, so its defer-to-host branch
   // matches the label's usual background-block styling.
   private labelTransform: ((s: string) => string) | null = null;
+  private readonly selectionColorizer: (s: string) => string;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
   private cursorShapeSettings: CursorShapeSettings =
@@ -364,6 +372,8 @@ export class ModalEditor extends CustomEditor {
     this.borderSync = opts?.borderSync ?? null;
     this.labelSync = opts?.labelSync ?? null;
     this.labelTransform = opts?.labelTransform ?? null;
+    this.selectionColorizer =
+      opts?.selectionColorizer ?? ((s) => `\x1b[7m${s}\x1b[27m`);
     this.installModeBorderColorizer();
   }
 
@@ -4132,9 +4142,63 @@ export class ModalEditor extends CustomEditor {
     this.lastCursorShapeSequence = sequence;
   }
 
+  private renderVisualSelection(lines: string[], width: number): void {
+    if (!isVisualMode(this.mode) || lines.length < 3) return;
+
+    const editor = this as unknown as ModalEditorInternals;
+    if (
+      typeof editor.lastWidth !== "number" ||
+      typeof editor.scrollOffset !== "number" ||
+      typeof editor.buildVisualLineMap !== "function"
+    ) {
+      return;
+    }
+
+    const layoutLines = editor.buildVisualLineMap(editor.lastWidth);
+    // Mirror of the host editor's own render heuristic (30% of terminal rows,
+    // minimum 5); pi-tui recomputes it per render, so we must too.
+    const maxVisibleLines = Math.max(
+      5,
+      Math.floor(this.tui.terminal.rows * 0.3),
+    );
+    const visibleLines = layoutLines.slice(
+      editor.scrollOffset,
+      editor.scrollOffset + maxVisibleLines,
+    );
+    const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
+    const leftPadding = Math.min(this.getPaddingX(), maxPadding);
+    const anchor = this.getVisualAnchor();
+    const cursor = this.getCursor();
+    const bufferLines = this.getLines();
+
+    for (let index = 0; index < visibleLines.length; index++) {
+      const layoutLine = visibleLines[index];
+      // Host render output row 0 is the top border; visible text rows start
+      // at index 1.
+      const renderedIndex = index + 1;
+      const renderedLine = lines[renderedIndex];
+      if (!layoutLine || renderedLine === undefined) continue;
+      const span = getVisualRenderSpan(
+        this.mode,
+        anchor,
+        cursor,
+        bufferLines,
+        layoutLine,
+      );
+      if (!span) continue;
+      lines[renderedIndex] = highlightRenderedTextRange(
+        renderedLine,
+        leftPadding + span.start,
+        leftPadding + span.end,
+        this.selectionColorizer,
+      );
+    }
+  }
+
   render(width: number): string[] {
     const lines = super.render(width);
     this.syncCursorShapeForRender(lines);
+    this.renderVisualSelection(lines, width);
     if (lines.length === 0) return lines;
 
     const rawLabel = fitModeLabel(this.getModeLabel(), width);
@@ -4253,6 +4317,10 @@ export default function (pi: ExtensionAPI) {
         labelSync,
         offBorderColor,
         labelTransform: reverseVideo,
+        selectionColorizer:
+          typeof t.bg === "function"
+            ? (s) => t.bg("selectedBg", s)
+            : reverseVideo,
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
