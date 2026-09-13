@@ -245,9 +245,16 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
+  //
+  // Visual selection rendering: visual.ts gains host-layout span geometry and
+  // ANSI-safe selected-range painting; index.ts connects it to the host's own
+  // wrapped/scrolled visual-line map, and README documents the new parity.
+  // Measured packed 60149 B and unpacked 236710 B. Budgets bumped 59000 ->
+  // 61000 and 231400 -> 237500, leaving ~850 B / ~790 B headroom. The helpers
+  // stay in the existing visual.ts module, so files remain at 17.
   maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  maxSize: 61000,
+  maxUnpackedSize: 237500,
 } as const;
 
 function compareStrings(a: string, b: string): number {

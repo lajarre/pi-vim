@@ -9689,6 +9689,49 @@ describe("visual mode — footer label", () => {
   });
 });
 
+describe("visual mode — selection rendering", () => {
+  function highlightedEditor(text: string): ModalEditor {
+    const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
+    const editor = new ModalEditor(tui, stubTheme, stubKeybindings, {
+      selectionColorizer: (selected) => `<selected>${selected}</selected>`,
+    });
+    for (const char of text) editor.handleInput(char);
+    editor.handleInput("\x1b");
+    setInternalCursor(editor, 0, 0);
+    focusEditor(editor);
+    return editor;
+  }
+
+  it("highlights the inclusive character-wise selection", () => {
+    const editor = highlightedEditor("hello");
+    sendKeys(editor, ["v", "l", "l"]);
+
+    const line = removeCursorMarker(findCursorMarkerLine(editor.render(20)));
+
+    assert.ok(line.startsWith("<selected>hel</selected>lo"));
+  });
+
+  it("highlights whole lines and their EOL cells", () => {
+    const editor = highlightedEditor("first\nsecond");
+    sendKeys(editor, ["V", "j"]);
+
+    const lines = editor.render(20).map(removeCursorMarker);
+
+    assert.ok(lines[1]?.startsWith("<selected>first </selected>"));
+    assert.ok(lines[2]?.startsWith("<selected>second </selected>"));
+  });
+
+  it("keeps line-wise highlighting aligned across wrapped rows", () => {
+    const editor = highlightedEditor("alpha beta");
+    sendKeys(editor, ["V"]);
+
+    const lines = editor.render(8).map(removeCursorMarker);
+
+    assert.ok(lines[1]?.startsWith("<selected>alpha </selected>"));
+    assert.ok(lines[2]?.startsWith("<selected>beta </selected>"));
+  });
+});
+
 describe("visual mode — inert normal-mode commands", () => {
   const stays = (keys: string[]) => {
     const { editor } = createEditorWithSpy("hello");
