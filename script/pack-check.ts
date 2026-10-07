@@ -245,9 +245,13 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
-  maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  // Direct editor dispatch: a runtime-checked adapter adds one shipped module
+  // and README binding guarantees, without new dependencies. Measured packed
+  // 58644 -> 59181 B, unpacked 231210 -> 232872 B, files 17 -> 18. Evidence and
+  // rationale: doc/dev/editor-action-dispatch.md. Keep ~419 B / ~628 B headroom.
+  maxFiles: 18,
+  maxSize: 59600,
+  maxUnpackedSize: 233500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
