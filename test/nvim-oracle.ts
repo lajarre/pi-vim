@@ -77,7 +77,10 @@ const NVIM_DRIVER_LUA = [
   "local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
   "local lines = vim.split(input.text, '\\n', { plain = true })",
   "if #lines == 0 then lines = { '' } end",
+  "local undo_levels = vim.bo.undolevels",
+  "vim.bo.undolevels = -1",
   "vim.api.nvim_buf_set_lines(0, 0, -1, true, lines)",
+  "vim.bo.undolevels = undo_levels",
   "vim.fn.setreg('\"', input.register or '')",
   "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
   "if input.mode == 'insert' then vim.cmd('startinsert') else vim.cmd('stopinsert') end",
@@ -185,7 +188,14 @@ export async function runNvimParityCase(
 ): Promise<NvimParitySnapshot> {
   const scenario = {
     text: testCase.initial.text,
-    cursor: testCase.initial.cursor,
+    cursor: {
+      line: testCase.initial.cursor.line,
+      col: Buffer.byteLength(
+        (
+          testCase.initial.text.split("\n")[testCase.initial.cursor.line] ?? ""
+        ).slice(0, testCase.initial.cursor.col),
+      ),
+    },
     mode: testCase.initial.mode ?? "normal",
     register: testCase.initial.register ?? "",
     keys: testCase.keys.map(toNvimKey),
@@ -241,7 +251,7 @@ export async function runNvimParityCase(
   const combinedOutput = `${stdout}\n${stderr}`;
   const resultLine = combinedOutput
     .split(/\r?\n/)
-    .find((line) => line.startsWith(NVIM_RESULT_PREFIX));
+    .find((line) => line.includes(NVIM_RESULT_PREFIX));
 
   if (!resultLine) {
     throw new Error(
@@ -250,13 +260,20 @@ export async function runNvimParityCase(
   }
 
   const parsed = JSON.parse(
-    resultLine.slice(NVIM_RESULT_PREFIX.length),
+    resultLine.slice(
+      resultLine.indexOf(NVIM_RESULT_PREFIX) + NVIM_RESULT_PREFIX.length,
+    ),
   ) as unknown;
   assertSnapshot(parsed);
 
   return {
     text: parsed.text,
-    cursor: parsed.cursor,
+    cursor: {
+      line: parsed.cursor.line,
+      col: Buffer.from(parsed.text.split("\n")[parsed.cursor.line] ?? "")
+        .subarray(0, parsed.cursor.col)
+        .toString().length,
+    },
     mode: normalizeNvimMode(parsed.mode),
     register: parsed.register,
   };

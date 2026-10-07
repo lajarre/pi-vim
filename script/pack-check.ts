@@ -293,9 +293,16 @@ const THRESHOLDS = {
   // 2026-10-10: Document software-cursor contrast under reverse-video fallback.
   // Measured 66555 B packed / 259850 B unpacked / 18 files. Limits remain
   // 67100 / 260400, leaving 545 B / 550 B headroom.
-  maxFiles: 18,
-  maxSize: 67100,
-  maxUnpackedSize: 260400,
+  //
+  // Direct editor dispatch: a runtime-checked adapter adds one shipped module
+  // and README binding guarantees, without new dependencies. Measured packed
+  // 58644 -> 59181 B, unpacked 231210 -> 232872 B, files 17 -> 18. Evidence and
+  // rationale: doc/dev/editor-action-dispatch.md. Keep ~419 B / ~628 B headroom.
+  // Stacked on the 2026-10-10 intake branch the import measures 67124 B packed /
+  // 261512 B unpacked / 19 files; budgets become 67700 / 262200 (576 B / 688 B headroom).
+  maxFiles: 19,
+  maxSize: 67700,
+  maxUnpackedSize: 262200,
 } as const;
 
 function compareStrings(a: string, b: string): number {

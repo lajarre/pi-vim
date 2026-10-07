@@ -2,6 +2,8 @@
  * Types and constants for vim-mode extension
  */
 
+import type { PiEditorAction } from "./pi-editor-actions.js";
+
 export type Mode = "normal" | "insert" | "visual" | "visual-line";
 export type CharMotion = "f" | "F" | "t" | "T";
 export type PendingMotion = CharMotion | null;
@@ -12,13 +14,13 @@ export interface LastCharMotion {
   char: string;
 }
 
-// Normal mode key mappings: key -> escape sequence (or null for mode switch)
-export const NORMAL_KEYS: Record<string, string | null> = {
-  h: "\x1b[D", // left
-  j: "\x1b[B", // down
-  k: "\x1b[A", // up
-  l: "\x1b[C", // right
-  "0": "\x01", // line start
+/** Normal-mode key mappings; null entries use pi-vim's own command handlers. */
+export const NORMAL_KEYS: Record<string, PiEditorAction | null> = {
+  h: ["moveCursor", 0, -1],
+  j: ["moveCursor", 1, 0],
+  k: ["moveCursor", -1, 0],
+  l: ["moveCursor", 0, 1],
+  "0": ["moveToLineStart"],
   $: null, // line end
   x: null, // delete char (custom clipboard handling)
   X: null, // delete char before cursor (custom clipboard handling)

@@ -61,6 +61,7 @@ import {
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
+import { runPiEditorAction } from "./pi-editor-actions.js";
 import {
   type CursorShapeSettings,
   DEFAULT_CURSOR_SHAPE_SETTINGS,
@@ -89,16 +90,8 @@ import type {
 } from "./types.js";
 import {
   CHAR_MOTION_KEYS,
-  CTRL_A,
-  CTRL_E,
-  CTRL_K,
   CTRL_R,
   CTRL_UNDERSCORE,
-  ESC_DOWN,
-  ESC_LEFT,
-  ESC_RIGHT,
-  ESC_UP,
-  NEWLINE,
   NORMAL_KEYS,
 } from "./types.js";
 import {
@@ -661,7 +654,7 @@ export class ModalEditor extends CustomEditor {
       let changed = false;
       this.withTransition("undo", () => {
         const beforeUndo = this.captureSnapshot();
-        super.handleInput(CTRL_UNDERSCORE);
+        runPiEditorAction(this, "undo");
         const afterUndo = this.captureSnapshot();
 
         if (this.snapshotChanged(beforeUndo, afterUndo)) {
@@ -1367,11 +1360,11 @@ export class ModalEditor extends CustomEditor {
 
       if ("insert" === this.mode) {
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
-          super.handleInput(CTRL_E);
+          runPiEditorAction(this, "moveToLineEnd");
           return;
         }
         if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
-          super.handleInput(CTRL_A);
+          runPiEditorAction(this, "moveToLineStart");
           return;
         }
         if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
@@ -2671,18 +2664,17 @@ export class ModalEditor extends CustomEditor {
   }
 
   private openLineBelow(): void {
-    super.handleInput(CTRL_E);
-    super.handleInput(NEWLINE);
+    runPiEditorAction(this, "moveToLineEnd");
+    runPiEditorAction(this, "addNewLine");
   }
 
   private openLineAbove(): void {
-    super.handleInput(CTRL_A);
-    super.handleInput(NEWLINE);
-    super.handleInput(ESC_UP);
+    runPiEditorAction(this, "moveToLineStart");
+    runPiEditorAction(this, "addNewLine");
+    runPiEditorAction(this, "moveCursor", -1, 0);
   }
 
   private handleMappedKey(key: string): void {
-    const seq = NORMAL_KEYS[key];
     switch (key) {
       case "i":
         this.setMode();
@@ -2690,12 +2682,12 @@ export class ModalEditor extends CustomEditor {
       case "a":
         this.setMode();
         if (!this.isCursorAtOrPastEol()) {
-          super.handleInput(ESC_RIGHT);
+          runPiEditorAction(this, "moveCursor", 0, 1);
         }
         break;
       case "A":
         this.setMode();
-        super.handleInput(CTRL_E);
+        runPiEditorAction(this, "moveToLineEnd");
         break;
       case "I":
         this.setMode();
@@ -2749,8 +2741,10 @@ export class ModalEditor extends CustomEditor {
       case "k":
         this.moveCursorVertically(-1);
         break;
-      default:
-        if (seq) super.handleInput(seq);
+      default: {
+        const action = NORMAL_KEYS[key];
+        if (action) runPiEditorAction(this, ...action);
+      }
     }
   }
 
@@ -2830,9 +2824,9 @@ export class ModalEditor extends CustomEditor {
 
     if (this.tryMoveCursorByState(delta)) return;
 
-    const seq = delta > 0 ? ESC_RIGHT : ESC_LEFT;
+    const direction = delta > 0 ? 1 : -1;
     for (let i = 0; i < Math.abs(delta); i++) {
-      super.handleInput(seq);
+      runPiEditorAction(this, "moveCursor", 0, direction);
     }
   }
 
@@ -2848,9 +2842,9 @@ export class ModalEditor extends CustomEditor {
 
     const state = editor.state;
     if (!state || !Array.isArray(state.lines) || state.lines.length === 0) {
-      const seq = delta > 0 ? ESC_DOWN : ESC_UP;
+      const direction = delta > 0 ? 1 : -1;
       for (let i = 0; i < Math.abs(delta); i++) {
-        super.handleInput(seq);
+        runPiEditorAction(this, "moveCursor", direction, 0);
       }
       return;
     }
@@ -2917,7 +2911,7 @@ export class ModalEditor extends CustomEditor {
 
     const state = editor.state;
     if (!state || !Array.isArray(state.lines) || state.lines.length === 0) {
-      super.handleInput(CTRL_A);
+      runPiEditorAction(this, "moveToLineStart");
       return;
     }
 
@@ -3441,7 +3435,7 @@ export class ModalEditor extends CustomEditor {
       col < line.length ? line.slice(col) : hasNextLine ? "\n" : "";
 
     if (deleted !== "") this.writeToRegister(deleted);
-    super.handleInput(CTRL_K);
+    runPiEditorAction(this, "deleteToEndOfLine");
   }
 
   private cutCurrentLineContent(): void {
@@ -3453,8 +3447,8 @@ export class ModalEditor extends CustomEditor {
     const deleted = line.length > 0 ? line : hasNextLine ? "\n" : "";
 
     this.writeToRegister(deleted);
-    super.handleInput(CTRL_A);
-    super.handleInput(CTRL_K);
+    runPiEditorAction(this, "moveToLineStart");
+    runPiEditorAction(this, "deleteToEndOfLine");
   }
 
   private cutLine(): void {
@@ -3523,7 +3517,7 @@ export class ModalEditor extends CustomEditor {
       const newText = text.slice(0, startAbs) + text.slice(endAbs);
       this.replaceTextInBuffer(newText, startAbs);
 
-      super.handleInput(CTRL_A);
+      runPiEditorAction(this, "moveToLineStart");
     }
   }
 
@@ -4023,11 +4017,9 @@ export class ModalEditor extends CustomEditor {
       const content = text.slice(0, -1);
       const targetLine = this.getCursor().line + 1;
       for (let i = 0; i < safeCount; i++) {
-        super.handleInput(CTRL_E);
-        super.handleInput(NEWLINE);
-        for (const char of content) {
-          super.handleInput(char === "\n" ? NEWLINE : char);
-        }
+        runPiEditorAction(this, "moveToLineEnd");
+        runPiEditorAction(this, "addNewLine");
+        this.insertRegisterText(content);
       }
       // Vim: line-wise `p` leaves the cursor on the first non-blank of the
       // first inserted line (one line below the original cursor). An
@@ -4038,12 +4030,10 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (!this.isCursorAtOrPastEol()) {
-      super.handleInput(ESC_RIGHT);
+      runPiEditorAction(this, "moveCursor", 0, 1);
     }
     for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
+      this.insertRegisterText(text);
     }
     this.moveCursorToPreviousGraphemeStart();
   }
@@ -4061,12 +4051,10 @@ export class ModalEditor extends CustomEditor {
       const content = text.slice(0, -1);
       const targetLine = this.getCursor().line;
       for (let i = 0; i < safeCount; i++) {
-        super.handleInput(CTRL_A);
-        super.handleInput(NEWLINE);
-        super.handleInput(ESC_UP);
-        for (const char of content) {
-          super.handleInput(char === "\n" ? NEWLINE : char);
-        }
+        this.moveCursorToLineStart(targetLine);
+        runPiEditorAction(this, "addNewLine");
+        runPiEditorAction(this, "moveCursor", -1, 0);
+        this.insertRegisterText(content);
       }
       // Vim: line-wise `P` leaves the cursor on the first non-blank of the
       // first inserted line (the cursor's original line, since `P` inserts
@@ -4077,11 +4065,16 @@ export class ModalEditor extends CustomEditor {
     }
 
     for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
+      this.insertRegisterText(text);
     }
     this.moveCursorToPreviousGraphemeStart();
+  }
+
+  private insertRegisterText(text: string): void {
+    for (const char of text) {
+      if (char === "\n") runPiEditorAction(this, "addNewLine");
+      else runPiEditorAction(this, "insertCharacter", char);
+    }
   }
 
   private deleteRange(

@@ -88,6 +88,8 @@ Common quick wins:
 
 `Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, not executed. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
 
+Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert literal text without triggering shortcuts; counted linewise puts keep each register copy intact. Actual Insert-mode input and unhandled keys still follow Pi's configured bindings. This uses runtime-checked Pi internals; an incompatible Pi upgrade reports a compatibility error rather than sending fallback keys.
+
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
 Insert-mode shortcuts (stay in Insert mode):
