@@ -63,6 +63,14 @@ import {
   type WordMotionClass,
 } from "./motions.js";
 import {
+  collectSearchMatches,
+  compileVimSearch,
+  findSearchTarget,
+  type SearchMatch,
+  searchTargetFromMatches,
+} from "./search.js";
+import { highlightSearchRows } from "./search-highlight.js";
+import {
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
   readPiVimSettings,
@@ -272,6 +280,21 @@ export class ModalEditor extends CustomEditor {
   private pendingReplace: boolean = false;
   private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
+  private pendingSearch: { pattern: string; direction: 1 | -1 } | null = null;
+  private lastSearch: { pattern: string; direction: 1 | -1 } | null = null;
+  private searchHighlightCache: {
+    text: string;
+    pattern: string;
+    regex: RegExp | null;
+    matches: SearchMatch[];
+  } | null = null;
+  private searchRowCache: {
+    search: NonNullable<ModalEditor["searchHighlightCache"]>;
+    width: number;
+    current: number | null;
+    native: string[];
+    styled: string[];
+  } | null = null;
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private discardingPasteAfterNewlineInExCommand: boolean = false;
@@ -712,6 +735,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingMotion !== null ||
       this.pendingTextObject !== null ||
       this.pendingOperator !== null ||
+      this.pendingSearch !== null ||
       this.pendingG ||
       this.pendingReplace
     );
@@ -1149,6 +1173,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
+    this.pendingSearch = null;
     this.clearPendingExCommand();
   }
 
@@ -1345,6 +1370,11 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (this.pendingSearch !== null) {
+        this.handlePendingSearch(data);
+        return;
+      }
+
       if ("insert" === this.mode) {
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           super.handleInput(CTRL_E);
@@ -1465,6 +1495,11 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingSearch !== null && this.pendingSearch.pattern !== "") {
+      this.handlePendingSearch("\n");
+      return;
+    }
+
     if (
       this.pendingMotion ||
       this.pendingTextObject ||
@@ -1473,7 +1508,8 @@ export class ModalEditor extends CustomEditor {
       this.operatorCount ||
       this.pendingG ||
       this.pendingGCount ||
-      this.pendingReplace
+      this.pendingReplace ||
+      this.pendingSearch
     ) {
       this.clearPendingState();
       this.cancelRepeatableCommand();
@@ -1929,11 +1965,147 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private startSearch(key: string): void {
+    this.pendingSearch = { pattern: "", direction: key === "/" ? 1 : -1 };
+  }
+
+  private handlePendingSearch(data: string): void {
+    const pending = this.pendingSearch;
+    if (!pending) return;
+    if (matchesKey(data, "ctrl+c")) {
+      this.clearPendingState();
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (isBackspaceLikeInput(data)) {
+      const graphemes = getLineGraphemes(pending.pattern);
+      pending.pattern = pending.pattern.slice(0, graphemes.at(-1)?.start ?? 0);
+      return;
+    }
+    if (isEnterLikeInput(data)) {
+      this.pendingSearch = null;
+      const pattern = pending.pattern || this.lastSearch?.pattern;
+      if (!pattern) {
+        this.clearPendingState();
+        this.cancelRepeatableCommand();
+        return;
+      }
+      this.executeSearch(pattern, pending.direction);
+      return;
+    }
+    if (isPrintableChunk(data)) pending.pattern += data;
+  }
+
+  private executeSearch(
+    pattern: string,
+    direction: 1 | -1,
+    remember = true,
+  ): void {
+    const regex = compileVimSearch(pattern);
+    const count = this.takeTotalCount(1);
+    if (!regex) {
+      this.notifyFn(`Unsupported Vim search pattern: ${pattern}`);
+      this.clearPendingState();
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (remember) this.lastSearch = { pattern, direction };
+    const from = this.getAbsoluteIndexFromCursor();
+    const target = findSearchTarget(
+      this.getText(),
+      regex,
+      from,
+      direction,
+      count,
+    );
+    if (target === null || (this.pendingOperator && target === from)) {
+      this.notifyFn(`Pattern not found: ${pattern}`);
+      this.clearPendingState();
+      this.cancelRepeatableCommand();
+      return;
+    }
+    const operator = this.pendingOperator;
+    this.pendingOperator = null;
+    if (operator === "d" || operator === "c") {
+      const targetCursor = this.getCursorFromAbsoluteIndex(
+        this.getText(),
+        target,
+      );
+      const cursor = this.getCursor();
+      if (
+        direction === 1 &&
+        targetCursor.line > cursor.line &&
+        targetCursor.col === 0 &&
+        cursor.col <=
+          findFirstNonWhitespaceColumn(this.getLines()[cursor.line] ?? "")
+      ) {
+        // From the first non-blank, a search to a later line's first column
+        // writes a linewise register. Delete consumes the whole lines; change
+        // keeps the line break so inserted text occupies one replacement line.
+        if (operator === "d") {
+          this.deleteLineRange(cursor.line, targetCursor.line - 1);
+        } else {
+          const text = this.getText();
+          this.writeToRegister(
+            text.slice(this.getAbsoluteIndex(cursor.line, 0), target),
+          );
+          this.replaceTextInBuffer(
+            text.slice(0, from) + text.slice(target - 1),
+            from,
+          );
+          this.setMode();
+        }
+        return;
+      }
+      // Otherwise a forward search to column zero leaves the line break.
+      const end =
+        direction === 1 &&
+        targetCursor.line > this.getCursor().line &&
+        targetCursor.col === 0
+          ? target - 1
+          : target;
+      this.deleteRangeByAbsolute(from, end);
+      if (targetCursor.line !== this.getCursor().line && operator === "d") {
+        this.moveCursorToLineStart(this.getCursor().line);
+      }
+      if (operator === "c") this.setMode();
+    } else if (operator === "y") {
+      this.yankRangeByAbsolute(from, target);
+    } else {
+      this.moveCursorToAbsoluteIndex(target);
+    }
+  }
+
+  private repeatSearch(reverse: boolean): void {
+    const search = this.lastSearch;
+    if (!search) {
+      const hadOperator = this.pendingOperator !== null;
+      this.clearPendingState();
+      this.cancelRepeatableCommand();
+      if (hadOperator) this.clearRepeatState();
+      return;
+    }
+    this.executeSearch(
+      search.pattern,
+      reverse ? (search.direction === 1 ? -1 : 1) : search.direction,
+      false,
+    );
+  }
+
   private handlePendingDelete(data: string): void {
     if (this.opDigit(data)) return;
 
     if (data === "%") {
       this.applyPercentOp();
+      return;
+    }
+
+    if (data === "/" || data === "?") {
+      this.startSearch(data);
+      return;
+    }
+    if (data === "n" || data === "N") {
+      this.repeatSearch(data === "N");
       return;
     }
 
@@ -2030,6 +2202,15 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "%") {
       this.applyPercentOp();
+      return;
+    }
+
+    if (data === "/" || data === "?") {
+      this.startSearch(data);
+      return;
+    }
+    if (data === "n" || data === "N") {
+      this.repeatSearch(data === "N");
       return;
     }
 
@@ -2451,6 +2632,10 @@ export class ModalEditor extends CustomEditor {
 
       if (
         !supportsCountedStandaloneEdit &&
+        data !== "/" &&
+        data !== "?" &&
+        data !== "n" &&
+        data !== "N" &&
         !supportsCountedCharMotion &&
         !supportsCountedWordMotion &&
         !supportsCountedParagraphMotion &&
@@ -2477,6 +2662,15 @@ export class ModalEditor extends CustomEditor {
 
     if (data === ":") {
       this.startPendingExCommand();
+      return;
+    }
+
+    if (data === "/" || data === "?") {
+      this.startSearch(data);
+      return;
+    }
+    if (data === "n" || data === "N") {
+      this.repeatSearch(data === "N");
       return;
     }
 
@@ -3681,6 +3875,15 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (data === "/" || data === "?") {
+      this.startSearch(data);
+      return;
+    }
+    if (data === "n" || data === "N") {
+      this.repeatSearch(data === "N");
+      return;
+    }
+
     if (data === "y") {
       const count = this.takeTotalCount(1);
       this.yankLinewiseByDelta(count - 1);
@@ -4097,6 +4300,7 @@ export class ModalEditor extends CustomEditor {
 
   render(width: number): string[] {
     const lines = super.render(width);
+    this.renderSearchHighlights(lines, width);
     this.syncCursorShapeForRender(lines);
     if (lines.length === 0) return lines;
 
@@ -4121,6 +4325,67 @@ export class ModalEditor extends CustomEditor {
     return lines;
   }
 
+  private renderSearchHighlights(lines: string[], width: number): void {
+    const pending = this.pendingSearch;
+    const pattern = pending?.pattern || this.lastSearch?.pattern;
+    if (!pattern) return;
+    const text = this.getText();
+    let cache = this.searchHighlightCache;
+    if (!cache || cache.text !== text || cache.pattern !== pattern) {
+      const regex = compileVimSearch(pattern);
+      cache = {
+        text,
+        pattern,
+        regex,
+        matches: regex ? collectSearchMatches(text, regex) : [],
+      };
+      this.searchHighlightCache = cache;
+    }
+    if (!cache.matches.length) return;
+    const from = this.getAbsoluteIndexFromCursor();
+    const current =
+      pending?.pattern && cache.regex
+        ? searchTargetFromMatches(
+            cache.matches,
+            from,
+            pending.direction,
+            Math.min(
+              MAX_COUNT,
+              (Number(this.prefixCount) || 1) *
+                (Number(this.operatorCount) || 1),
+            ),
+          )
+        : cache.matches.some((match) => match.start === from)
+          ? from
+          : null;
+    const previous = this.searchRowCache;
+    if (
+      previous?.search === cache &&
+      previous.width === width &&
+      previous.current === current &&
+      previous.native.length === lines.length &&
+      lines.every((line, index) => line === previous.native[index])
+    ) {
+      lines.splice(0, lines.length, ...previous.styled);
+      return;
+    }
+    const native = [...lines];
+    highlightSearchRows(
+      lines,
+      this as unknown as Parameters<typeof highlightSearchRows>[1],
+      width,
+      cache.matches,
+      current,
+    );
+    this.searchRowCache = {
+      search: cache,
+      width,
+      current,
+      native,
+      styled: [...lines],
+    };
+  }
+
   private getModeLabelColorizer(): ((s: string) => string) | null {
     if (!this.labelColorizers) return null;
     const labelColorizers = this.labelColorizers;
@@ -4132,6 +4397,10 @@ export class ModalEditor extends CustomEditor {
   private getModeLabel(): string {
     if ("insert" === this.mode) return " INSERT ";
     if (this.pendingExCommand !== null) return ` EX ${this.pendingExCommand}_ `;
+    if (this.pendingSearch !== null) {
+      const mark = this.pendingSearch.direction === 1 ? "/" : "?";
+      return ` SEARCH ${mark}${this.pendingSearch.pattern}_ `;
+    }
 
     const prefixCount = this.prefixCount;
     const operatorCount = this.operatorCount;
