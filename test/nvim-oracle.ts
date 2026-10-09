@@ -236,18 +236,19 @@ export async function runNvimParityCase(
   }
 
   const combinedOutput = `${stdout}\n${stderr}`;
-  const resultLine = combinedOutput
-    .split(/\r?\n/)
-    .find((line) => line.startsWith(NVIM_RESULT_PREFIX));
-
-  if (!resultLine) {
+  // Search commands echo their status on stderr without a newline, so the
+  // snapshot marker can appear after that status rather than at column zero.
+  const marker = combinedOutput.lastIndexOf(NVIM_RESULT_PREFIX);
+  if (marker === -1) {
     throw new Error(
       `nvim parity oracle produced no result for ${testCase.name} (stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(stderr)})`,
     );
   }
 
   const parsed = JSON.parse(
-    resultLine.slice(NVIM_RESULT_PREFIX.length),
+    combinedOutput
+      .slice(marker + NVIM_RESULT_PREFIX.length)
+      .split(/\r?\n/, 1)[0] ?? "",
   ) as unknown;
   assertSnapshot(parsed);
 

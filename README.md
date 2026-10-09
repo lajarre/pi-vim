@@ -16,7 +16,7 @@ Restart Pi after install; requires `@earendil-works/pi-tui >= 0.74.0`.
 
 ### the everyday vim, in all four modes
 
-Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. Motions (`w`, `f{char}`, `%`, `25gg`), operators with counts (`3dw`, `ci"`, `ya{`), text objects, and `.` to repeat the last change. Undo is scoped like vim's: one `u` reverts one whole change — an insert session, a `cw`, a paste — and `<C-r>` brings it back. The boundaries (block visual, macros, search, vim ex semantics) are documented below rather than half-built.
+Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. Motions (`w`, `f{char}`, `%`, `25gg`), operators with counts (`3dw`, `ci"`, `ya{`), text objects, and `.` to repeat the last change. Undo is scoped like vim's: one `u` reverts one whole change — an insert session, a `cw`, a paste — and `<C-r>` brings it back. The boundaries (block visual, macros, parts of Vim's search-pattern language, vim ex semantics) are documented below rather than half-built.
 
 <!-- gif slot (recording pending): a change, then . . . down the buffer, then u / <C-r> -->
 
@@ -177,6 +177,19 @@ A `{count}` prefix finds the Nth occurrence of `{char}` on the line.
 Char-find motions compose with operators: `df{char}`, `ct{char}`, `d{count}t{char}`, etc.
 
 ---
+
+### search motions (normal mode)
+
+| keys | action |
+|---|---|
+| `/pattern<Enter>` / `?pattern<Enter>` | Search the prompt forward / backward; wrap at the buffer edge |
+| `n` / `N` | Repeat the latest search in its original / opposite direction |
+| `{count}/pattern<Enter>` | Move to the counted match |
+| `d/c/y` + `/` or `?` + `pattern<Enter>` | Use the search target as an operator motion; for example `c?word<Enter>` changes back to `word` and enters Insert mode |
+
+`<Enter>` commits a search; an empty search repeats the previous pattern. A non-empty search followed by `Esc` commits it too (matching Neovim); `Ctrl+C` cancels it. Failed or unsupported searches leave the prompt text untouched. Pasted text never submits a search.
+
+The matcher follows Vim's default **magic** behavior for literal text, `.`, `*`, `^`, `$`, character classes, escaped `\+`, `\?`, `\|`, `\(`, `\)`, `\{`, `\}`, `\n`, case flags `\c` / `\C`, and `\v` very-magic mode. **It is not a complete Vim regex engine.** Unsupported atoms such as `\<` / `\>`, `\zs`, `\ze`, and `\V` produce a warning and do not fall back to JavaScript regex or literal search. Search options such as `ignorecase`, `smartcase`, and `wrapscan` are not configurable here; wrapping is always on. Vim ex substitution (`:s`) remains out of scope.
 
 ### edit operators (normal mode)
 
@@ -488,9 +501,10 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
-| Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
+| Named registers / macros | Not implemented; the unnamed register is supported | Supported |
+| Search patterns | `/`, `?`, `n`, `N` and search operators use the documented Vim-compatible regex subset; other atoms and configurable search options are not implemented | Full Vim pattern language and search options |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
-| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, `G`, `/`, and `?`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---
 

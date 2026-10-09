@@ -245,9 +245,17 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
-  maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  //
+  // Prompt search motions: search.ts adds a bounded Vim-pattern compiler and
+  // directional match finder; index.ts wires /, ?, n/N and d/c/y composition;
+  // README documents commands and deliberate regex limitations. Measured from
+  // npm pack --dry-run: 18 files, 61040 B packed, 240829 B unpacked (up from
+  // the 17-file, 59000 B / 231400 B budget). Test and doc/dev files remain
+  // excluded. Budgets become 18 / 61500 / 241500, leaving ~460 B packed and
+  // ~671 B unpacked headroom.
+  maxFiles: 18,
+  maxSize: 61500,
+  maxUnpackedSize: 241500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
