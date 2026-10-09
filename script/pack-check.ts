@@ -253,9 +253,16 @@ const THRESHOLDS = {
   // the 17-file, 59000 B / 231400 B budget). Test and doc/dev files remain
   // excluded. Budgets become 18 / 61500 / 241500, leaving ~460 B packed and
   // ~671 B unpacked headroom.
-  maxFiles: 18,
-  maxSize: 61500,
-  maxUnpackedSize: 241500,
+  //
+  // Search highlighting adds search-highlight.ts to decorate verified native
+  // draft rows (without replacing Pi's editor), plus README UX notes. Measured
+  // at 19 files, 63431 B packed and 249345 B unpacked (including a cached
+  // fast path for unchanged render rows); budgets become 19 / 63900 / 250000
+  // with ~469 B / ~655 B headroom. Test files remain excluded; a changed
+  // host layout falls back to native unstyled rows.
+  maxFiles: 19,
+  maxSize: 63900,
+  maxUnpackedSize: 250000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

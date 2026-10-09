@@ -59,6 +59,22 @@ export function compileVimSearch(pattern: string): RegExp | null {
   }
 }
 
+export type SearchMatch = { start: number; end: number };
+
+export function collectSearchMatches(
+  text: string,
+  regex: RegExp,
+): SearchMatch[] {
+  const matches: SearchMatch[] = [];
+  regex.lastIndex = 0;
+  for (let match = regex.exec(text); match !== null; match = regex.exec(text)) {
+    matches.push({ start: match.index, end: match.index + match[0].length });
+    // Neovim skips overlapping occurrences. Advance past empty matches too.
+    if (match[0].length === 0) regex.lastIndex++;
+  }
+  return matches;
+}
+
 export function findSearchTarget(
   text: string,
   regex: RegExp,
@@ -66,15 +82,22 @@ export function findSearchTarget(
   direction: 1 | -1,
   count = 1,
 ): number | null {
-  const positions: number[] = [];
-  regex.lastIndex = 0;
-  for (let match = regex.exec(text); match !== null; match = regex.exec(text)) {
-    positions.push(match.index);
-    // Like Neovim, advance past the whole match rather than finding an
-    // overlapping occurrence (e.g. /aa on aaaa moves to column 2).
-    if (match[0].length === 0) regex.lastIndex++;
-  }
-  if (positions.length === 0) return null;
+  return searchTargetFromMatches(
+    collectSearchMatches(text, regex),
+    from,
+    direction,
+    count,
+  );
+}
+
+export function searchTargetFromMatches(
+  matches: SearchMatch[],
+  from: number,
+  direction: 1 | -1,
+  count = 1,
+): number | null {
+  if (matches.length === 0) return null;
+  const positions = matches.map((match) => match.start);
   let position = from;
   for (let i = 0; i < count; i++) {
     const next =

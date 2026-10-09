@@ -62,7 +62,14 @@ import {
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
-import { compileVimSearch, findSearchTarget } from "./search.js";
+import {
+  collectSearchMatches,
+  compileVimSearch,
+  findSearchTarget,
+  type SearchMatch,
+  searchTargetFromMatches,
+} from "./search.js";
+import { highlightSearchRows } from "./search-highlight.js";
 import {
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
@@ -275,6 +282,19 @@ export class ModalEditor extends CustomEditor {
   private pendingExCommand: string | null = null;
   private pendingSearch: { pattern: string; direction: 1 | -1 } | null = null;
   private lastSearch: { pattern: string; direction: 1 | -1 } | null = null;
+  private searchHighlightCache: {
+    text: string;
+    pattern: string;
+    regex: RegExp | null;
+    matches: SearchMatch[];
+  } | null = null;
+  private searchRowCache: {
+    search: NonNullable<ModalEditor["searchHighlightCache"]>;
+    width: number;
+    current: number | null;
+    native: string[];
+    styled: string[];
+  } | null = null;
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private discardingPasteAfterNewlineInExCommand: boolean = false;
@@ -4280,6 +4300,7 @@ export class ModalEditor extends CustomEditor {
 
   render(width: number): string[] {
     const lines = super.render(width);
+    this.renderSearchHighlights(lines, width);
     this.syncCursorShapeForRender(lines);
     if (lines.length === 0) return lines;
 
@@ -4302,6 +4323,67 @@ export class ModalEditor extends CustomEditor {
       lines[last] = label;
     }
     return lines;
+  }
+
+  private renderSearchHighlights(lines: string[], width: number): void {
+    const pending = this.pendingSearch;
+    const pattern = pending?.pattern || this.lastSearch?.pattern;
+    if (!pattern) return;
+    const text = this.getText();
+    let cache = this.searchHighlightCache;
+    if (!cache || cache.text !== text || cache.pattern !== pattern) {
+      const regex = compileVimSearch(pattern);
+      cache = {
+        text,
+        pattern,
+        regex,
+        matches: regex ? collectSearchMatches(text, regex) : [],
+      };
+      this.searchHighlightCache = cache;
+    }
+    if (!cache.matches.length) return;
+    const from = this.getAbsoluteIndexFromCursor();
+    const current =
+      pending?.pattern && cache.regex
+        ? searchTargetFromMatches(
+            cache.matches,
+            from,
+            pending.direction,
+            Math.min(
+              MAX_COUNT,
+              (Number(this.prefixCount) || 1) *
+                (Number(this.operatorCount) || 1),
+            ),
+          )
+        : cache.matches.some((match) => match.start === from)
+          ? from
+          : null;
+    const previous = this.searchRowCache;
+    if (
+      previous?.search === cache &&
+      previous.width === width &&
+      previous.current === current &&
+      previous.native.length === lines.length &&
+      lines.every((line, index) => line === previous.native[index])
+    ) {
+      lines.splice(0, lines.length, ...previous.styled);
+      return;
+    }
+    const native = [...lines];
+    highlightSearchRows(
+      lines,
+      this as unknown as Parameters<typeof highlightSearchRows>[1],
+      width,
+      cache.matches,
+      current,
+    );
+    this.searchRowCache = {
+      search: cache,
+      width,
+      current,
+      native,
+      styled: [...lines],
+    };
   }
 
   private getModeLabelColorizer(): ((s: string) => string) | null {
