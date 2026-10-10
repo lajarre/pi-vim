@@ -277,8 +277,8 @@ const THRESHOLDS = {
   // 252519 B unpacked / 18 files. Budgets become 64900 / 253200, leaving
   // 416 B / 681 B headroom; tests/parity are not packed, no new dependency.
   //
-  // 2026-10-10: Visual selection rendering, stacked on the clipboard, escape
-  // sequence, cursor shape and ZZ/ZQ changes: visual.ts gains host-layout span
+  // 2026-10-10: Visual selection rendering, stacked on the clipboard,
+  // cursor shape and ZZ/ZQ changes: visual.ts gains host-layout span
   // geometry and ANSI-safe selected-range painting; index.ts uses the host wrapped/scrolled line map,
   // and README documents the paint. Measured 66077 B packed / 258250 B unpacked
   // / 18 files. Budgets become 66600 / 258900, leaving 523 B / 650 B headroom.
@@ -300,9 +300,16 @@ const THRESHOLDS = {
   // rationale: doc/dev/editor-action-dispatch.md. Keep ~419 B / ~628 B headroom.
   // Stacked on the 2026-10-10 intake branch the import measures 67124 B packed /
   // 261512 B unpacked / 19 files; budgets become 67700 / 262200 (576 B / 688 B headroom).
+  //
+  // 2026-10-10 PR #54 intake integration: direct actions stacked on clipboard
+  // work, whole-contract compatibility preflight, safe put
+  // text filtering and README contracts; remove 8 unused escape constants.
+  // Measured 67740 B packed / 263415 B unpacked / 19 files. Budgets become
+  // 68300 / 264100 / 19, leaving 560 B / 685 B headroom. No new dependency;
+  // host comparison and hot-path evidence: doc/dev/editor-action-dispatch.md.
   maxFiles: 19,
-  maxSize: 67700,
-  maxUnpackedSize: 262200,
+  maxSize: 68300,
+  maxUnpackedSize: 264100,
 } as const;
 
 function compareStrings(a: string, b: string): number {
