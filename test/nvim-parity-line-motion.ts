@@ -1,3 +1,10 @@
+/**
+ * Pi prompt-history recall is intentionally exempt from the nvim oracle: Vim
+ * has no host prompt history. Seeded recall/guards live in history-navigation
+ * unit tests. These cases pin the buffer-local counts/operators at the edges.
+ * The existing short-line j / gg / G cursor gaps remain out of scope: history
+ * dispatch must not change the underlying vertical-motion implementation.
+ */
 import { describe, it } from "node:test";
 import { assertMatchesNvim, type NvimParityCase } from "./nvim-oracle.js";
 
@@ -41,6 +48,61 @@ const LINE_MOTION_PARITY_CASES: NvimParityCase[] = [
     name: "9k: clamps at the first line",
     initial: { text: "alpha\nbravo\ncharlie", cursor: { line: 1, col: 3 } },
     keys: ["9", "k"],
+  },
+  ...["1", "3", "99999"].flatMap((count): NvimParityCase[] => [
+    {
+      name: `${count}k: stays at the first line`,
+      initial: {
+        text: "abc\ndef",
+        cursor: { line: 0, col: 0 },
+        register: "keep",
+      },
+      keys: [...count, "k"],
+      renderWidths: [8, 80],
+    },
+    {
+      name: `${count}j: stays at the last line`,
+      initial: {
+        text: "abc\ndef",
+        cursor: { line: 1, col: 0 },
+        register: "keep",
+      },
+      keys: [...count, "j"],
+      renderWidths: [8, 80],
+    },
+  ]),
+  {
+    name: "3k and 3j: stay in an empty buffer",
+    initial: { text: "", cursor: { line: 0, col: 0 }, register: "keep" },
+    keys: ["3", "k", "3", "j"],
+  },
+  {
+    name: "3dk: clamps a linewise delete to the top edge",
+    initial: { text: "abc\ndef\nghi", cursor: { line: 1, col: 0 } },
+    keys: ["3", "d", "k"],
+  },
+  {
+    name: "3yj: clamps a linewise yank to the bottom edge",
+    initial: { text: "abc\ndef\nghi", cursor: { line: 1, col: 0 } },
+    keys: ["3", "y", "j"],
+  },
+  {
+    name: "ck: a failed upward change at the top leaves the buffer alone",
+    initial: {
+      text: "abc\ndef",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["c", "k"],
+  },
+  {
+    name: "j and k: move logical lines despite wrapping",
+    initial: {
+      text: "abcdefghijklmnop\nqrstuvwxyzabcdef",
+      cursor: { line: 0, col: 9 },
+    },
+    keys: ["j", "k"],
+    renderWidths: [8, 80],
   },
   {
     name: "0: moves to the absolute line start",

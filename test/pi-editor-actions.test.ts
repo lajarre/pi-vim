@@ -361,6 +361,38 @@ describe("Pi editor compatibility adapter", () => {
     assert.equal(editor.cursor, 5);
   });
 
+  it("dispatches history directions with the host receiver", () => {
+    const editor = {
+      directions: [] as number[],
+      navigateHistory(direction: -1 | 1) {
+        this.directions.push(direction);
+      },
+    };
+    runPiEditorAction(editor, "navigateHistory", -1);
+    runPiEditorAction(editor, "navigateHistory", 1);
+    assert.deepEqual(editor.directions, [-1, 1]);
+    for (const navigateHistory of [undefined, false]) {
+      assert.throws(
+        () => runPiEditorAction({ navigateHistory }, "navigateHistory", -1),
+        /Pi editor compatibility error: navigateHistory\(\) unavailable/,
+      );
+    }
+    const failure = new Error("host history failed");
+    assert.throws(
+      () =>
+        runPiEditorAction(
+          {
+            navigateHistory() {
+              throw failure;
+            },
+          },
+          "navigateHistory",
+          -1,
+        ),
+      (error) => error === failure,
+    );
+  });
+
   it("fails clearly rather than falling back to configurable keys", () => {
     assert.throws(
       () => runPiEditorAction({}, "undo"),

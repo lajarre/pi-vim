@@ -307,9 +307,15 @@ const THRESHOLDS = {
   // Measured 67740 B packed / 263415 B unpacked / 19 files. Budgets become
   // 68300 / 264100 / 19, leaving 560 B / 685 B headroom. No new dependency;
   // host comparison and hot-path evidence: doc/dev/editor-action-dispatch.md.
+  //
+  // 2026-10-10 — Normal-mode prompt history (#51): guarded j/k dispatch through
+  // navigateHistory, default-on project-overridable setting and README contract.
+  // Measured 69241 B packed / 268090 B unpacked / 19 files. Budgets become
+  // 69700 / 268800 / 19, leaving 459 B / 710 B headroom. No new dependency or
+  // shipped file; focused/parity tests and host/perf evidence are not packed.
   maxFiles: 19,
-  maxSize: 68300,
-  maxUnpackedSize: 264100,
+  maxSize: 69700,
+  maxUnpackedSize: 268800,
 } as const;
 
 function compareStrings(a: string, b: string): number {

@@ -1,6 +1,7 @@
 /** Pi's TypeScript-private editor operations used by synthetic Vim commands. */
 export type PiEditorAction =
   | [action: "undo"]
+  | [action: "navigateHistory", direction: -1 | 1]
   | [action: "moveToLineStart"]
   | [action: "moveToLineEnd"]
   | [action: "deleteToEndOfLine"]
@@ -12,6 +13,7 @@ export type PiEditorAction =
 export function getPiEditorCompatibilityError(editor: object): string | null {
   const actions: Record<PiEditorAction[0], true> = {
     undo: true,
+    navigateHistory: true,
     moveToLineStart: true,
     moveToLineEnd: true,
     deleteToEndOfLine: true,

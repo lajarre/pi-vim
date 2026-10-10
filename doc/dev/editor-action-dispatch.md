@@ -23,8 +23,8 @@ catch can also leave partial mode/register/clipboard/put changes. Whole-contract
 preflight avoids starting those Vim actions. This is not a synthetic-key fallback:
 no remapped key is fabricated, and Pi's actual input semantics remain in control.
 
-Movement, deletion, undo, open-line commands, Insert-mode positioning shortcuts,
-and register insertion bypass `CustomEditor.handleInput`. Actual user input
+Movement, deletion, undo, prompt-history recall, open-line commands, Insert-mode
+positioning shortcuts, and register insertion bypass `CustomEditor.handleInput`. Actual user input
 still goes through that dispatcher, including application and extension shortcuts.
 Calling the original operations retains Pi's kill ring, undo snapshots, and
 change notifications. Register insertion uses `insertCharacter` / `addNewLine`,
@@ -85,12 +85,13 @@ checkout and on the baseline, alternating runs. Set `PIVIM_ENTRY` to the baselin
 
 ## Intake integration evidence (2026-10-10)
 
-All seven action methods exist in the installed pi-tui 0.78.0 and the published
+All eight action methods exist in the installed pi-tui 0.78.0 and the published
 1.0.0 source. The latter was source-audited, not used as the runtime test host.
 
 | operation | signature in both versions | relevant behavior |
 | --- | --- | --- |
-| undo | `undo()` | Pops one snapshot, no-op when empty; resets grouping/column and emits onChange. 1.0 also restores paste metadata. |
+| undo | `undo()` | Exits history browsing and pops one snapshot, no-op when empty; resets grouping/column and emits onChange. 1.0 also restores paste metadata. |
+| prompt history | `navigateHistory(direction)` | `-1` older / `1` newer; first browse snapshots once, valid recalls emit onChange. Cursor/draft behavior differs below. |
 | line start | `moveToLineStart()` | Clears lastAction; sets column zero. |
 | line end | `moveToLineEnd()` | Clears lastAction; sets UTF-16 line length. |
 | delete tail | `deleteToEndOfLine()` | Snapshots real deletes/joins, updates kill ring and onChange. |
@@ -155,6 +156,75 @@ The wide-line motion median increased 0.33%; sustained insert increased 0.185 µ
 (2.0%). These microbenchmarks exclude rendering; no render-performance claim is
 made for the stock fallback.
 
+## Prompt-history integration evidence (2026-10-10)
+
+Issue #51 adds normal-mode edge recall through `navigateHistory`, not synthetic
+Up/Down input. Both audited hosts expose `history`, `historyIndex` (`-1` means
+not browsing), and public `addToHistory`. They trim entries, deduplicate adjacent
+entries, retain at most 100, clamp exhausted navigation, and push one undo
+snapshot on entering history. Their dispatch conditions are not identical:
+
+| behavior | pi-tui 0.78.0 | pi-tui 1.0.0 source |
+| --- | --- | --- |
+| insert Up entry | Empty, or already browsing on first visual row | First visual row and empty, browsing, or column zero (allows a non-empty draft) |
+| insert Down | Browsing on last visual row | Same |
+| older recall cursor | End of last logical line | Start of buffer |
+| newer recall cursor | End of last logical line | Same |
+| returning to index -1 | Clears editor | Restores the saved `historyDraft` state |
+| undo | Clears browsing index, restores snapshot | Also clears saved draft and restores paste metadata |
+
+Normal-mode j/k deliberately retain the conservative empty-or-browsing guard,
+use logical edges, and normalize successful recalls to the last grapheme of the
+last line. Counts/operators and pending prefixes bypass this path; visual modes
+and replay are rejected before host dispatch. Exhausted navigation does not
+reposition the cursor. The new boolean defaults on, with project override; this
+exposes existing host history without granting a capability or maintaining a
+second history/draft store. Insert arrows remain host-owned.
+
+No pi-vim undo window opens for recall. Pi's first-browse anchor survives
+`collapseUndoStackTo`; `u` before further edits restores the pre-browse draft
+(empty after normal-mode entry) and exits browsing. Redo restores recalled text
+and cursor but not browsing state. Pi's onChange clears stale redo; harmless
+inputs do not. Recall preserves the last dot command. Seeded tests assert these
+states plus register/clipboard neutrality, mode/label stability, Unicode,
+wrapped/logical edges, disabled settings, and remapped host bindings. A simulated
+start-of-buffer host checks cursor normalization; 1.0.0 was not runtime-tested.
+The nvim oracle has no prompt history; its added cases cover buffer-local counts
+and operators instead. Existing short-target vertical and gg/G gaps are unchanged.
+
+### Input-cost evidence
+
+Baseline `214f8bc`, then the history implementation, same installed 0.78.0 peers
+and Node v24.15.0. One before/after run of the existing
+`node --import tsx/esm script/perf-bench.ts --json` input set, four samples per
+motion. Medians are microseconds/op; these are observations, not speedup claims.
+
+| operation | before | after |
+| --- | ---: | ---: |
+| h, 4K line | 413.084 | 422.316 |
+| ignored printable | 0.660 | 0.665 |
+| 10w, 400 words | 33.943 | 34.083 |
+| 3fX | 39.201 | 41.456 |
+| 200j, 320 lines | 2.506 | 2.627 |
+| 50p | 172.183 | 163.333 |
+| w / b, 20 words | 0.975 / 1.092 | 1.007 / 1.112 |
+| w / b, 50 words | 1.161 / 1.301 | 1.171 / 1.330 |
+| w / b, 100 words | 1.516 / 1.651 | 1.520 / 1.719 |
+| w / b, 200 words | 2.375 / 2.639 | 2.345 / 2.744 |
+| w / b, 400 words | 4.481 / 4.569 | 4.523 / 4.673 |
+| dw / yw, 400 words | 8.253 / 4.089 | 8.285 / 4.030 |
+
+Incremental import medians: 27.475 → 21.847 ms (seven process samples);
+incremental heap: 3,015,384 → 3,029,944 bytes (five process samples).
+A separate guard probe alternated 20,000 j/k pairs per sample (eight measured
+samples after one warmup). Fixtures: empty; `abc`; 4,096 ASCII characters;
+`ab👩‍💻é` repeated 100 times; `first\nsecond\nthird`. Render once at 40/80/120
+columns before timing; no history entries or timed rendering. Across all 15
+fixtures, baseline medians were 0.632–0.656 µs/key, after 0.680–0.702 µs/key;
+the added guard cost 0.032–0.070 µs/key. No line-length scan was added to the
+no-recall path. Terminal painting, successful-recall cost, interactive latency,
+and 1.0.0 runtime behavior are not covered by these measurements.
+
 ## Package evidence
 
 The original unstacked PR measured 18 files / 59,181 bytes packed / 232,872 bytes
@@ -163,3 +233,9 @@ contracts measured 19 files / 64,268 bytes packed / 250,897 bytes unpacked.
 The degraded-mode follow-up measures **19 files / 64,380 bytes packed / 251,395 bytes unpacked**.
 Budgets remain 19 files / 64,800 packed / 251,600 unpacked: 420 / 205 bytes headroom.
 No dependency was added. Tests and development docs remain outside the package.
+
+The #51 history change stacked on `214f8bc` measures **19 files / 69,241 bytes packed / 268,090 bytes unpacked**.
+Budgets become 19 files / 69,700 packed / 268,800 unpacked, leaving 459 / 710 bytes
+headroom. Runtime growth is the guarded host action and its boolean setting;
+README navigation/settings/limits prose is also shipped. No dependency or packed
+file was added.

@@ -10,6 +10,7 @@ import {
   readPiVimCursorShapeSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
+  readPiVimHistoryNavigation,
   readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
@@ -18,6 +19,59 @@ import {
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "../settings.js";
+
+describe("piVim history navigation settings reader", () => {
+  it("uses defaults when absent and reads explicit global booleans", () => {
+    assert.equal(readPiVimHistoryNavigation(undefined, undefined), undefined);
+    assert.equal(
+      readPiVimHistoryNavigation({ piVim: {} }, { piVim: {} }),
+      undefined,
+    );
+    for (const value of [true, false]) {
+      assert.equal(
+        readPiVimHistoryNavigation({ piVim: { historyNavigation: value } }, {}),
+        value,
+      );
+    }
+  });
+
+  it("lets project booleans override global in either direction", () => {
+    for (const value of [true, false]) {
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: !value } },
+          { piVim: { historyNavigation: value } },
+        ),
+        value,
+      );
+    }
+  });
+
+  it("defaults invalid values without falling back to global", () => {
+    for (const value of [null, "false", 0, [], {}]) {
+      assert.equal(
+        readPiVimHistoryNavigation({ piVim: { historyNavigation: value } }, {}),
+        undefined,
+      );
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: false } },
+          { piVim: { historyNavigation: value } },
+        ),
+        undefined,
+      );
+    }
+    for (const value of [null, "false", 0, []]) {
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: false } },
+          { piVim: value },
+        ),
+        undefined,
+      );
+    }
+  });
+});
 
 describe("piVim mode color settings reader", () => {
   it("returns undefined when mode colors are missing", () => {

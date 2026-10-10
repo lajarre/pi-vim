@@ -284,6 +284,7 @@ export class ModalEditor extends CustomEditor {
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
+  private historyNavigation = true;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
   private lastRepeatableCommand: RepeatableCommand | null = null;
@@ -410,6 +411,9 @@ export class ModalEditor extends CustomEditor {
   }
   setCursorShapeSettings(settings: CursorShapeSettings): void {
     this.cursorShapeSettings = { ...settings };
+  }
+  setHistoryNavigation(enabled: boolean): void {
+    this.historyNavigation = enabled;
   }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
@@ -2760,16 +2764,52 @@ export class ModalEditor extends CustomEditor {
         this.cutCharsBeforeCursor();
         break;
       case "j":
-        this.moveCursorVertically(1);
+      case "k": {
+        const direction = key === "j" ? 1 : -1;
+        if (!this.tryNavigatePromptHistory(direction)) {
+          this.moveCursorVertically(direction);
+        }
         break;
-      case "k":
-        this.moveCursorVertically(-1);
-        break;
+      }
       default: {
         const action = NORMAL_KEYS[key];
         if (action) runPiEditorAction(this, ...action);
       }
     }
+  }
+
+  /** Mapped j/k only; operators/counts use their buffer-local dispatch. */
+  private tryNavigatePromptHistory(direction: -1 | 1): boolean {
+    if (
+      !this.historyNavigation ||
+      this.mode !== "normal" ||
+      this.replayingRepeat ||
+      this.hasPendingCount()
+    ) {
+      return false;
+    }
+
+    const editor = this as unknown as ModalEditorInternals;
+    const index = editor.historyIndex ?? -1;
+    const lines = this.getLines();
+    const atEdge =
+      this.getCursor().line === (direction === -1 ? 0 : lines.length - 1);
+    const empty = lines.length === 1 && lines[0] === "";
+    // Retain Pi 0.78's draft protection, even on hosts that allow non-empty
+    // column-zero drafts to enter history. Edges are logical, not visual.
+    if (!atEdge || (index < 0 && !(direction === -1 && empty))) return false;
+
+    // Pi owns the initial undo snapshot. No Vim change/window or dot recording:
+    // u restores the pre-browse draft; onChange invalidates stale redo.
+    runPiEditorAction(this, "navigateHistory", direction);
+    if (editor.historyIndex !== index) {
+      // Hosts differ on older-recall placement. Normalize successful recalls
+      // only, leaving exhausted-history no-ops (including their cursor) alone.
+      this.moveCursorToBufferEnd();
+      runPiEditorAction(this, "moveToLineEnd");
+      this.clampCursorToLastGrapheme();
+    }
+    return true;
   }
 
   private executeCharMotion(
@@ -4406,6 +4446,7 @@ export default function (pi: ExtensionAPI) {
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
       editor.setCursorShapeSettings(cursorShape.settings);
+      editor.setHistoryNavigation(piVimSettings.historyNavigation ?? true);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.

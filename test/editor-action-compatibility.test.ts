@@ -12,6 +12,7 @@ import {
 
 const ACTIONS = [
   "undo",
+  "navigateHistory",
   "moveToLineStart",
   "moveToLineEnd",
   "deleteToEndOfLine",

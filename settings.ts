@@ -43,6 +43,7 @@ export type PiVimSettings = {
   exCommand?: unknown;
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
+  historyNavigation?: boolean;
   cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
   // Per-mode paint policy for Pi's input border. Default: every mode "host".
@@ -245,6 +246,13 @@ export function readPiVimModeColors(g: unknown, p: unknown) {
   return colors(w);
 }
 
+export function readPiVimHistoryNavigation(g: unknown, p: unknown) {
+  // No capability grant: project settings override global, even if invalid.
+  const v = get(p, "historyNavigation");
+  const value = v === M ? get(g, "historyNavigation") : v;
+  return typeof value === "boolean" ? value : undefined;
+}
+
 export function readPiVimModeChange(g: unknown, p: unknown) {
   void p;
   // modeChange executes a shell command, so only the user-global settings file
@@ -321,6 +329,7 @@ function disk(cwd: string): PiVimSettings {
     exCommand: readPiVimExCommandSetting(g, p),
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
+    historyNavigation: readPiVimHistoryNavigation(g, p),
     cursorShape: readPiVimCursorShapeSetting(g, p),
     modeChange: readPiVimModeChange(g, p),
     borderSync: readPiVimBorderSync(g, p),

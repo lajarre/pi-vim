@@ -153,7 +153,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 
 | key | action |
 |---|---|
-| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; line moves clamp to the buffer |
+| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; counted line moves stay in the buffer |
+| Bare `k` on the first logical line / `j` on the last | Recall older / newer Pi prompts when empty or already browsing (newer requires browsing); [historyNavigation](#historynavigation) defaults on |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
 | `gM`; `{count}gM` | Halfway the text of the line; a count of `1`-`100` moves to that percentage of it (higher counts mean halfway, per nvim); text is measured in graphemes, not screen cells |
@@ -358,7 +359,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -366,6 +367,7 @@ Default-equivalent `settings.json`:
 {
   "piVim": {
     "clipboardMirror": "all",
+    "historyNavigation": true,
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
@@ -399,6 +401,14 @@ Default-equivalent `settings.json`:
 ### clipboardMirror
 
 `all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`. See [register and clipboard policy](#register-and-clipboard-policy) for the full read/write contract.
+
+### historyNavigation
+
+`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On logical line zero, `k` recalls an older prompt only when the buffer is empty or history browsing is already active. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest returns to the draft (empty when browsing began with `k`). `false` keeps both keys buffer-local. Project settings can override global in either direction; invalid values use the default rather than the global value.
+
+Unlike zsh vi-mode, a non-empty, non-browsing draft is never replaced: `k` / `j` at its edges remain no-ops. This retains Pi 0.78's draft protection even on newer hosts. Edges are logical lines, not wrapped screen rows. After recall the cursor lands on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Insert-mode arrows retain Pi's own version-dependent behavior.
+
+Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and protected-draft no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
 
 ### exCommand
 
@@ -510,6 +520,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 
 | area | this extension | full Vim |
 |---|---|---|
+| Prompt history | Bare normal `k` / `j` expose Pi history at logical buffer edges, with empty-draft protection; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
 | Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
