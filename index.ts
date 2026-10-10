@@ -269,6 +269,7 @@ export class ModalEditor extends CustomEditor {
   private pendingOperator: PendingOperator = null;
   private prefixCount: string = "";
   private operatorCount: string = "";
+  private pendingZ: boolean = false;
   private pendingG: boolean = false;
   private pendingGCount: string = "";
   private pendingReplace: boolean = false;
@@ -719,6 +720,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingMotion !== null ||
       this.pendingTextObject !== null ||
       this.pendingOperator !== null ||
+      this.pendingZ ||
       this.pendingG ||
       this.pendingReplace
     );
@@ -1153,6 +1155,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
+    this.pendingZ = false;
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
@@ -1478,6 +1481,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingOperator ||
       this.prefixCount ||
       this.operatorCount ||
+      this.pendingZ ||
       this.pendingG ||
       this.pendingGCount ||
       this.pendingReplace
@@ -2321,6 +2325,18 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handleNormalMode(data: string): void {
+    if (this.pendingZ) {
+      this.clearPendingState();
+      if (data === "Z" || data === "Q") {
+        this.quitPrompt(
+          data === "Q",
+          "Prompt is not empty; use ZQ or :q! to quit anyway",
+        );
+      }
+      // Like Vim's invalid Z suffix, consume the key without executing it.
+      return;
+    }
+
     if (this.pendingG) {
       if (isDigit(data)) {
         this.pendingGCount += data;
@@ -2364,6 +2380,12 @@ export class ModalEditor extends CustomEditor {
       }
 
       this.clearPendingState();
+      return;
+    }
+
+    if (data === "Z" && this.mode === "normal") {
+      this.clearPendingState(); // Quit aliases never carry a count.
+      this.pendingZ = true;
       return;
     }
 
@@ -4157,6 +4179,7 @@ export class ModalEditor extends CustomEditor {
       return pending ? ` ${name} ${pending}_ ` : ` ${name} `;
     }
 
+    if (this.pendingZ) return " NORMAL Z_ ";
     if (this.pendingReplace) {
       return prefixCount ? ` NORMAL ${prefixCount}r_ ` : " NORMAL r_ ";
     }

@@ -271,9 +271,14 @@ const THRESHOLDS = {
   // session-start wiring and DECSCUSR lookup plus the README reference. Measured
   // 63882 B packed / 250632 B unpacked / 18 files. Budgets become 64300 /
   // 251300, leaving 418 B / 668 B headroom; no new dependency or packed file.
+  //
+  // 2026-10-10 — Normal-mode ZZ/ZQ (#49): shared guarded quit helper, pending-Z
+  // dispatch/clearing/footer and README semantics. Measured 64484 B packed /
+  // 252519 B unpacked / 18 files. Budgets become 64900 / 253200, leaving
+  // 416 B / 681 B headroom; tests/parity are not packed, no new dependency.
   maxFiles: 18,
-  maxSize: 64300,
-  maxUnpackedSize: 251300,
+  maxSize: 64900,
+  maxUnpackedSize: 253200,
 } as const;
 
 function compareStrings(a: string, b: string): number {

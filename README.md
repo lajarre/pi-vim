@@ -74,6 +74,8 @@ Common quick wins:
 | `Esc` / `Ctrl+[` | Insert → Normal mode |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
 | `:` | Normal → EX mini-mode |
+| `ZZ` | Normal → quit only if the prompt is empty or whitespace-only (same guard as `:q`; no write) |
+| `ZQ` | Normal → force quit, discarding the prompt (same as `:q!`) |
 | `i` | Normal → Insert at cursor |
 | `a` | Normal → Insert after cursor |
 | `I` | Normal → Insert at first non-whitespace |
@@ -83,6 +85,8 @@ Common quick wins:
 | `v` | Normal → character-wise Visual mode |
 | `V` | Normal → line-wise Visual mode |
 | `Esc` / `Ctrl+[` | Visual → Normal mode (never reaches Pi) |
+
+`Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, not executed. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
@@ -105,8 +109,8 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 | `Enter` | Execute pending ex command |
 | `Esc` | Cancel EX mini-mode |
 | `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
-| `:q` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
-| `:q!` | Force quit the current Pi session even when the prompt has text |
+| `:q` / Normal-mode `ZZ` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
+| `:q!` / Normal-mode `ZQ` | Force quit the current Pi session even when the prompt has text |
 | `:qa` | Same safe quit policy as `:q` |
 | `:qa!` | Same force quit policy as `:q!` |
 | `:quit` / `:qall` / `:quitall` | Long aliases with the same safe quit policy as `:q` |
@@ -116,6 +120,8 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 | `:!{cmd}` | Run `{cmd}` in Pi's shell via `!{cmd}`, e.g. `:!ls` runs `!ls`; `:!!{cmd}` runs it excluded from context |
 | reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
 | unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
+
+`ZZ` and `ZQ` are Normal-mode keys, not EX commands, and need no Enter. A refused `ZZ` warns: `Prompt is not empty; use ZQ or :q! to quit anyway`. Neither alias submits the prompt or writes a file; both use Pi's shutdown lifecycle, which may wait for an active agent to become idle.
 
 Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. A paste never auto-submits: only a typed `Enter` submits an ex command. Pasting into the ex line keeps the paste up to its first newline, holds that first line, and discards the rest, so pasted content can never execute until you type Enter yourself.
 
@@ -513,6 +519,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
+| `ZZ` / `ZQ` | Normal-only: `ZZ` uses the safe `:q` prompt guard, `ZQ` forces quit; a prompt has nothing to write | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both also work from Visual |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
