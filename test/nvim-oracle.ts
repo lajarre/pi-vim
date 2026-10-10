@@ -24,6 +24,8 @@ export type NvimParityCase = {
   name: string;
   initial: NvimParityInitialState;
   keys: string[];
+  /** Exercise paint between inputs; the oracle still compares semantic state. */
+  renderWidths?: readonly number[];
 };
 
 export type NvimParitySnapshot = {
@@ -172,6 +174,7 @@ export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
 
   for (const key of testCase.keys) {
     editor.handleInput(key);
+    for (const width of testCase.renderWidths ?? []) editor.render(width);
   }
 
   return takePiSnapshot(editor);

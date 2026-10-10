@@ -124,14 +124,9 @@ export function getVisualRenderSpan(
     return { start: length, end: length + 1 };
   }
 
-  // A coincident selection on an empty final line still occupies the cursor
-  // cell even though it has no buffer text to span.
-  if (
-    isLastSegment &&
-    line.length === 0 &&
-    logicalLine === start.line &&
-    logicalLine === end.line
-  ) {
+  // An empty selected final line still occupies the cursor cell, including
+  // when the anchor is on an earlier line and there is no final newline.
+  if (isLastSegment && line.length === 0) {
     return { start: 0, end: 1 };
   }
   return null;

@@ -278,14 +278,20 @@ const THRESHOLDS = {
   // 416 B / 681 B headroom; tests/parity are not packed, no new dependency.
   //
   // 2026-10-10: Visual selection rendering, stacked on the clipboard, escape
-  // sequence, cursor shape and ZZ/ZQ changes: visual.ts gains host-layout span geometry and ANSI-safe
-  // selected-range painting; index.ts uses the host wrapped/scrolled line map,
+  // sequence, cursor shape and ZZ/ZQ changes: visual.ts gains host-layout span
+  // geometry and ANSI-safe selected-range painting; index.ts uses the host wrapped/scrolled line map,
   // and README documents the paint. Measured 66077 B packed / 258250 B unpacked
   // / 18 files. Budgets become 66600 / 258900, leaving 523 B / 650 B headroom.
   // Helpers stay in visual.ts; no runtime dependency or new packed file.
+  //
+  // 2026-10-10: Selection review fixes validate the optional host layout, guard
+  // missing theme backgrounds, and paint a selected final empty row. README
+  // documents fallback and linewise paint boundaries. Measured 66525 B packed /
+  // 259754 B unpacked / 18 files. Budgets become 67100 / 260400, leaving 575 B /
+  // 646 B headroom. Regression/parity tests are not shipped; no new dependency.
   maxFiles: 18,
-  maxSize: 66600,
-  maxUnpackedSize: 258900,
+  maxSize: 67100,
+  maxUnpackedSize: 260400,
 } as const;
 
 function compareStrings(a: string, b: string): number {

@@ -4142,19 +4142,34 @@ export class ModalEditor extends CustomEditor {
     this.lastCursorShapeSequence = sequence;
   }
 
-  private renderVisualSelection(lines: string[], width: number): void {
-    if (!isVisualMode(this.mode) || lines.length < 3) return;
+  private renderVisualSelection(
+    lines: string[],
+    width: number,
+    mode: VisualMode,
+  ): void {
+    if (lines.length < 3) return;
 
     const editor = this as unknown as ModalEditorInternals;
     if (
       typeof editor.lastWidth !== "number" ||
+      !Number.isInteger(editor.lastWidth) ||
+      editor.lastWidth < 1 ||
       typeof editor.scrollOffset !== "number" ||
+      !Number.isInteger(editor.scrollOffset) ||
+      editor.scrollOffset < 0 ||
       typeof editor.buildVisualLineMap !== "function"
     ) {
       return;
     }
 
-    const layoutLines = editor.buildVisualLineMap(editor.lastWidth);
+    let layoutLines: VisualLayoutLine[];
+    try {
+      layoutLines = editor.buildVisualLineMap(editor.lastWidth);
+    } catch {
+      // Optional paint must not break editing if the private host API changes.
+      return;
+    }
+    if (!Array.isArray(layoutLines)) return;
     // Mirror of the host editor's own render heuristic (30% of terminal rows,
     // minimum 5); pi-tui recomputes it per render, so we must too.
     const maxVisibleLines = Math.max(
@@ -4170,6 +4185,25 @@ export class ModalEditor extends CustomEditor {
     const anchor = this.getVisualAnchor();
     const cursor = this.getCursor();
     const bufferLines = this.getLines();
+    // Validate before painting any row, including the reserved border rows.
+    if (
+      visibleLines.length > lines.length - 2 ||
+      visibleLines.some(
+        (line) =>
+          !line ||
+          !Number.isInteger(line.logicalLine) ||
+          line.logicalLine < 0 ||
+          line.logicalLine >= bufferLines.length ||
+          !Number.isInteger(line.startCol) ||
+          line.startCol < 0 ||
+          !Number.isInteger(line.length) ||
+          line.length < 0 ||
+          line.startCol + line.length >
+            (bufferLines[line.logicalLine]?.length ?? 0),
+      )
+    ) {
+      return;
+    }
 
     for (let index = 0; index < visibleLines.length; index++) {
       const layoutLine = visibleLines[index];
@@ -4179,7 +4213,7 @@ export class ModalEditor extends CustomEditor {
       const renderedLine = lines[renderedIndex];
       if (!layoutLine || renderedLine === undefined) continue;
       const span = getVisualRenderSpan(
-        this.mode,
+        mode,
         anchor,
         cursor,
         bufferLines,
@@ -4198,7 +4232,9 @@ export class ModalEditor extends CustomEditor {
   render(width: number): string[] {
     const lines = super.render(width);
     this.syncCursorShapeForRender(lines);
-    this.renderVisualSelection(lines, width);
+    if (isVisualMode(this.mode)) {
+      this.renderVisualSelection(lines, width, this.mode);
+    }
     if (lines.length === 0) return lines;
 
     const rawLabel = fitModeLabel(this.getModeLabel(), width);
@@ -4317,10 +4353,15 @@ export default function (pi: ExtensionAPI) {
         labelSync,
         offBorderColor,
         labelTransform: reverseVideo,
-        selectionColorizer:
-          typeof t.bg === "function"
-            ? (s) => t.bg("selectedBg", s)
-            : reverseVideo,
+        selectionColorizer: (s) => {
+          try {
+            if (typeof t?.bg === "function") return t.bg("selectedBg", s);
+          } catch {
+            // Custom themes may omit selectedBg. Retry on the next render so
+            // switching back to a complete theme restores its highlight.
+          }
+          return reverseVideo(s);
+        },
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
