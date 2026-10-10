@@ -174,6 +174,10 @@ export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
   }
 
   setPiCursor(editor, testCase.initial.cursor);
+  // Match nvim's undo-disabled fixture load: exhausted undo must stop at the
+  // initial text, not undo the harness's programmatic setText back to empty.
+  const { undoStack } = editor as unknown as { undoStack: { clear(): void } };
+  undoStack.clear();
 
   for (const key of testCase.keys) {
     editor.handleInput(key);

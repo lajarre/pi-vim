@@ -82,6 +82,56 @@ const CASES: NvimParityCase[] = [
       keys: ["2", command],
     }),
   ),
+  ...[
+    ["2", "P", "."],
+    ["2", "P", "u"],
+    ["2", "P", "9", "u"],
+    ["2", "P", ".", "u", "u", "9", "\x12"],
+  ].map(
+    (keys): NvimParityCase => ({
+      name: `multiline put history ${JSON.stringify(keys)}`,
+      initial: {
+        text: "ab\ncd",
+        cursor: { line: 0, col: 0 },
+        register: "qx\nyz\n",
+      },
+      keys,
+    }),
+  ),
+  ...["o", "O"].map(
+    (command): NvimParityCase => ({
+      name: `${command} opens at the empty buffer boundary`,
+      initial: { text: "", cursor: { line: 0, col: 0 }, register: "keep" },
+      keys: [command, "Z", ESC],
+    }),
+  ),
+  {
+    name: "o opens after the final long logical line",
+    initial: {
+      text: `first\n${"a".repeat(120)}`,
+      cursor: { line: 1, col: 110 },
+      register: "keep",
+    },
+    keys: ["o", "Z", ESC],
+  },
+  {
+    name: "O opens above the first long logical line",
+    initial: {
+      text: `${"a".repeat(120)}\nlast`,
+      cursor: { line: 0, col: 110 },
+      register: "keep",
+    },
+    keys: ["O", "Z", ESC],
+  },
+  {
+    name: "counted P preserves combining and joined graphemes",
+    initial: {
+      text: "ab",
+      cursor: { line: 0, col: 0 },
+      register: "e\u0301👩🏽‍💻",
+    },
+    keys: ["2", "P"],
+  },
   {
     name: "dd lands at the next line start",
     initial: {

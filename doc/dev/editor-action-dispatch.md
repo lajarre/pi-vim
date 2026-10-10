@@ -39,7 +39,10 @@ bindings, conflicting actions, extension interception, Unicode, clipboard writes
 undo/redo, count consumption, and real-input forwarding. Curated nvim comparisons
 live in `test/nvim-parity-editor-actions.ts`. The oracle now converts between
 nvim's byte columns and Pi's UTF-16 columns and excludes fixture initialization
-from nvim undo history; it also tolerates undo messages preceding its result.
+from both undo histories; it also tolerates undo messages preceding its result.
+Follow-up tests cover `2P.`, single-command undo windows, exhausted undo/redo,
+real-edit redo invalidation, harmless input, joined/combining graphemes,
+and open-line commands at empty/wrapped buffer edges.
 
 ## Existing gaps kept out of scope
 

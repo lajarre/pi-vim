@@ -48,6 +48,15 @@ const PUT_PARITY_CASES: NvimParityCase[] = [
     keys: ["p"],
   },
   {
+    name: "2P keeps multiline register copies intact with default bindings",
+    initial: {
+      text: "ab\ncd",
+      cursor: { line: 0, col: 0 },
+      register: "qx\nyz\n",
+    },
+    keys: ["2", "P"],
+  },
+  {
     name: "line-wise p with a leading-whitespace first line lands on its first non-blank",
     initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "  foo\n" },
     keys: ["p"],
