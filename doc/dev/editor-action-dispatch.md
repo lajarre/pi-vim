@@ -23,6 +23,13 @@ still goes through that dispatcher, including application and extension shortcut
 Calling the original operations retains Pi's kill ring, undo snapshots, and
 change notifications. Register insertion uses `insertCharacter` / `addNewLine`,
 not input events, so register contents cannot accidentally trigger shortcuts.
+Before placement/counting, put text normalizes CRLF/CR and tabs as Pi does and
+filters other C0, DEL, and C1 controls. Private `insertCharacter` does not filter
+controls; accepting raw ESC/BEL would let a clipboard OSC sequence reach terminal
+rendering. This intentionally differs from nvim's literal control-character puts
+and leaves the source register unchanged. A control-only put is a no-op, including
+cursor/history, while consuming its count. Focused tests assert buffer and render
+safety for both clipboard and unnamed-register inputs.
 Counted multi-line `P` also resets to the insertion line for every copy, fixing
 an existing interleaving bug exposed by the new tests.
 

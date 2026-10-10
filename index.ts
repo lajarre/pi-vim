@@ -4004,6 +4004,23 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private getSafePutText(): string {
+    // Private insertCharacter bypasses Pi's input/paste filtering. Never let
+    // clipboard or register controls reach terminal rendering. Match Pi's
+    // newline/tab normalization, but also exclude DEL and C1 controls.
+    const text = this.getPasteRegisterText()
+      .replace(/\r\n?/g, "\n")
+      .replace(/\t/g, "    ");
+    let safe = "";
+    for (const char of text) {
+      const code = char.charCodeAt(0);
+      if (code === 10 || (code >= 32 && (code < 127 || code > 159))) {
+        safe += char;
+      }
+    }
+    return safe;
+  }
+
   private moveCursorToPreviousGraphemeStart(): void {
     const cursor = this.getCursor();
     const line = this.getLines()[cursor.line] ?? "";
@@ -4022,7 +4039,7 @@ export class ModalEditor extends CustomEditor {
 
   private putAfter(): void {
     const count = this.takeTotalCount(1);
-    const text = this.getPasteRegisterText();
+    const text = this.getSafePutText();
     if (!text) return;
     const safeCount = Math.min(
       count,
@@ -4056,7 +4073,7 @@ export class ModalEditor extends CustomEditor {
 
   private putBefore(): void {
     const count = this.takeTotalCount(1);
-    const text = this.getPasteRegisterText();
+    const text = this.getSafePutText();
     if (!text) return;
     const safeCount = Math.min(
       count,
