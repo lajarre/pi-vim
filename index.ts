@@ -1620,6 +1620,14 @@ export class ModalEditor extends CustomEditor {
     "<",
   ]);
 
+  private quitPrompt(force: boolean, warning: string): void {
+    if (!force && this.hasNonEmptyPrompt()) {
+      this.notifyFn(warning);
+      return;
+    }
+    this.quitFn();
+  }
+
   private submitPendingExCommand(): void {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
     this.clearPendingExCommand();
@@ -1629,12 +1637,10 @@ export class ModalEditor extends CustomEditor {
     const quitName = force ? command.slice(0, -1) : command;
 
     if (ModalEditor.EX_QUIT_NAMES.has(quitName)) {
-      if (!force && this.hasNonEmptyPrompt()) {
-        this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
-        return;
-      }
-
-      this.quitFn();
+      this.quitPrompt(
+        force,
+        `Prompt is not empty; use :${command}! to quit anyway`,
+      );
       return;
     }
 
