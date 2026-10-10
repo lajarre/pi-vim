@@ -8,6 +8,25 @@ export type PiEditorAction =
   | [action: "moveCursor", deltaLine: number, deltaCol: number]
   | [action: "insertCharacter", text: string];
 
+/** Validate the whole contract before a command can make partial changes. */
+export function getPiEditorCompatibilityError(editor: object): string | null {
+  const actions: Record<PiEditorAction[0], true> = {
+    undo: true,
+    moveToLineStart: true,
+    moveToLineEnd: true,
+    deleteToEndOfLine: true,
+    addNewLine: true,
+    moveCursor: true,
+    insertCharacter: true,
+  };
+  for (const action of Object.keys(actions)) {
+    if (typeof (editor as Record<string, unknown>)[action] !== "function") {
+      return `Pi editor compatibility error: ${action}() unavailable`;
+    }
+  }
+  return null;
+}
+
 /** Bypass input dispatch without silently falling back to configurable keys. */
 export function runPiEditorAction(
   editor: object,

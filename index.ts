@@ -61,7 +61,10 @@ import {
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
-import { runPiEditorAction } from "./pi-editor-actions.js";
+import {
+  getPiEditorCompatibilityError,
+  runPiEditorAction,
+} from "./pi-editor-actions.js";
 import {
   type CursorShapeSettings,
   DEFAULT_CURSOR_SHAPE_SETTINGS,
@@ -298,6 +301,7 @@ export class ModalEditor extends CustomEditor {
   private undoWindow: { floor: number; openVersion: number } | null = null;
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
+  private editorActionsAvailable: boolean | null = null;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
   private readonly offBorderColor: ((s: string) => string) | null;
@@ -1297,6 +1301,18 @@ export class ModalEditor extends CustomEditor {
   }
 
   handleInput(data: string): void {
+    // Pi's terminal dispatcher does not catch editor exceptions. Validate once
+    // before recording, mode changes, register writes, or any partial edit.
+    if (this.editorActionsAvailable === null) {
+      const error = getPiEditorCompatibilityError(this);
+      this.editorActionsAvailable = error === null;
+      if (error) {
+        this.notifyFn(
+          `${error}; pi-vim input disabled. Reload with a compatible Pi version or disable pi-vim.`,
+        );
+      }
+    }
+    if (!this.editorActionsAvailable) return;
     try {
       this.handleInputCore(data);
     } finally {

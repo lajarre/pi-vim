@@ -1,10 +1,21 @@
 # Direct Pi editor operations
 
 `pi-editor-actions.ts` is the compatibility boundary for Pi's TypeScript-private
-editor methods. It checks each method at runtime, keeps its receiver, and fails
-with a named compatibility error if an upgrade removes it. There is deliberately
-no synthetic-key fallback: a remapped, conflicting, or disabled binding cannot
-reliably express an editor operation.
+editor methods. Before the first input, `ModalEditor` checks the whole contract.
+If any method is missing or non-callable, it warns once and disables editor input
+for that instance before recording, mode changes, register writes, or edits. The
+buffer, cursor, mode, registers and history stay intact. Reload with a compatible
+Pi version or disable pi-vim to recover. The successful check is cached; replacing
+host methods after the first input is not supported. Individual calls still check
+the method and retain its receiver; unrelated host exceptions are not swallowed.
+
+Decision (2026-10-10): notify once + no-op, not a throw from normal input. Both
+reviewed Pi TUI versions call the focused editor without an exception boundary,
+so a missing-method throw escapes terminal dispatch and can terminate Pi. Catching
+only the failed call is too late: commands can already have changed mode, written
+the register/clipboard, or inserted part of a put. A whole-contract preflight
+avoids partial actions. There is deliberately no synthetic-key fallback: a
+remapped, conflicting, or disabled binding cannot reliably express an operation.
 
 Movement, deletion, undo, open-line commands, Insert-mode positioning shortcuts,
 and register insertion bypass `CustomEditor.handleInput`. Actual user input
