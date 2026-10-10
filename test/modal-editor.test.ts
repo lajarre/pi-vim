@@ -3319,6 +3319,50 @@ describe("cursor shape lifecycle", () => {
     assert.deepEqual(operations, ["set:true", `write:${RESET_CURSOR_SHAPE}`]);
   });
 
+  for (const previousOwner of [false, true]) {
+    it(`leaves the host cursor alone in degraded mode (previous Vim owner=${previousOwner})`, async (t) => {
+      t.after(setPiVimSettingsReaderForTests(() => ({})));
+      const extension = await installExtensionWithEditorFactory();
+      const tui = createCursorShapeTui();
+      if (previousOwner) {
+        const previous = extension.editorFactory(
+          tui,
+          stubTheme,
+          stubKeybindings,
+        );
+        focusEditor(previous);
+        previous.render(80);
+      }
+      assert.equal(Object.hasOwn(ModalEditor.prototype, "undo"), false);
+      Object.defineProperty(ModalEditor.prototype, "undo", {
+        value: undefined,
+        configurable: true,
+      });
+      t.after(() => {
+        Reflect.deleteProperty(ModalEditor.prototype, "undo");
+      });
+
+      const editor = extension.editorFactory(tui, stubTheme, stubKeybindings);
+      focusEditor(editor);
+      // Input-first detection must also bypass Vim without first rendering.
+      editor.handleInput("abc");
+      assert.equal(editor.getText(), "abc");
+      assert.doesNotMatch(editor.render(80).join("\n"), /INSERT|NORMAL/);
+      assert.equal(extension.notificationCalls, 1);
+      assert.deepEqual(extension.eventBusEmissions(), []);
+      const expectedWrites = previousOwner
+        ? [INSERT_CURSOR_SHAPE, RESET_CURSOR_SHAPE]
+        : [];
+      assert.deepEqual(tui.terminalWrites, expectedWrites);
+      assert.deepEqual(
+        tui.hardwareCursorValues,
+        previousOwner ? [true, false] : [],
+      );
+      await extension.emitShutdown();
+      assert.deepEqual(tui.terminalWrites, expectedWrites);
+    });
+  }
+
   it("skips startup enablement and cleanup cursor writes on unsupported runtimes", async () => {
     const extension = await installExtensionWithEditorFactory();
     const tui = createCursorShapeTui({ setShowHardwareCursor: false });

@@ -1,21 +1,27 @@
 # Direct Pi editor operations
 
 `pi-editor-actions.ts` is the compatibility boundary for Pi's TypeScript-private
-editor methods. Before the first input, `ModalEditor` checks the whole contract.
-If any method is missing or non-callable, it warns once and disables editor input
-for that instance before recording, mode changes, register writes, or edits. The
-buffer, cursor, mode, registers and history stay intact. Reload with a compatible
-Pi version or disable pi-vim to recover. The successful check is cached; replacing
-host methods after the first input is not supported. Individual calls still check
-the method and retain its receiver; unrelated host exceptions are not swallowed.
+editor methods. Before input or rendering, `ModalEditor` checks the whole contract.
+If any method is missing or non-callable, it warns once and forwards every input
+unchanged to `CustomEditor.handleInput` for that instance. Preflight itself leaves
+the buffer, cursor, mode, registers and history untouched; subsequent typing,
+submission and `/reload` or `/quit` use Pi's stock dispatcher and keybindings,
+without Vim recording, mode transitions or register/clipboard writes.
+Rendering returns the stock lines without a Vim label, border recoloring or cursor
+shaping. Startup does not claim the hardware cursor for an incompatible editor;
+if replacing an existing Vim editor, its cursor ownership is released once.
+The check is cached; replacing host methods after successful validation is not
+supported. Individual action calls still check the method and retain its receiver;
+unrelated host exceptions are not swallowed.
 
-Decision (2026-10-10): notify once + no-op, not a throw from normal input. Both
-reviewed Pi TUI versions call the focused editor without an exception boundary,
-so a missing-method throw escapes terminal dispatch and can terminate Pi. Catching
-only the failed call is too late: commands can already have changed mode, written
-the register/clipboard, or inserted part of a put. A whole-contract preflight
-avoids partial actions. There is deliberately no synthetic-key fallback: a
-remapped, conflicting, or disabled binding cannot reliably express an operation.
+Decision (2026-10-10 follow-up): notify once + stock pass-through supersedes the
+initial notify + input-no-op decision. Swallowing every key stranded the user,
+including the recovery commands. A changed private method name need not break Pi's
+public input path, so pass-through keeps that path usable. Both reviewed Pi TUIs
+let editor exceptions escape terminal dispatch and terminate Pi; a late per-action
+catch can also leave partial mode/register/clipboard/put changes. Whole-contract
+preflight avoids starting those Vim actions. This is not a synthetic-key fallback:
+no remapped key is fabricated, and Pi's actual input semantics remain in control.
 
 Movement, deletion, undo, open-line commands, Insert-mode positioning shortcuts,
 and register insertion bypass `CustomEditor.handleInput`. Actual user input
@@ -100,7 +106,8 @@ change to one host snapshot. Existing undo cursor differences for `o`/linewise
 
 Three alternating base/head rounds of the existing five-operation benchmark,
 eight samples per run. Base `4811b14` (the intake tip); head `935cf8e` (all runtime
-fixes). Node v24.15.0, darwin-arm64, installed peers 0.78.0. Values below are the
+fixes, before the degraded-mode follow-up). Node v24.15.0, darwin-arm64, installed
+peers 0.78.0. Values below are the
 median of the three per-run medians and the median of the three per-run p95s;
 these are sampled microbenchmarks, not interactive end-to-end latency.
 
@@ -123,10 +130,36 @@ base run. The nested files reuse the installed peers. Keep the archived Biome
 configuration under a non-config filename so lint does not discover a nested
 root; do not change the active checkout's lint configuration.
 
+### Degraded-mode follow-up evidence
+
+The compatibility matrix models a host with renamed private methods but a working
+public dispatcher: the installed host's original method is exposed only inside
+its stock `handleInput` call. For every missing/non-callable action, tests assert
+unchanged preflight state, one warning, literal typing and Enter/slash-command
+submission, no Vim register/clipboard/mode changes, and stock-render equality with
+no cursor-shape writes. Factory tests also cover startup without cursor ownership
+and replacement of an existing Vim editor, releasing its ownership exactly once.
+
+Three alternating rounds against `e7b9bcf`, with the same runtime and aggregation
+as above, measure the supported input path after the shared preflight helper:
+
+| operation | base median µs | follow-up median µs | base p95 µs | follow-up p95 µs |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 0.628 | 0.625 | 0.760 | 0.755 |
+| `motion_h_4k` | 408.910 | 410.266 | 409.900 | 413.513 |
+| `motion_w_50` | 1.413 | 1.378 | 1.692 | 1.673 |
+| `insert_type` | 9.086 | 9.271 | 9.473 | 9.751 |
+| `insert_edit` | 13.305 | 13.136 | 13.923 | 13.738 |
+
+The wide-line motion median increased 0.33%; sustained insert increased 0.185 µs
+(2.0%). These microbenchmarks exclude rendering; no render-performance claim is
+made for the stock fallback.
+
 ## Package evidence
 
 The original unstacked PR measured 18 files / 59,181 bytes packed / 232,872 bytes
 unpacked. Intake integration plus compatibility preflight, safe puts and README
-contracts measures **19 files / 64,268 bytes packed / 250,897 bytes unpacked**.
-Budgets are 19 files / 64,800 packed / 251,600 unpacked: 532 / 703 bytes headroom.
+contracts measured 19 files / 64,268 bytes packed / 250,897 bytes unpacked.
+The degraded-mode follow-up measures **19 files / 64,380 bytes packed / 251,395 bytes unpacked**.
+Budgets remain 19 files / 64,800 packed / 251,600 unpacked: 420 / 205 bytes headroom.
 No dependency was added. Tests and development docs remain outside the package.

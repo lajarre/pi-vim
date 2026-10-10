@@ -508,7 +508,10 @@ export class ModalEditor extends CustomEditor {
     // sessions even though direct editor tests pass. Reclassify on every host
     // assignment so a thinking-level cycle off -> on -> off is honored.
     Object.defineProperty(this, "borderColor", {
-      get: () => resolvedBorderColor,
+      get: () =>
+        this.editorActionsAvailable === false && this.borderBase
+          ? this.borderBase
+          : resolvedBorderColor,
       set: (next: unknown) => {
         if (typeof next === "function") {
           this.borderBase = next as (s: string) => string;
@@ -1300,19 +1303,24 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  handleInput(data: string): void {
-    // Pi's terminal dispatcher does not catch editor exceptions. Validate once
-    // before recording, mode changes, register writes, or any partial edit.
+  private canUseVimActions(): boolean {
+    // Validate before input or paint without touching editing state. A changed
+    // private action contract need not break the host's public input path.
     if (this.editorActionsAvailable === null) {
       const error = getPiEditorCompatibilityError(this);
       this.editorActionsAvailable = error === null;
       if (error) {
-        this.notifyFn(
-          `${error}; pi-vim input disabled. Reload with a compatible Pi version or disable pi-vim.`,
-        );
+        this.notifyFn(`${error}; using the stock Pi editor without Vim mode.`);
       }
     }
-    if (!this.editorActionsAvailable) return;
+    return this.editorActionsAvailable;
+  }
+
+  handleInput(data: string): void {
+    if (!this.canUseVimActions()) {
+      super.handleInput(data);
+      return;
+    }
     try {
       this.handleInputCore(data);
     } finally {
@@ -4256,7 +4264,9 @@ export class ModalEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
+    const vim = this.canUseVimActions();
     const lines = super.render(width);
+    if (!vim) return lines;
     this.syncCursorShapeForRender(lines);
     if (isVisualMode(this.mode)) {
       this.renderVisualSelection(lines, width, this.mode);
@@ -4371,7 +4381,6 @@ export default function (pi: ExtensionAPI) {
       (event) => pi.events.emit("pi-vim:mode-change", event),
     );
     ctx.ui.setEditorComponent((tui, theme, kb) => {
-      cursorShapeCleanup = enableCursorShapeSupport(tui);
       const editor = new ModalEditor(tui, theme, kb, {
         labelColorizers,
         borderColorizers,
@@ -4389,6 +4398,9 @@ export default function (pi: ExtensionAPI) {
           return reverseVideo(s);
         },
       });
+      const compatible = getPiEditorCompatibilityError(editor) === null;
+      if (!compatible) cursorShapeCleanup?.();
+      cursorShapeCleanup = compatible ? enableCursorShapeSupport(tui) : null;
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
