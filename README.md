@@ -436,7 +436,7 @@ Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX in
 ─────────────────────────────────────────────
 ```
 
-Both positions use the same mode colors, `labelSync`, and pending-command feedback (for example, ` NORMAL d_ `). Narrow widths shorten the label without splitting graphemes. On the top border, hidden-line indicators take priority: the label uses the left border cells if it fits, otherwise the larger free edge (after the indicator when that has more room), shrinking or disappearing if necessary. Text rows, cursor placement, and visual-selection highlighting stay in place.
+Both positions use the same mode colors, `labelSync`, and pending-command feedback (for example, ` NORMAL d_ `). Narrow widths shorten the label without splitting graphemes; moving it also preserves the trailing host row's width cap. On the top border, hidden-line indicators take priority: the label uses the left border cells if it fits, otherwise the larger free edge (after the indicator when that has more room), shrinking or disappearing if necessary. Text rows, cursor placement, and visual-selection highlighting stay in place.
 
 Project settings replace the global value as a whole. Invalid values warn once at session start and fall back to `bottom-right`, not the global value. An absent project setting inherits global; absence at both levels keeps the default. This is an intentional non-Vim presentation setting, not Vim statusline emulation.
 

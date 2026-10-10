@@ -294,6 +294,33 @@ describe("mode label positions", () => {
     assert.ok(plain(editor.render(32)[0] ?? "").startsWith(" V-LINE "));
   });
 
+  it("keeps the old last-row width cap when moving the label off a scroll footer", () => {
+    const { editor, tui } = editorFor("top-left");
+    tui.terminal.rows = 10;
+    editor.setText("abcdef ghi\n".repeat(12));
+    editor.handleInput("\x1b");
+    for (const line of [0, 4, 10]) {
+      setInternalCursor(editor, 0, line);
+      for (const width of [1, 2, 3, 4, 8, 12, 16, 24]) {
+        const host = CustomEditor.prototype.render.call(editor, width);
+        const before = state(editor);
+        const rows = editor.render(width);
+        assert.ok(rows.every((row) => visibleWidth(row) <= width));
+        assert.equal(rows.length, host.length);
+        assert.deepEqual(
+          rows.slice(1, -1).map(plain),
+          host.slice(1, -1).map(plain),
+        );
+        assert.equal(
+          plain(rows.at(-1) ?? ""),
+          plain(host.at(-1) ?? "").slice(0, width),
+        );
+        assert.deepEqual(state(editor), before);
+        assert.deepEqual(editor.render(width), rows);
+      }
+    }
+  });
+
   it("preserves left/centered/truncated indicator fixtures and whole-row SGR runs", (t) => {
     const { editor } = editorFor("top-left");
     const fixtures = [

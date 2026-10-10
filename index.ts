@@ -334,6 +334,7 @@ export class ModalEditor extends CustomEditor {
     label: "",
     result: "",
     top: { label: "", before: "", after: "" },
+    tail: { l: "", w: 0, result: "" },
   };
 
   private unnamedRegister: string = "";
@@ -4331,7 +4332,21 @@ export class ModalEditor extends CustomEditor {
     const raw = this.getModeLabel();
     const c = this.lastLineCache;
     const changed = line !== c.l || width !== c.w || raw !== c.raw;
-    if (topLeft && changed) c.top = layoutTopModeLabel(line, width, raw);
+    if (topLeft) {
+      // Moving the label must not remove its old last-row width cap: pi-tui
+      // 0.78 can return an oversized lower scroll indicator in narrow panes.
+      const last = lines.length - 1;
+      const tail = lines[last] ?? "";
+      if (tail !== c.tail.l || width !== c.tail.w) {
+        c.tail = {
+          l: tail,
+          w: width,
+          result: truncateToWidth(tail, width, ""),
+        };
+      }
+      lines[last] = c.tail.result;
+      if (changed) c.top = layoutTopModeLabel(line, width, raw);
+    }
     const rawLabel = topLeft ? c.top.label : fitModeLabel(raw, width);
     const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;

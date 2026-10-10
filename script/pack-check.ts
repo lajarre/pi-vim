@@ -320,9 +320,15 @@ const THRESHOLDS = {
   // 273357 B unpacked / 19 files. Budgets become 71400 / 274000, leaving
   // 565 B / 643 B headroom. No runtime dependency or new packed file; render
   // and settings tests plus benchmark scratch remain outside the package.
+  //
+  // 2026-10-10: Label-position review retains the last-row width cap when the
+  // label moves to the top, preventing an old-host lower scroll indicator from
+  // overflowing. The cap is cached with the overlay. Measured 71011 B packed /
+  // 273919 B unpacked / 19 files. Limits become 71600 / 274600, leaving
+  // 589 B / 681 B headroom. No new packed file or dependency.
   maxFiles: 19,
-  maxSize: 71400,
-  maxUnpackedSize: 274000,
+  maxSize: 71600,
+  maxUnpackedSize: 274600,
 } as const;
 
 function compareStrings(a: string, b: string): number {
