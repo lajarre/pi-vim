@@ -340,7 +340,7 @@ Typing done in an implicit insert session is repeatable too: the prompt opens in
 | `Y` | Yank every touched line |
 | `C` / `S` | Replace every touched line with one empty line and enter Insert mode |
 
-**The selection is not highlighted.** The footer reads ` VISUAL ` or ` V-LINE ` and the block cursor marks the moving end, but the span between the anchor and the cursor renders as ordinary text. Selection highlighting needs a render-layer change and is deferred.
+**The selection is not highlighted.** The footer reads ` VISUAL ` or ` V-LINE ` and the normal-mode cursor shape (block by default) marks the moving end, but the span between the anchor and the cursor renders as ordinary text. Selection highlighting needs a render-layer change and is deferred.
 
 Line-wise selections put a trailing newline in the register, so a following `p` pastes whole lines. A count typed before `v` or `V` is discarded rather than sizing the selection (`2v` behaves as `v`).
 
@@ -350,7 +350,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -361,6 +361,10 @@ Default-equivalent `settings.json`:
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
+    },
+    "cursorShape": {
+      "insert": "bar",
+      "normal": "block"
     },
     "modeColors": {
       "insert": "borderMuted",
@@ -431,6 +435,24 @@ Give insert a solid mode color, let normal defer to thinking, and make both mode
 
 `syncBorderColorWithMode` is deprecated but still accepted: `false` (or absent) is the defaults; `true` sets `borderSync` to `mode` for every mode; the never-released `"inherit"` sets both `borderSync` and `labelSync` to `thinking` for every mode. A present `borderSync` or `labelSync` wins over it for that surface.
 
+### cursorShape
+
+`piVim.cursorShape` controls the hardware cursor on terminals supporting DECSCUSR. `insert` defaults to `bar`; `normal` defaults to `block` and also covers Visual, V-Line, and the EX mini-mode. All shapes use the blinking variants:
+
+| value | terminal sequence |
+|---|---|
+| `block` | `ESC [ 1 SP q` (`\x1b[1 q`) |
+| `underline` | `ESC [ 3 SP q` (`\x1b[3 q`) |
+| `bar` | `ESC [ 5 SP q` (`\x1b[5 q`) |
+
+For a block cursor in Insert as well as Normal:
+
+```json
+{ "piVim": { "cursorShape": { "insert": "block" } } }
+```
+
+Project settings replace the whole map, not individual global keys. Missing keys use their defaults; invalid values warn once at session start and default only the affected key. A malformed map defaults both keys. This is an intentional non-Vim terminal setting, not a `guicursor` implementation: actual glyphs and blinking depend on the terminal, and unsupported hardware-cursor APIs keep the software-cursor fallback.
+
 ### modeColors
 
 `piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
@@ -484,7 +506,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
-| Visual selection rendering | No highlight; only the footer label and the block cursor mark the selection | Selection is highlighted |
+| Visual selection rendering | No highlight; only the footer label and the configured normal-mode cursor mark the selection | Selection is highlighted |
 | Visual line-wise delete | Leaves the cursor at column 0, like `dd` does today | Preserves the cursor column |
 | Visual dot-repeat | A visual edit clears the repeatable command; `.` afterwards does nothing | `.` repeats the operator over an equally sized region |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |

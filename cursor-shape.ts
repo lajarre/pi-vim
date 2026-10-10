@@ -4,12 +4,16 @@ const SOFTWARE_CURSOR_START = "\x1b[7m";
 const SOFTWARE_CURSOR_RESETS = ["\x1b[0m", "\x1b[27m"] as const;
 export const INSERT_CURSOR_SHAPE = "\x1b[5 q";
 export const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
+export const CURSOR_SHAPE_SEQUENCES = {
+  block: BLOCK_CURSOR_SHAPE,
+  underline: "\x1b[3 q",
+  bar: INSERT_CURSOR_SHAPE,
+} as const;
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
 const SHOW_HARDWARE_CURSOR = "\x1b[?25h";
 
 export type CursorShapeSequence =
-  | typeof INSERT_CURSOR_SHAPE
-  | typeof BLOCK_CURSOR_SHAPE
+  | (typeof CURSOR_SHAPE_SEQUENCES)[keyof typeof CURSOR_SHAPE_SEQUENCES]
   | typeof RESET_CURSOR_SHAPE
   | typeof SHOW_HARDWARE_CURSOR;
 

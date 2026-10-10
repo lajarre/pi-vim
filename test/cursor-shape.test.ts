@@ -1,3 +1,8 @@
+/**
+ * Terminal cursor shaping is an intentional non-Vim host surface: DECSCUSR
+ * writes/lifecycle use the TUI stub, not the nvim text/cursor/mode oracle.
+ * Real cursor glyphs and blinking still require the maintainer TTY QA script.
+ */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -8,6 +13,151 @@ import {
   stripSoftwareCursorAfterMarker,
   stripSoftwareCursorWhenHardwareCursorIsUsed,
 } from "../cursor-shape.js";
+
+import vim, { ModalEditor } from "../index.js";
+import {
+  type CursorShapeSettings,
+  resolveCursorShapeSettings,
+  setPiVimSettingsReaderForTests,
+} from "../settings.js";
+import {
+  createCursorShapeTui,
+  createExtensionApiHarness,
+  sendKeys,
+  stubKeybindings,
+  stubTheme,
+} from "./harness.js";
+
+function fixture(settings: CursorShapeSettings) {
+  const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
+  const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
+  editor.setCursorShapeSettings(settings);
+  editor.focused = true;
+  editor.setText("abc");
+  return { tui, editor };
+}
+
+describe("configured cursor shape rendering", () => {
+  for (const [mode, keys, label] of [
+    ["insert", [], " INSERT "],
+    ["normal", ["\x1b"], " NORMAL "],
+    ["visual", ["\x1b", "v"], " VISUAL "],
+    ["visual-line", ["\x1b", "V"], " V-LINE "],
+    ["ex", ["\x1b", ":"], " EX :_ "],
+  ] as const) {
+    it(`uses configured shape in ${mode} without rewriting unchanged renders`, () => {
+      const { tui, editor } = fixture({ insert: "block", normal: "underline" });
+      sendKeys(editor, [...keys]);
+      const lines = editor.render(40);
+      editor.render(40);
+      assert.deepEqual(tui.terminalWrites, [
+        mode === "insert" ? "\x1b[1 q" : "\x1b[3 q",
+      ]);
+      assert.equal(editor.getMode(), mode === "ex" ? "normal" : mode);
+      assert.equal(editor.getText(), "abc");
+      assert.ok(lines.at(-1)?.includes(label));
+      assert.ok(lines.some((line) => line.includes(CURSOR_MARKER)));
+      assert.ok(
+        lines.every(
+          (line) => !line.includes("\x1b[3 q") && !line.includes("\x1b[1 q"),
+        ),
+      );
+    });
+  }
+
+  it("writes configured insert -> normal -> insert transitions once each", () => {
+    const { tui, editor } = fixture({ insert: "underline", normal: "bar" });
+    editor.render(40);
+    editor.handleInput("\x1b");
+    editor.render(40);
+    editor.render(40);
+    editor.handleInput("i");
+    editor.render(40);
+    editor.render(40);
+    assert.deepEqual(tui.terminalWrites, ["\x1b[3 q", "\x1b[5 q", "\x1b[3 q"]);
+  });
+
+  it("does not rewrite identical shapes across mode changes", () => {
+    const { tui, editor } = fixture({ insert: "block", normal: "block" });
+    for (const key of ["\x1b", "v", "V", "\x1b", ":", "\x1b", "i"]) {
+      editor.render(40);
+      editor.handleInput(key);
+    }
+    editor.render(40);
+    assert.deepEqual(tui.terminalWrites, ["\x1b[1 q"]);
+  });
+
+  it("changes the cache only when a new setting changes the rendered shape", () => {
+    const settings: CursorShapeSettings = { insert: "block", normal: "bar" };
+    const { tui, editor } = fixture(settings);
+    settings.insert = "bar";
+    editor.render(40);
+    editor.setCursorShapeSettings({ insert: "block", normal: "underline" });
+    editor.render(40);
+    editor.setCursorShapeSettings({ insert: "underline", normal: "block" });
+    editor.render(40);
+    assert.deepEqual(tui.terminalWrites, ["\x1b[1 q", "\x1b[3 q"]);
+  });
+
+  it("restores the configured shape after hardware cursor ownership is lost", () => {
+    const { tui, editor } = fixture({ insert: "underline", normal: "bar" });
+    editor.render(40);
+    tui.setShowHardwareCursor?.(false);
+    editor.render(40);
+    editor.render(40);
+    assert.deepEqual(tui.terminalWrites, ["\x1b[3 q", "\x1b[3 q"]);
+    assert.deepEqual(tui.hardwareCursorValues, [false, true]);
+  });
+
+  for (const hasUI of [true, false]) {
+    it(`resolves at session start with one warning only when hasUI=${hasUI}`, async () => {
+      const restore = setPiVimSettingsReaderForTests(() => ({
+        cursorShape: { insert: "block", normal: "invalid" },
+      }));
+      const warnings: [string, string][] = [];
+      const pi = createExtensionApiHarness();
+      vim(pi);
+      let factory:
+        | ((...args: ConstructorParameters<typeof ModalEditor>) => ModalEditor)
+        | undefined;
+      try {
+        await pi.emit(
+          "session_start",
+          {},
+          {
+            cwd: ".",
+            hasUI,
+            ui: {
+              theme: stubTheme,
+              notify: (message: string, level: string) =>
+                warnings.push([message, level]),
+              setEditorComponent: (fn: NonNullable<typeof factory>) => {
+                factory = fn;
+              },
+            },
+          },
+        );
+        assert.ok(factory);
+        for (let i = 0; i < 2; i++) {
+          const tui = createCursorShapeTui();
+          const editor = factory(tui, stubTheme, stubKeybindings);
+          editor.focused = true;
+          editor.render(40);
+          editor.handleInput("\x1b");
+          editor.render(40);
+          assert.deepEqual(tui.terminalWrites, ["\x1b[1 q"]);
+        }
+        const expected = resolveCursorShapeSettings({
+          normal: "invalid",
+        }).warning;
+        assert.deepEqual(warnings, hasUI ? [[expected, "warning"]] : []);
+      } finally {
+        await pi.emit("session_shutdown", { reason: "quit" });
+        restore();
+      }
+    });
+  }
+});
 
 const SW_START = "\x1b[7m";
 const RESET = "\x1b[0m";

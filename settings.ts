@@ -7,6 +7,12 @@ export type ModeColorSettings = {
   ex?: string;
 };
 
+export type CursorShape = "block" | "underline" | "bar";
+export type CursorShapeSettings = {
+  insert: CursorShape;
+  normal: CursorShape;
+};
+
 export type ModeChangeSettings = {
   insert?: string;
   normal?: string;
@@ -37,6 +43,7 @@ export type PiVimSettings = {
   exCommand?: unknown;
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
+  cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
   // Per-mode paint policy for Pi's input border. Default: every mode "host".
   borderSync?: SurfaceSyncMap;
@@ -47,6 +54,11 @@ export type PiVimSettings = {
   // maps at their defaults; `true` → borderSync all "mode"; the never-released
   // `"inherit"` → both maps all "thinking".
   syncBorderColorWithMode?: BorderSyncMode;
+};
+
+export const DEFAULT_CURSOR_SHAPE_SETTINGS: CursorShapeSettings = {
+  insert: "bar",
+  normal: "block",
 };
 
 export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
@@ -184,6 +196,45 @@ export function resolveExCommandSettings(
   };
 }
 
+export function readPiVimCursorShapeSetting(g: unknown, p: unknown) {
+  // Visual-only, whole-setting override: absent/invalid project keys use
+  // defaults, not the global map (the same policy as modeColors).
+  const v = get(p, "cursorShape");
+  if (v !== M) return v;
+  const w = get(g, "cursorShape");
+  return w === M ? undefined : w;
+}
+
+export function resolveCursorShapeSettings(value: unknown): {
+  settings: CursorShapeSettings;
+  warning?: string;
+} {
+  const settings = { ...DEFAULT_CURSOR_SHAPE_SETTINGS };
+  if (value === undefined) return { settings };
+  if (!rec(value)) {
+    return {
+      settings,
+      warning: "Invalid piVim.cursorShape; expected an object.",
+    };
+  }
+  const invalid: string[] = [];
+  for (const key of MC) {
+    if (!Object.hasOwn(value, key)) continue;
+    const shape = value[key];
+    if (shape === "block" || shape === "underline" || shape === "bar") {
+      settings[key] = shape;
+    } else {
+      invalid.push(key);
+    }
+  }
+  return {
+    settings,
+    ...(invalid.length > 0 && {
+      warning: `Invalid piVim.cursorShape ${invalid.join(", ")}; expected block, underline, or bar.`,
+    }),
+  };
+}
+
 export function readPiVimModeColors(g: unknown, p: unknown) {
   const v = get(p, "modeColors");
   // Project settings are a whole-setting override. If a project checks in an
@@ -270,6 +321,7 @@ function disk(cwd: string): PiVimSettings {
     exCommand: readPiVimExCommandSetting(g, p),
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
+    cursorShape: readPiVimCursorShapeSetting(g, p),
     modeChange: readPiVimModeChange(g, p),
     borderSync: readPiVimBorderSync(g, p),
     labelSync: readPiVimLabelSync(g, p),

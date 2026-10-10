@@ -266,9 +266,14 @@ const THRESHOLDS = {
   // helper backend. README documents timeout, circuit and OSC52 boundaries.
   // Measured 60736 B packed / 238258 B unpacked / 18 files; budgets become
   // 61200 / 239000, leaving 464 B / 742 B headroom. No new dependency.
+  //
+  // 2026-10-10 — Configurable cursor shape (#55): whole-map setting validation,
+  // session-start wiring and DECSCUSR lookup plus the README reference. Measured
+  // 63882 B packed / 250632 B unpacked / 18 files. Budgets become 64300 /
+  // 251300, leaving 418 B / 668 B headroom; no new dependency or packed file.
   maxFiles: 18,
-  maxSize: 61200,
-  maxUnpackedSize: 239000,
+  maxSize: 64300,
+  maxUnpackedSize: 251300,
 } as const;
 
 function compareStrings(a: string, b: string): number {

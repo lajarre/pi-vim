@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   readPiVimBorderSync,
   readPiVimBorderSyncSetting,
   readPiVimClipboardMirrorSetting,
+  readPiVimCursorShapeSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
   readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
+  resolveCursorShapeSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -147,6 +150,117 @@ describe("piVim mode color settings reader", () => {
         { piVim: { modeColors: null } },
       ),
       undefined,
+    );
+  });
+});
+
+describe("piVim cursorShape settings", () => {
+  it("defaults to bar/block without sharing the defaults object", () => {
+    const result = resolveCursorShapeSettings(
+      readPiVimCursorShapeSetting(undefined, undefined),
+    );
+    assert.deepEqual(result, { settings: { insert: "bar", normal: "block" } });
+    assert.notEqual(result.settings, DEFAULT_CURSOR_SHAPE_SETTINGS);
+    assert.deepEqual(resolveCursorShapeSettings({}).settings, result.settings);
+  });
+
+  it("reads global values and accepts all three shapes for either mode", () => {
+    for (const shape of ["block", "underline", "bar"]) {
+      assert.deepEqual(
+        resolveCursorShapeSettings(
+          readPiVimCursorShapeSetting(
+            { piVim: { cursorShape: { insert: shape, normal: shape } } },
+            { piVim: {} },
+          ),
+        ),
+        { settings: { insert: shape, normal: shape } },
+      );
+    }
+  });
+
+  it("overrides the whole global map, defaulting missing project keys", () => {
+    assert.deepEqual(
+      resolveCursorShapeSettings(
+        readPiVimCursorShapeSetting(
+          { piVim: { cursorShape: { insert: "underline", normal: "bar" } } },
+          { piVim: { cursorShape: { insert: "block" } } },
+        ),
+      ),
+      { settings: { insert: "block", normal: "block" } },
+    );
+  });
+
+  it("does not fall back to globals for malformed project overrides", () => {
+    for (const value of [null, [], "block", 5, false]) {
+      const result = resolveCursorShapeSettings(
+        readPiVimCursorShapeSetting(
+          { piVim: { cursorShape: { insert: "underline", normal: "bar" } } },
+          { piVim: { cursorShape: value } },
+        ),
+      );
+      assert.deepEqual(result, {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+        warning: "Invalid piVim.cursorShape; expected an object.",
+      });
+    }
+    assert.equal(
+      readPiVimCursorShapeSetting(
+        { piVim: { cursorShape: {} } },
+        { piVim: null },
+      ),
+      null,
+    );
+  });
+
+  it("warns once for invalid keys and defaults only those keys", () => {
+    for (const invalid of [
+      "beam",
+      "BLOCK",
+      " bar ",
+      "",
+      null,
+      1,
+      true,
+      [],
+      {},
+    ]) {
+      assert.deepEqual(
+        resolveCursorShapeSettings({ insert: invalid, normal: "bar" }),
+        {
+          settings: { insert: "bar", normal: "bar" },
+          warning:
+            "Invalid piVim.cursorShape insert; expected block, underline, or bar.",
+        },
+      );
+      assert.deepEqual(
+        resolveCursorShapeSettings({ insert: "block", normal: invalid }),
+        {
+          settings: { insert: "block", normal: "block" },
+          warning:
+            "Invalid piVim.cursorShape normal; expected block, underline, or bar.",
+        },
+      );
+    }
+    assert.deepEqual(
+      resolveCursorShapeSettings({ insert: "invalid", normal: "invalid" }),
+      {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+        warning:
+          "Invalid piVim.cursorShape insert, normal; expected block, underline, or bar.",
+      },
+    );
+  });
+
+  it("ignores unknown mode keys instead of emitting terminal data", () => {
+    assert.deepEqual(
+      resolveCursorShapeSettings({ visual: "bar", ex: "underline" }),
+      {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+      },
+    );
+    assert.equal(
+      resolveCursorShapeSettings({ insert: "\x1b[0 q" }).settings.insert,
+      "bar",
     );
   });
 });

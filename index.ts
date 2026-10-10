@@ -21,14 +21,13 @@ import {
   resolveClipboardMirrorPolicy,
 } from "./clipboard-policy.js";
 import {
-  BLOCK_CURSOR_SHAPE,
+  CURSOR_SHAPE_SEQUENCES,
   type CursorShapeCleanup,
   type CursorShapeRuntime,
   type CursorShapeSequence,
   enableCursorShapeSupport,
   getCursorShapeRuntime,
   hasPromptCursorMarker,
-  INSERT_CURSOR_SHAPE,
   stripSoftwareCursorWhenHardwareCursorIsUsed,
 } from "./cursor-shape.js";
 import {
@@ -63,9 +62,12 @@ import {
   type WordMotionClass,
 } from "./motions.js";
 import {
+  type CursorShapeSettings,
+  DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
   readPiVimSettings,
+  resolveCursorShapeSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -312,6 +314,8 @@ export class ModalEditor extends CustomEditor {
   private labelTransform: ((s: string) => string) | null = null;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
+  private cursorShapeSettings: CursorShapeSettings =
+    DEFAULT_CURSOR_SHAPE_SETTINGS;
   private lastLineCache = { l: "", w: 0, label: "", result: "" };
 
   private unnamedRegister: string = "";
@@ -395,6 +399,9 @@ export class ModalEditor extends CustomEditor {
   }
   setCommandNamesFn(fn: () => ReadonlySet<string>): void {
     this.commandNamesFn = fn;
+  }
+  setCursorShapeSettings(settings: CursorShapeSettings): void {
+    this.cursorShapeSettings = { ...settings };
   }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
@@ -4064,9 +4071,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private getDesiredCursorShapeSequence(): CursorShapeSequence {
-    return "insert" === this.mode && this.pendingExCommand === null
-      ? INSERT_CURSOR_SHAPE
-      : BLOCK_CURSOR_SHAPE;
+    const mode =
+      this.mode === "insert" && this.pendingExCommand === null
+        ? "insert"
+        : "normal";
+    return CURSOR_SHAPE_SEQUENCES[this.cursorShapeSettings[mode]];
   }
 
   private syncCursorShapeForRender(lines: string[]): void {
@@ -4183,6 +4192,11 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
 
+    const cursorShape = resolveCursorShapeSettings(piVimSettings.cursorShape);
+    if (cursorShape.warning && ctx.hasUI) {
+      ctx.ui.notify(cursorShape.warning, "warning");
+    }
+
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
     const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
@@ -4215,6 +4229,7 @@ export default function (pi: ExtensionAPI) {
       editor.setQuitFn(() => ctx.shutdown());
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
+      editor.setCursorShapeSettings(cursorShape.settings);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.
