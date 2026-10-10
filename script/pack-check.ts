@@ -289,6 +289,10 @@ const THRESHOLDS = {
   // documents fallback and linewise paint boundaries. Measured 66525 B packed /
   // 259754 B unpacked / 18 files. Budgets become 67100 / 260400, leaving 575 B /
   // 646 B headroom. Regression/parity tests are not shipped; no new dependency.
+  //
+  // 2026-10-10: Document software-cursor contrast under reverse-video fallback.
+  // Measured 66555 B packed / 259850 B unpacked / 18 files. Limits remain
+  // 67100 / 260400, leaving 545 B / 550 B headroom.
   maxFiles: 18,
   maxSize: 67100,
   maxUnpackedSize: 260400,
