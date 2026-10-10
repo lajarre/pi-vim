@@ -39,14 +39,6 @@ export const NORMAL_KEYS: Record<string, PiEditorAction | null> = {
 // Character motion keys that wait for a target character
 export const CHAR_MOTION_KEYS = new Set<string>(["f", "F", "t", "T"]);
 
-// Escape sequences
-export const ESC_LEFT = "\x1b[D";
-export const ESC_RIGHT = "\x1b[C";
-export const CTRL_A = "\x01"; // line start
-export const CTRL_E = "\x05"; // line end
-export const CTRL_K = "\x0b"; // kill to end of line
+// Raw user-input aliases retained by the Vim undo/redo dispatcher.
 export const CTRL_R = "\x12"; // ctrl+r — readline redo trigger in vim layer
 export const CTRL_UNDERSCORE = "\x1f"; // ctrl+_ — readline undo
-export const NEWLINE = "\n"; // newline character
-export const ESC_UP = "\x1b[A"; // cursor up
-export const ESC_DOWN = "\x1b[B"; // cursor down
