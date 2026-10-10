@@ -519,7 +519,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
-| `ZZ` / `ZQ` | Normal-only: `ZZ` uses the safe `:q` prompt guard, `ZQ` forces quit; a prompt has nothing to write | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both also work from Visual |
+| `ZZ` / `ZQ` | Normal-only: `ZZ` uses the safe `:q` prompt guard, `ZQ` forces quit; a prompt has nothing to write | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both are Normal-mode commands |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
