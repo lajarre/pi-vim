@@ -7,6 +7,8 @@ export type ModeColorSettings = {
   ex?: string;
 };
 
+export type LabelPosition = "bottom-right" | "top-left";
+
 export type CursorShape = "block" | "underline" | "bar";
 export type CursorShapeSettings = {
   insert: CursorShape;
@@ -44,11 +46,12 @@ export type PiVimSettings = {
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
   historyNavigation?: boolean;
+  labelPosition?: unknown;
   cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
   // Per-mode paint policy for Pi's input border. Default: every mode "host".
   borderSync?: SurfaceSyncMap;
-  // Per-mode paint policy for pi-vim's footer mode label. Default: "mode".
+  // Per-mode paint policy for pi-vim's mode label. Default: "mode".
   labelSync?: SurfaceSyncMap;
   // Deprecated, never-released alias superseded by borderSync/labelSync; still
   // accepted and translated in `resolveSurfaceSyncMaps`. `false`/absent → both
@@ -197,6 +200,30 @@ export function resolveExCommandSettings(
   };
 }
 
+export function readPiVimLabelPositionSetting(g: unknown, p: unknown) {
+  // A present project value overrides global even when invalid, like modeColors.
+  const v = get(p, "labelPosition");
+  if (v !== M) return v;
+  const w = get(g, "labelPosition");
+  return w === M ? undefined : w;
+}
+
+export function resolveLabelPosition(value: unknown): {
+  position: LabelPosition;
+  warning?: string;
+} {
+  if (value === "bottom-right" || value === "top-left") {
+    return { position: value };
+  }
+  return {
+    position: "bottom-right",
+    ...(value !== undefined && {
+      warning:
+        "Invalid piVim.labelPosition; expected bottom-right or top-left.",
+    }),
+  };
+}
+
 export function readPiVimCursorShapeSetting(g: unknown, p: unknown) {
   // Visual-only, whole-setting override: absent/invalid project keys use
   // defaults, not the global map (the same policy as modeColors).
@@ -330,6 +357,7 @@ function disk(cwd: string): PiVimSettings {
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     historyNavigation: readPiVimHistoryNavigation(g, p),
+    labelPosition: readPiVimLabelPositionSetting(g, p),
     cursorShape: readPiVimCursorShapeSetting(g, p),
     modeChange: readPiVimModeChange(g, p),
     borderSync: readPiVimBorderSync(g, p),

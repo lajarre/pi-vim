@@ -313,9 +313,16 @@ const THRESHOLDS = {
   // Measured 69241 B packed / 268090 B unpacked / 19 files. Budgets become
   // 69700 / 268800 / 19, leaving 459 B / 710 B headroom. No new dependency or
   // shipped file; focused/parity tests and host/perf evidence are not packed.
+  //
+  // 2026-10-10: Configurable mode label position (#53), stacked on #51: setting validation,
+  // session wiring and a cached top-border overlay preserving scroll indicators
+  // and ANSI runs, plus the README reference. Measured 70835 B packed /
+  // 273357 B unpacked / 19 files. Budgets become 71400 / 274000, leaving
+  // 565 B / 643 B headroom. No runtime dependency or new packed file; render
+  // and settings tests plus benchmark scratch remain outside the package.
   maxFiles: 19,
-  maxSize: 69700,
-  maxUnpackedSize: 268800,
+  maxSize: 71400,
+  maxUnpackedSize: 274000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

@@ -28,7 +28,7 @@ Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. 
 
 ### and the comfort layer
 
-Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the footer always shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX`, and mode-colored borders and labels are one setting away — each mode choosing whether to paint its own color, show the host's border, or defer only while the host is thinking.
+Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the mode label shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX` (bottom-right by default, optionally top-left), and mode-colored borders and labels are one setting away — each mode choosing whether to paint its own color, show the host's border, or defer only while the host is thinking.
 
 ## 30-second quickstart
 
@@ -359,7 +359,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -376,6 +376,7 @@ Default-equivalent `settings.json`:
       "insert": "bar",
       "normal": "block"
     },
+    "labelPosition": "bottom-right",
     "modeColors": {
       "insert": "borderMuted",
       "normal": "borderAccent",
@@ -416,9 +417,32 @@ Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX in
 
 `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the non-empty composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
 
+### labelPosition
+
+`piVim.labelPosition` places the existing mode label without changing input behavior:
+
+| value | placement |
+|---|---|
+| `bottom-right` (default) | right end of the editor's last rendered row, unchanged from previous releases |
+| `top-left` | left end of the editor's top border, not the application header |
+
+```json
+{ "piVim": { "labelPosition": "top-left" } }
+```
+
+```text
+ NORMAL ─────────────────────────────────────
+█
+─────────────────────────────────────────────
+```
+
+Both positions use the same mode colors, `labelSync`, and pending-command feedback (for example, ` NORMAL d_ `). Narrow widths shorten the label without splitting graphemes. On the top border, hidden-line indicators take priority: the label uses the left border cells if it fits, otherwise the larger free edge (after the indicator when that has more room), shrinking or disappearing if necessary. Text rows, cursor placement, and visual-selection highlighting stay in place.
+
+Project settings replace the global value as a whole. Invalid values warn once at session start and fall back to `bottom-right`, not the global value. An absent project setting inherits global; absence at both levels keeps the default. This is an intentional non-Vim presentation setting, not Vim statusline emulation.
+
 ### borderSync and labelSync
 
-`borderSync` and `labelSync` set a per-mode paint policy for two surfaces: `borderSync` for Pi's input border, `labelSync` for the footer mode label. Each maps the mode keys `insert`, `normal`, `visual`, `ex` to one of three values:
+`borderSync` and `labelSync` set a per-mode paint policy for two surfaces: `borderSync` for Pi's input border, `labelSync` for the mode label at either position. Each maps the mode keys `insert`, `normal`, `visual`, `ex` to one of three values:
 
 | value | effect |
 |---|---|
@@ -475,7 +499,7 @@ Project settings replace the whole map, not individual global keys. Missing keys
 
 `piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
 
-`visual` colors both VISUAL and V-LINE (the footer label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
+`visual` colors both VISUAL and V-LINE (the mode label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
 
 Usual/safest tokens: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 

@@ -52,7 +52,7 @@ import {
   type ModeColorKey,
   resolveModeColors,
 } from "./mode-colors.js";
-import { fitModeLabel } from "./mode-label.js";
+import { fitModeLabel, layoutTopModeLabel } from "./mode-label.js";
 import {
   findCharMotionTarget,
   findFirstNonWhitespaceColumn,
@@ -70,9 +70,11 @@ import {
   DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
+  type LabelPosition,
   readPiVimSettings,
   resolveCursorShapeSettings,
   resolveExCommandSettings,
+  resolveLabelPosition,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "./settings.js";
@@ -246,6 +248,7 @@ type ModalEditorInternals = {
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 
 type ModalEditorOptions = {
+  labelPosition?: LabelPosition;
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
   // Per-mode paint policy for each surface. "mode" paints the mode color;
@@ -303,6 +306,7 @@ export class ModalEditor extends CustomEditor {
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private editorActionsAvailable: boolean | null = null;
+  private readonly labelPosition: LabelPosition;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
   private readonly offBorderColor: ((s: string) => string) | null;
@@ -323,7 +327,14 @@ export class ModalEditor extends CustomEditor {
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
   private cursorShapeSettings: CursorShapeSettings =
     DEFAULT_CURSOR_SHAPE_SETTINGS;
-  private lastLineCache = { l: "", w: 0, label: "", result: "" };
+  private lastLineCache = {
+    l: "",
+    w: 0,
+    raw: "",
+    label: "",
+    result: "",
+    top: { label: "", before: "", after: "" },
+  };
 
   private unnamedRegister: string = "";
   private preferRegisterForPut = false;
@@ -364,6 +375,7 @@ export class ModalEditor extends CustomEditor {
   ) {
     super(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
+    this.labelPosition = opts?.labelPosition ?? "bottom-right";
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
     this.offBorderColor = opts?.offBorderColor ?? null;
@@ -4313,24 +4325,34 @@ export class ModalEditor extends CustomEditor {
     }
     if (lines.length === 0) return lines;
 
-    const rawLabel = fitModeLabel(this.getModeLabel(), width);
+    const topLeft = this.labelPosition === "top-left";
+    const row = topLeft ? 0 : lines.length - 1;
+    const line = lines[row] ?? "";
+    const raw = this.getModeLabel();
+    const c = this.lastLineCache;
+    const changed = line !== c.l || width !== c.w || raw !== c.raw;
+    if (topLeft && changed) c.top = layoutTopModeLabel(line, width, raw);
+    const rawLabel = topLeft ? c.top.label : fitModeLabel(raw, width);
     const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;
-    const last = lines.length - 1;
-    const lastLine = lines[last];
-    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
-      const contentWidth = width - visibleWidth(rawLabel);
-      const c = this.lastLineCache;
-      if (lastLine !== c.l || contentWidth !== c.w || label !== c.label) {
-        c.l = lastLine;
-        c.w = contentWidth;
-        c.label = label;
-        c.result = truncateToWidth(lastLine, contentWidth, "") + label;
+    if (changed || label !== c.label) {
+      c.l = line;
+      c.w = width;
+      c.raw = raw;
+      c.label = label;
+      if (topLeft) {
+        c.result = c.top.label
+          ? c.top.before + label + c.top.after
+          : c.top.before;
+      } else {
+        // Keep the released last-row fallback/truncation byte-for-byte.
+        c.result =
+          line && visibleWidth(line) >= visibleWidth(rawLabel)
+            ? truncateToWidth(line, width - visibleWidth(rawLabel), "") + label
+            : label;
       }
-      lines[last] = c.result;
-    } else {
-      lines[last] = label;
     }
+    lines[row] = c.result;
     return lines;
   }
 
@@ -4402,6 +4424,11 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(cursorShape.warning, "warning");
     }
 
+    const labelPosition = resolveLabelPosition(piVimSettings.labelPosition);
+    if (labelPosition.warning && ctx.hasUI) {
+      ctx.ui.notify(labelPosition.warning, "warning");
+    }
+
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
     const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
@@ -4422,6 +4449,7 @@ export default function (pi: ExtensionAPI) {
     );
     ctx.ui.setEditorComponent((tui, theme, kb) => {
       const editor = new ModalEditor(tui, theme, kb, {
+        labelPosition: labelPosition.position,
         labelColorizers,
         borderColorizers,
         borderSync,
