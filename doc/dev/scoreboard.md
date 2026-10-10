@@ -31,19 +31,20 @@ silently-passing tests.
 | --- | ---: | ---: | ---: |
 | nvim parity char-find motions | 18 | 0 | 0 |
 | nvim parity dot repeat | 31 | 0 | 0 |
+| nvim parity editor actions with remapped Pi bindings + nvim parity editor actions with disabled Pi bindings | 56 | 0 | 0 |
 | nvim parity single-key edits and replace | 19 | 0 | 2 |
-| nvim parity line, buffer, and vertical motions | 26 | 0 | 6 |
+| nvim parity line, buffer, and vertical motions | 37 | 0 | 6 |
 | nvim parity linewise operators | 12 | 0 | 5 |
 | nvim parity Z-prefix cancellation + nvim parity mode switching | 17 | 0 | 0 |
 | nvim parity operators with motions | 41 | 0 | 0 |
-| nvim parity put + nvim parity joins | 18 | 0 | 1 |
+| nvim parity put + nvim parity joins | 19 | 0 | 1 |
 | nvim parity structural motions | 12 | 0 | 4 |
 | nvim parity text objects + nvim parity text object cursor after EOL deletion | 39 | 0 | 0 |
 | nvim parity with visual rendering between inputs | 8 | 0 | 0 |
 | nvim parity visual mode | 76 | 0 | 5 |
 | nvim parity word motions | 12 | 0 | 0 |
 | nvim parity smoke + nvim parity regressions | 8 | 0 | 0 |
-| **total** | **337** | **0** | **23** |
+| **total** | **405** | **0** | **23** |
 
 ### known gaps
 
@@ -94,7 +95,7 @@ knowingly differs from nvim; `README.md` explains the user-visible ones.
 ## unit tests
 
 `npm test` covers the pure modules and `ModalEditor`'s observable behavior:
-**1,138 pass, 0 fail, 0 skip**.
+**1,307 pass, 0 fail, 0 skip**.
 
 The EX-to-Pi command bridge has no parity suite by design — it is a Pi
 integration surface, not a vim motion, so nvim has nothing to say about it.
@@ -113,14 +114,15 @@ so the last two rows share almost all of their work.
 
 | stage | median | min–max |
 | --- | ---: | ---: |
-| node runtime only | 69.8 ms | 68.0–71.4 ms |
-| Pi host import | 572.4 ms | 563.1–581.5 ms |
-| + pi-vim import | 595.1 ms | 591.0–598.8 ms |
+| node runtime only | 70.8 ms | 69.2–74.6 ms |
+| Pi host import | 571.4 ms | 567.4–602.2 ms |
+| + pi-vim import | 601.8 ms | 595.9–609.1 ms |
 
-Subtracting those two medians gives **22.6 ms** for pi-vim's own share, above
-the host import's 18.4 ms run-to-run spread. The extension import is still
-measured second, on caches the host import warmed, so read it as a lower
-bound; on a loaded machine the same subtraction has come out negative.
+Subtracting those two medians gives **30.5 ms** for pi-vim's own share, but
+the host import's own run-to-run spread is **34.8 ms** — wider than the gap
+itself — and the extension import is measured second, on caches the host
+import warmed. Treat it as an upper bound rather than a measurement; on a
+loaded machine the same subtraction comes out negative.
 
 ### memory
 
@@ -128,12 +130,12 @@ Median `heapUsed` right after import, over 5 runs with gc forced.
 
 | stage | median heap | min–max |
 | --- | ---: | ---: |
-| Pi host import | 45878.4 KiB | 45868.4–45878.5 KiB |
-| + pi-vim import | 48829.3 KiB | 48821.8–48829.3 KiB |
-| **pi-vim's own heap** | **2950.8 KiB** | — |
+| Pi host import | 45971.6 KiB | 45971.5–45972.4 KiB |
+| + pi-vim import | 48939.3 KiB | 48939.1–48940.1 KiB |
+| **pi-vim's own heap** | **2967.7 KiB** | — |
 
-Unlike startup, this difference is resolvable: it is 292× the widest
-run-to-run spread of either row (10.1 KiB).
+Unlike startup, this difference is resolvable: it is 2793× the widest
+run-to-run spread of either row (1.1 KiB).
 
 ### responsiveness
 
@@ -142,28 +144,28 @@ row times every key of the command, count digits included.
 
 | operation | per | median | p95 |
 | --- | --- | ---: | ---: |
-| `h` one column left, on a 4k-column line | keystroke | 418.21 µs | 418.48 µs |
-| an unbound printable key in normal mode (no-op) | keystroke | 0.65 µs | 0.65 µs |
-| `10w` across a 400-word line | command | 33.75 µs | 34.30 µs |
-| `3fX` across a 600-column line | command | 35.39 µs | 36.83 µs |
-| `200j` down a 320-line buffer | command | 2.63 µs | 2.71 µs |
-| `50p` char-wise put of a yanked word | command | 2017.29 µs | 2028.12 µs |
-| `w` on a 20-word line | keystroke | 1.07 µs | 1.09 µs |
-| `b` on a 20-word line | keystroke | 1.07 µs | 1.11 µs |
-| `w` on a 50-word line | keystroke | 1.18 µs | 1.25 µs |
-| `b` on a 50-word line | keystroke | 1.24 µs | 1.30 µs |
-| `w` on a 100-word line | keystroke | 1.55 µs | 1.57 µs |
-| `b` on a 100-word line | keystroke | 1.61 µs | 1.61 µs |
-| `w` on a 200-word line | keystroke | 2.41 µs | 2.46 µs |
-| `b` on a 200-word line | keystroke | 2.59 µs | 2.60 µs |
-| `w` on a 400-word line | keystroke | 4.45 µs | 4.46 µs |
-| `b` on a 400-word line | keystroke | 4.51 µs | 4.54 µs |
-| `dw` on a 400-word line | command | 7.93 µs | 7.99 µs |
-| `yw` on a 400-word line | command | 3.84 µs | 3.93 µs |
+| `h` one column left, on a 4k-column line | keystroke | 410.18 µs | 410.56 µs |
+| an unbound printable key in normal mode (no-op) | keystroke | 0.64 µs | 0.66 µs |
+| `10w` across a 400-word line | command | 33.56 µs | 34.08 µs |
+| `3fX` across a 600-column line | command | 40.13 µs | 41.49 µs |
+| `200j` down a 320-line buffer | command | 2.69 µs | 2.72 µs |
+| `50p` char-wise put of a yanked word | command | 175.69 µs | 176.81 µs |
+| `w` on a 20-word line | keystroke | 0.97 µs | 1.01 µs |
+| `b` on a 20-word line | keystroke | 1.03 µs | 1.12 µs |
+| `w` on a 50-word line | keystroke | 1.15 µs | 1.24 µs |
+| `b` on a 50-word line | keystroke | 1.29 µs | 1.37 µs |
+| `w` on a 100-word line | keystroke | 1.50 µs | 1.50 µs |
+| `b` on a 100-word line | keystroke | 1.67 µs | 1.68 µs |
+| `w` on a 200-word line | keystroke | 2.32 µs | 2.37 µs |
+| `b` on a 200-word line | keystroke | 2.62 µs | 2.65 µs |
+| `w` on a 400-word line | keystroke | 4.24 µs | 4.34 µs |
+| `b` on a 400-word line | keystroke | 4.61 µs | 4.63 µs |
+| `dw` on a 400-word line | command | 7.97 µs | 8.03 µs |
+| `yw` on a 400-word line | command | 3.83 µs | 3.90 µs |
 
 The costliest single keystroke is `h` one column left, on a 4k-column line, at
-418 µs; the costliest whole command is `50p` char-wise put of a yanked word,
-at 2017 µs. Both scale with the text they walk — the `w` and `b` ladders from
+410 µs; the costliest whole command is `50p` char-wise put of a yanked word,
+at 176 µs. Both scale with the text they walk — the `w` and `b` ladders from
 20 to 400 words isolate that scaling.
 
 ## published footprint
@@ -174,9 +176,9 @@ code and `README.md` count.
 
 | measure | actual | budget | headroom |
 | --- | ---: | ---: | ---: |
-| files | 18 | 18 | 0 |
-| packed size | 68,320 B | 68,600 B | 280 B |
-| unpacked size | 265,682 B | 266,400 B | 718 B |
+| files | 19 | 19 | 0 |
+| packed size | 71,011 B | 71,600 B | 589 B |
+| unpacked size | 273,919 B | 274,600 B | 681 B |
 
 ## reproducing this
 
