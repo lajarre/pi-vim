@@ -119,3 +119,57 @@ so the base checkout must live inside this one (here under the git-ignored
 `.tmp/`) to reuse its installed peers. A sibling checkout would need its own
 `npm ci` instead. Each run prints JSON; compare the `stats.median` of matching
 operations. Absolute numbers move with the machine; the deltas above reproduce.
+
+## clipboard runtime probe — 2026-10-14
+
+`canSpawnJavaScriptHelper()` runs before clipboard reads/writes. Before this
+change (`3629754`), each call created a `require` and re-resolved `node:sea`.
+The implementation in this commit memoizes the process-constant default
+result, including `false`; explicit test overrides bypass the cache and cannot
+poison it. No clipboard process, native backend or editor work is timed here.
+
+Node v24.15.0, darwin-arm64; three rounds, ordered before/after, after/before,
+before/after. Each fresh process makes one separately timed first probe,
+10,000 warmups, then 30 batches of 20,000 probes. Results below are the median
+of the three run medians and p95s in µs/call (batch averages, not latency tails).
+
+| probe | before median | before p95 | after median | after p95 |
+| --- | ---: | ---: | ---: | ---: |
+| repeated default runtime detection | 2.371165 | 2.464360 | 0.005400 | 0.026496 |
+
+Median first-probe time: 106.416 µs before, 104.875 µs after. The default probe
+still pays the initial builtin lookup; this result is about repeated work, not
+a claim of faster cold startup or OS clipboard completion. Tests count one
+SEA probe across repeated default calls for both ordinary Node and simulated
+SEA, while injected probes run every time. Bun and missing-API fallback tests
+remain in place.
+
+Reproduce without installing dependencies or switching branches:
+
+```sh
+mkdir -p .tmp/runtime-before
+git archive 3629754 clipboard-platform.ts | tar -xf - -C .tmp/runtime-before
+# Run once with PIVIM_ENTRY=.tmp/runtime-before/clipboard-platform.ts,
+# then with PIVIM_ENTRY=clipboard-platform.ts; alternate for three rounds.
+PIVIM_ENTRY=clipboard-platform.ts node --import tsx/esm --input-type=module <<'JS'
+import { performance } from 'node:perf_hooks';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const { canSpawnJavaScriptHelper: probe } = await import(
+  pathToFileURL(resolve(process.env.PIVIM_ENTRY)).href
+);
+let consumed = 0;
+const firstStart = performance.now();
+consumed += Number(probe());
+const firstUs = (performance.now() - firstStart) * 1000;
+for (let i = 0; i < 10000; i++) consumed += Number(probe());
+const samples = [];
+for (let sample = 0; sample < 30; sample++) {
+  const start = performance.now();
+  for (let i = 0; i < 20000; i++) consumed += Number(probe());
+  samples.push((performance.now() - start) * 1000 / 20000);
+}
+const sorted = [...samples].sort((a, b) => a - b);
+console.log({ firstUs, median: sorted[14], p95: sorted[27], samples, consumed });
+JS
+```

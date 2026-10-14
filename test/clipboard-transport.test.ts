@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import {
   buildClipboardWriteHelperSource,
@@ -340,6 +341,36 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
 });
 
 describe("clipboard runtime detection", () => {
+  for (const isSea of [false, true]) {
+    it(`memoizes default runtime detection (SEA=${isSea}) without caching overrides`, async (t) => {
+      const sea = createRequire(import.meta.url)("node:sea") as {
+        isSea(): boolean;
+      };
+      const probe = t.mock.method(sea, "isSea", () => isSea);
+      const url = new URL("../clipboard-platform.ts", import.meta.url);
+      url.searchParams.set("runtime-case", String(isSea));
+      const fresh = (await import(
+        url.href
+      )) as typeof import("../clipboard-platform.js");
+      for (let i = 0; i < 3; i++)
+        assert.equal(fresh.canSpawnJavaScriptHelper(), !isSea);
+      assert.equal(probe.mock.callCount(), 1);
+      let overrides = 0;
+      for (let i = 0; i < 2; i++) {
+        assert.equal(
+          fresh.canSpawnJavaScriptHelper({}, () => {
+            overrides++;
+            return { isSea: () => !isSea };
+          }),
+          isSea,
+        );
+      }
+      assert.equal(overrides, 2, "injected probes remain independent");
+      assert.equal(fresh.canSpawnJavaScriptHelper(), !isSea);
+      assert.equal(probe.mock.callCount(), 1);
+    });
+  }
+
   it("uses documented node:sea.isSea without process.features flags", () => {
     let checks = 0;
     assert.equal(

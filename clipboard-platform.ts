@@ -90,7 +90,20 @@ export function readClipboardCommands(
   return null;
 }
 
+let processCanSpawnHelper: boolean | undefined;
+
 export function canSpawnJavaScriptHelper(
+  versions?: { bun?: string },
+  loadSea?: () => { isSea?: () => boolean } | undefined,
+): boolean {
+  // Runtime identity cannot change, but injected test probes must stay isolated.
+  if (versions !== undefined || loadSea !== undefined)
+    return detectJavaScriptHelper(versions, loadSea);
+  processCanSpawnHelper ??= detectJavaScriptHelper();
+  return processCanSpawnHelper;
+}
+
+function detectJavaScriptHelper(
   versions: { bun?: string } = process.versions as { bun?: string },
   loadSea: () => { isSea?: () => boolean } | undefined = () =>
     createRequire(import.meta.url)("node:sea"),
