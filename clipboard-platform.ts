@@ -45,14 +45,20 @@ export function getClipboardReadCommands(
       { command: "pwsh.exe", args },
     ];
   }
-  if (env.TERMUX_VERSION) {
-    return [{ command: "termux-clipboard-get", args: [] }];
-  }
-  return [
-    { command: "wl-paste", args: ["--no-newline", "--type", "text"] },
-    { command: "xclip", args: ["-selection", "clipboard", "-out"] },
-    { command: "xsel", args: ["--clipboard", "--output"] },
-  ];
+  const commands: ClipboardReadCommand[] = [];
+  if (env.TERMUX_VERSION)
+    commands.push({ command: "termux-clipboard-get", args: [] });
+  if (env.WAYLAND_DISPLAY)
+    commands.push({
+      command: "wl-paste",
+      args: ["--no-newline", "--type", "text"],
+    });
+  if (env.DISPLAY)
+    commands.push(
+      { command: "xclip", args: ["-selection", "clipboard", "-out"] },
+      { command: "xsel", args: ["--clipboard", "--output"] },
+    );
+  return commands;
 }
 
 export function readClipboardCommands(

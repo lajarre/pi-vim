@@ -18,11 +18,52 @@ const success = (stdout: string) => ({ status: 0, signal: null, stdout });
 const failure = () => ({ status: 1, signal: null, stdout: "untrusted" });
 const standalone = {
   canSpawnHelper: () => false,
-  env: {},
+  env: { WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" },
   now: () => 0,
 } satisfies ClipboardReadOptions;
 
 describe("clipboard transport reads (isolated; no host clipboard)", () => {
+  for (const [env, commands] of [
+    [{}, []],
+    [{ WAYLAND_DISPLAY: "", DISPLAY: "" }, []],
+    [{ WAYLAND_DISPLAY: "wayland-0" }, ["wl-paste"]],
+    [{ DISPLAY: ":0" }, ["xclip", "xsel"]],
+    [
+      { WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" },
+      ["wl-paste", "xclip", "xsel"],
+    ],
+    [{ TERMUX_VERSION: "1" }, ["termux-clipboard-get"]],
+    [
+      { TERMUX_VERSION: "1", WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" },
+      ["termux-clipboard-get", "wl-paste", "xclip", "xsel"],
+    ],
+  ] as const) {
+    it(`gates Linux reads by the display environment ${JSON.stringify(env)}`, () => {
+      assert.deepEqual(
+        getClipboardReadCommands("linux", env).map((c) => c.command),
+        commands,
+      );
+      const calls: string[] = [];
+      assert.equal(
+        readClipboardInChildProcess({
+          ...standalone,
+          platform: "linux",
+          env,
+          run: (command) => {
+            calls.push(command);
+            return failure();
+          },
+        }),
+        null,
+      );
+      assert.deepEqual(
+        calls,
+        commands,
+        "headless reads must not spawn even once",
+      );
+    });
+  }
+
   for (const platform of ["linux", "win32"] as const) {
     it(`${platform} fallback commands share a monotonic 750ms budget`, () => {
       let elapsed = 12_000;
@@ -46,7 +87,9 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
       );
       assert.deepEqual(
         commands,
-        getClipboardReadCommands(platform, {}).map((c) => c.command),
+        getClipboardReadCommands(platform, standalone.env).map(
+          (c) => c.command,
+        ),
       );
     });
 
@@ -177,7 +220,7 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
     }
   }
 
-  it("X11 tries xclip then xsel after unavailable Wayland", () => {
+  it("X11 tries xclip then xsel without spawning Wayland", () => {
     const calls: string[] = [];
     assert.equal(
       readClipboardInChildProcess({
@@ -193,7 +236,7 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
       }),
       "X11",
     );
-    assert.deepEqual(calls, ["wl-paste", "xclip", "xsel"]);
+    assert.deepEqual(calls, ["xclip", "xsel"]);
   });
 
   it("both PowerShell candidates explicitly emit non-ASCII text as BOM-free UTF-8", () => {
@@ -263,34 +306,37 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
     );
   });
 
-  it("read deadline failure preserves unnamed shadow, cursor, mode and undo", async () => {
-    const { editor, clipboardWrites } = createEditorWithSpy("foo bar");
-    sendKeys(editor, ["y", "w"]);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    let elapsed = 0;
-    let attempts = 0;
-    editor.setClipboardReadFn(() =>
-      readClipboardInChildProcess({
-        ...standalone,
-        platform: "linux",
-        now: () => elapsed,
-        run: () => {
-          attempts++;
-          elapsed += 750;
-          throw new Error("backend hung");
-        },
-      }),
-    );
-    sendKeys(editor, ["p"]);
-    assert.equal(attempts, 1);
-    assert.equal(editor.getText(), "ffoo oo bar");
-    assert.equal(editor.getRegister(), "foo ");
-    assert.equal(editor.getMode(), "normal");
-    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
-    assert.deepEqual(clipboardWrites, ["foo "]);
-    sendKeys(editor, ["u"]);
-    assert.equal(editor.getText(), "foo bar");
-  });
+  for (const hasDisplay of [true, false]) {
+    it(`failed read preserves unnamed shadow, cursor, mode and undo (display=${hasDisplay})`, async () => {
+      const { editor, clipboardWrites } = createEditorWithSpy("foo bar");
+      sendKeys(editor, ["y", "w"]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      let elapsed = 0;
+      let attempts = 0;
+      editor.setClipboardReadFn(() =>
+        readClipboardInChildProcess({
+          ...standalone,
+          platform: "linux",
+          env: hasDisplay ? standalone.env : {},
+          now: () => elapsed,
+          run: () => {
+            attempts++;
+            elapsed += 750;
+            throw new Error("backend hung");
+          },
+        }),
+      );
+      sendKeys(editor, ["p"]);
+      assert.equal(attempts, hasDisplay ? 1 : 0);
+      assert.equal(editor.getText(), "ffoo oo bar");
+      assert.equal(editor.getRegister(), "foo ");
+      assert.equal(editor.getMode(), "normal");
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+      assert.deepEqual(clipboardWrites, ["foo "]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "foo bar");
+    });
+  }
 });
 
 describe("clipboard runtime detection", () => {
