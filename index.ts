@@ -74,6 +74,7 @@ import {
   readPiVimSettings,
   resolveCursorShapeSettings,
   resolveExCommandSettings,
+  resolveHistoryNavigation,
   resolveLabelPosition,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -4440,6 +4441,13 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
 
+    const historyNavigation = resolveHistoryNavigation(
+      piVimSettings.historyNavigation,
+    );
+    if (historyNavigation.warning && ctx.hasUI) {
+      ctx.ui.notify(historyNavigation.warning, "warning");
+    }
+
     const cursorShape = resolveCursorShapeSettings(piVimSettings.cursorShape);
     if (cursorShape.warning && ctx.hasUI) {
       ctx.ui.notify(cursorShape.warning, "warning");
@@ -4495,7 +4503,7 @@ export default function (pi: ExtensionAPI) {
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
       editor.setCursorShapeSettings(cursorShape.settings);
-      editor.setHistoryNavigation(piVimSettings.historyNavigation ?? true);
+      editor.setHistoryNavigation(historyNavigation.enabled);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.

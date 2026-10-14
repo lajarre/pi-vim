@@ -47,18 +47,18 @@ describe("piVim history navigation settings reader", () => {
     }
   });
 
-  it("defaults invalid values without falling back to global", () => {
+  it("preserves invalid values for warnings without falling back to global", () => {
     for (const value of [null, "false", 0, [], {}]) {
       assert.equal(
         readPiVimHistoryNavigation({ piVim: { historyNavigation: value } }, {}),
-        undefined,
+        value,
       );
       assert.equal(
         readPiVimHistoryNavigation(
           { piVim: { historyNavigation: false } },
           { piVim: { historyNavigation: value } },
         ),
-        undefined,
+        value,
       );
     }
     for (const value of [null, "false", 0, []]) {
@@ -67,7 +67,7 @@ describe("piVim history navigation settings reader", () => {
           { piVim: { historyNavigation: false } },
           { piVim: value },
         ),
-        undefined,
+        value,
       );
     }
   });

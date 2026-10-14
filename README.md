@@ -405,7 +405,7 @@ Default-equivalent `settings.json`:
 
 ### historyNavigation
 
-`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On logical line zero, `k` recalls an older prompt only when the buffer is empty or history browsing is already active. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest returns to the draft (empty when browsing began with `k`). `false` keeps both keys buffer-local. Project settings can override global in either direction; invalid values use the default rather than the global value.
+`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On logical line zero, `k` recalls an older prompt only when the buffer is empty or history browsing is already active. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest returns to the draft (empty when browsing began with `k`). `false` keeps both keys buffer-local. Project settings can override global in either direction; non-boolean values use the default rather than the global value and show a warning at session start when a UI is available.
 
 Unlike zsh vi-mode, a non-empty, non-browsing draft is never replaced: `k` / `j` at its edges remain no-ops. This retains Pi 0.78's draft protection even on newer hosts. Edges are logical lines, not wrapped screen rows. After recall the cursor lands on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Insert-mode arrows retain Pi's own version-dependent behavior.
 

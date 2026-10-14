@@ -45,7 +45,7 @@ export type PiVimSettings = {
   exCommand?: unknown;
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
-  historyNavigation?: boolean;
+  historyNavigation?: unknown;
   labelPosition?: unknown;
   cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
@@ -277,7 +277,20 @@ export function readPiVimHistoryNavigation(g: unknown, p: unknown) {
   // No capability grant: project settings override global, even if invalid.
   const v = get(p, "historyNavigation");
   const value = v === M ? get(g, "historyNavigation") : v;
-  return typeof value === "boolean" ? value : undefined;
+  return value === M ? undefined : value;
+}
+
+export function resolveHistoryNavigation(value: unknown): {
+  enabled: boolean;
+  warning?: string;
+} {
+  if (typeof value === "boolean") return { enabled: value };
+  return {
+    enabled: true,
+    ...(value !== undefined && {
+      warning: "Invalid piVim.historyNavigation; expected a boolean.",
+    }),
+  };
 }
 
 export function readPiVimModeChange(g: unknown, p: unknown) {
