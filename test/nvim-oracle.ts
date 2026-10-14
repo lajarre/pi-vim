@@ -1,3 +1,10 @@
+/**
+ * The oracle defaults to nvim_feedkeys(..., 'x'): mapped input. Its undo
+ * grouping can differ from typed input around dot-repeat (2P.u can retain
+ * four copies instead of two). Opt into 'xt' with typedInput for checkpoints
+ * that must observe each typed undo boundary; do not silently change all
+ * existing cases. Always compare text, cursor, mode and the unnamed register.
+ */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { ModalEditor } from "../index.js";
@@ -24,6 +31,8 @@ export type NvimParityCase = {
   name: string;
   initial: NvimParityInitialState;
   keys: string[];
+  /** Preserve typed-key undo boundaries for scenarios that include dot. */
+  typedInput?: boolean;
   /** Exercise paint between inputs; the oracle still compares semantic state. */
   renderWidths?: readonly number[];
 };
@@ -87,7 +96,7 @@ const NVIM_DRIVER_LUA = [
   "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
   "local keys = table.concat(input.keys, '')",
   "local term = vim.api.nvim_replace_termcodes(keys, true, false, true)",
-  "vim.api.nvim_feedkeys(term, 'x', false)",
+  "vim.api.nvim_feedkeys(term, input.typedInput and 'xt' or 'x', false)",
   "local out_lines = vim.api.nvim_buf_get_lines(0, 0, -1, true)",
   "local cursor = vim.api.nvim_win_get_cursor(0)",
   "local snapshot = { text = table.concat(out_lines, '\\n'), cursor = { line = cursor[1] - 1, col = cursor[2] }, mode = vim.api.nvim_get_mode().mode, register = vim.fn.getreg('\"') }",
@@ -203,6 +212,7 @@ export async function runNvimParityCase(
     mode: testCase.initial.mode ?? "normal",
     register: testCase.initial.register ?? "",
     keys: testCase.keys.map(toNvimKey),
+    typedInput: testCase.typedInput ?? false,
   };
 
   const child = spawn(

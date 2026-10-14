@@ -86,10 +86,14 @@ const CASES: NvimParityCase[] = [
     ["2", "P", "."],
     ["2", "P", "u"],
     ["2", "P", "9", "u"],
+    ["2", "P", ".", "u"],
+    ["2", "P", ".", "u", "u"],
+    ["2", "P", ".", "u", "u", "\x12"],
     ["2", "P", ".", "u", "u", "9", "\x12"],
   ].map(
     (keys): NvimParityCase => ({
       name: `multiline put history ${JSON.stringify(keys)}`,
+      typedInput: keys.includes(".") && keys.includes("u"),
       initial: {
         text: "ab\ncd",
         cursor: { line: 0, col: 0 },
