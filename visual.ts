@@ -19,6 +19,29 @@ export type VisualLayoutLine = {
 };
 
 export type VisualRenderSpan = { start: number; end: number };
+export type VisualRenderRange = {
+  start: VisualPosition;
+  end: VisualPosition;
+  endColExclusive: number;
+};
+
+/** Resolve the inclusive end grapheme once, not once per wrapped row. */
+export function prepareVisualRenderRange(
+  mode: VisualMode,
+  anchor: VisualPosition,
+  cursor: VisualPosition,
+  lines: string[],
+): VisualRenderRange {
+  const { start, end } = orderVisualEndpoints(anchor, cursor);
+  return {
+    start,
+    end,
+    endColExclusive:
+      mode === "visual"
+        ? getInclusiveEndColumn(lines[end.line] ?? "", end.col)
+        : 0,
+  };
+}
 
 export function isVisualMode(mode: Mode): mode is VisualMode {
   return mode === "visual" || mode === "visual-line";
@@ -85,26 +108,23 @@ export function getVisualRenderSpan(
   cursor: VisualPosition,
   lines: string[],
   layoutLine: VisualLayoutLine,
+  range = prepareVisualRenderRange(mode, anchor, cursor, lines),
 ): VisualRenderSpan | null {
   const { logicalLine, startCol, length } = layoutLine;
   const line = lines[logicalLine] ?? "";
   const segmentEnd = startCol + length;
   const isLastSegment = segmentEnd >= line.length;
 
+  const { start, end, endColExclusive } = range;
   if (mode === "visual-line") {
-    const { startLine, endLine } = getVisualLineRange(anchor, cursor);
-    if (logicalLine < startLine || logicalLine > endLine) return null;
+    if (logicalLine < start.line || logicalLine > end.line) return null;
     return { start: 0, end: length + (isLastSegment ? 1 : 0) };
   }
 
-  const { start, end } = orderVisualEndpoints(anchor, cursor);
   if (logicalLine < start.line || logicalLine > end.line) return null;
 
   const selectionStart = logicalLine === start.line ? start.col : 0;
-  const selectionEnd =
-    logicalLine === end.line
-      ? getInclusiveEndColumn(line, end.col)
-      : line.length;
+  const selectionEnd = logicalLine === end.line ? endColExclusive : line.length;
   const intersectionStart = Math.max(selectionStart, startCol);
   const intersectionEnd = Math.min(selectionEnd, segmentEnd);
   const includesEol =
@@ -134,7 +154,8 @@ export function getVisualRenderSpan(
 
 const CURSOR_MARKER = "\x1b_pi:c\x07";
 const CSI_PATTERN = new RegExp(
-  `^${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+  `${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
+  "y",
 );
 
 function rawIndexAtTextOffset(line: string, target: number): number {
@@ -145,7 +166,8 @@ function rawIndexAtTextOffset(line: string, target: number): number {
       raw += CURSOR_MARKER.length;
       continue;
     }
-    const ansi = line.slice(raw).match(CSI_PATTERN)?.[0];
+    CSI_PATTERN.lastIndex = raw;
+    const ansi = CSI_PATTERN.exec(line)?.[0];
     if (ansi) {
       raw += ansi.length;
       continue;

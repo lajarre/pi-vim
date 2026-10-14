@@ -184,6 +184,42 @@ describe("visual selection render integration", () => {
     }
   });
 
+  for (const size of [4096, 16384]) {
+    it(`segments the selection end once per frame on a ${size}-unit wrapped line`, (t) => {
+      const text = "x".repeat(size);
+      const { editor, writes } = editorFor(text);
+      editor.handleInput("v");
+      const before = snapshot(editor);
+      const segment = Intl.Segmenter.prototype.segment;
+      let calls = 0;
+      t.mock.method(
+        Intl.Segmenter.prototype,
+        "segment",
+        function (this: Intl.Segmenter, input: string) {
+          if (
+            input === text &&
+            new Error().stack?.includes("getInclusiveEndColumn")
+          )
+            calls++;
+          return segment.call(this, input);
+        },
+      );
+      for (const width of [80, 40, 80]) {
+        calls = 0;
+        const rows = editor.render(width);
+        assert.ok(rows.length > 4);
+        assert.equal(
+          calls,
+          1,
+          "wrapped rows must share one prepared selection",
+        );
+        assert.equal(rows.slice(1, -1).map(selected).join(""), "x");
+        assert.deepEqual(snapshot(editor), before);
+        assert.deepEqual(writes, []);
+      }
+    });
+  }
+
   it("does no selection work in insert or normal mode", () => {
     const { editor } = editorFor("abc");
     Object.defineProperty(editor, "renderVisualSelection", {

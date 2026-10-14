@@ -107,6 +107,7 @@ import {
   highlightRenderedTextRange,
   isVisualMode,
   orderVisualEndpoints,
+  prepareVisualRenderRange,
   type VisualLayoutLine,
   type VisualMode,
   type VisualPosition,
@@ -4295,6 +4296,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    const range = prepareVisualRenderRange(mode, anchor, cursor, bufferLines);
     for (let index = 0; index < visibleLines.length; index++) {
       const layoutLine = visibleLines[index];
       // Host render output row 0 is the top border; visible text rows start
@@ -4308,6 +4310,7 @@ export class ModalEditor extends CustomEditor {
         cursor,
         bufferLines,
         layoutLine,
+        range,
       );
       if (!span) continue;
       lines[renderedIndex] = highlightRenderedTextRange(
