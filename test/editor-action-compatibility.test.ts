@@ -147,18 +147,10 @@ describe("editor action compatibility preflight", () => {
         assert.deepEqual(submits, ["abc"]);
         assert.equal(editor.getText(), "");
 
-        const moreInput = [
-          "\x1b",
-          "text",
-          "\r",
-          "/reload",
-          "\r",
-          "/quit",
-          "\r",
-        ];
+        const moreInput = ["\x1b", "jk", "\r", "/reload", "\r", "/quit", "\r"];
         for (const data of moreInput) editor.handleInput(data);
         assert.deepEqual(forwarded, ["a", "b", "c", "\r", ...moreInput]);
-        assert.deepEqual(submits, ["abc", "text", "/reload", "/quit"]);
+        assert.deepEqual(submits, ["abc", "jk", "/reload", "/quit"]);
         assert.equal(editor.getText(), "");
         assert.equal(notifications.length, 1);
         assert.equal(editor.getRegister(), "register\n");

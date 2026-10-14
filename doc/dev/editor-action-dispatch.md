@@ -105,31 +105,34 @@ bypassing the binding layer. Pi-vim's own undo windows still collapse each Vim
 change to one host snapshot. Existing undo cursor differences for `o`/linewise
 `p` are explicitly asserted in the focused history tests, not silently normalized.
 
-Three alternating base/head rounds of the existing five-operation benchmark,
-eight samples per run. Base `4811b14` (the intake tip); head `935cf8e` (all runtime
-fixes, before the degraded-mode follow-up). Node v24.15.0, darwin-arm64, installed
-peers 0.78.0. Values below are the
-median of the three per-run medians and the median of the three per-run p95s;
-these are sampled microbenchmarks, not interactive end-to-end latency.
+Remeasured on 2026-10-31: three alternating base/head rounds of the existing
+five-operation benchmark, eight samples per run. Base `21e4a3e` (clipboard
+integration); head `10b9ae4` (action integration, before the degraded-mode
+follow-up). Node v24.15.0, darwin-arm64, installed peers 0.78.0. Values below
+are the median of the three per-run medians and the median of the three
+per-run p95s; these are sampled microbenchmarks, not interactive end-to-end
+latency. Cursor, quit and visual changes are also present at head; this is an
+integration comparison, not an isolated action-adapter profile.
 
 | operation | base median µs | head median µs | base p95 µs | head p95 µs |
 | --- | ---: | ---: | ---: | ---: |
-| `noop_key` | 0.642 | 0.637 | 0.765 | 0.767 |
-| `motion_h_4k` | 425.698 | 418.594 | 429.155 | 423.988 |
-| `motion_w_50` | 1.443 | 1.391 | 1.718 | 1.688 |
-| `insert_type` | 8.816 | 9.179 | 9.007 | 9.552 |
-| `insert_edit` | 12.879 | 13.080 | 13.362 | 13.626 |
+| `noop_key` | 0.657 | 0.673 | 0.785 | 0.784 |
+| `motion_h_4k` | 437.097 | 429.958 | 437.705 | 433.051 |
+| `motion_w_50` | 1.486 | 1.383 | 1.702 | 1.722 |
+| `insert_type` | 9.295 | 8.943 | 9.884 | 9.328 |
+| `insert_edit` | 13.533 | 13.500 | 14.450 | 14.219 |
 
-Insert medians increased by 0.362 µs (+4.1%) and 0.200 µs (+1.6%); motion medians
-did not regress. This migration fixes binding correctness, not performance.
+The ignored-key median increased by 0.016 µs (+2.4%); motion and insert medians
+decreased in this sample. This migration fixes binding correctness, not performance.
 No render optimization or speedup claim is made. The benchmark excludes terminal
 painting, large puts, clipboard transport, and 1.0 runtime behavior.
 
-To avoid creating another worktree, extract `git archive 4811b14` under
+To avoid creating another worktree, extract `git archive 21e4a3e '*.ts'` under
 `.tmp/base-checkout`, then set `PIVIM_ENTRY=.tmp/base-checkout/index.ts` for the
-base run. The nested files reuse the installed peers. Keep the archived Biome
-configuration under a non-config filename so lint does not discover a nested
-root; do not change the active checkout's lint configuration.
+base run. Archive `10b9ae4` into a separate nested directory for the head run.
+The nested files reuse the installed peers; archiving only TypeScript avoids
+introducing a nested Biome configuration. Run `script/hotpath-compare.ts`
+serially, alternating the two entrypoints for three rounds.
 
 ### Degraded-mode follow-up evidence
 
@@ -141,20 +144,21 @@ submission, no Vim register/clipboard/mode changes, and stock-render equality wi
 no cursor-shape writes. Factory tests also cover startup without cursor ownership
 and replacement of an existing Vim editor, releasing its ownership exactly once.
 
-Three alternating rounds against `e7b9bcf`, with the same runtime and aggregation
-as above, measure the supported input path after the shared preflight helper:
+Remeasured on 2026-10-31: three alternating rounds of `c74137d` vs `3934f5b`,
+with the same runtime and aggregation as above, measure the supported input
+path after the shared preflight helper:
 
 | operation | base median µs | follow-up median µs | base p95 µs | follow-up p95 µs |
 | --- | ---: | ---: | ---: | ---: |
-| `noop_key` | 0.628 | 0.625 | 0.760 | 0.755 |
-| `motion_h_4k` | 408.910 | 410.266 | 409.900 | 413.513 |
-| `motion_w_50` | 1.413 | 1.378 | 1.692 | 1.673 |
-| `insert_type` | 9.086 | 9.271 | 9.473 | 9.751 |
-| `insert_edit` | 13.305 | 13.136 | 13.923 | 13.738 |
+| `noop_key` | 0.674 | 0.666 | 0.781 | 0.792 |
+| `motion_h_4k` | 429.326 | 432.274 | 433.379 | 434.040 |
+| `motion_w_50` | 1.386 | 1.384 | 1.768 | 1.771 |
+| `insert_type` | 9.323 | 9.075 | 9.829 | 9.273 |
+| `insert_edit` | 13.643 | 13.944 | 14.911 | 14.162 |
 
-The wide-line motion median increased 0.33%; sustained insert increased 0.185 µs
-(2.0%). These microbenchmarks exclude rendering; no render-performance claim is
-made for the stock fallback.
+The wide-line motion median increased 0.7%; a fresh insert edit increased
+0.301 µs (2.2%). Sustained insert decreased by 2.7%. These microbenchmarks
+exclude rendering; no render-performance claim is made for the stock fallback.
 
 ## Prompt-history integration evidence (2026-10-10)
 
@@ -194,9 +198,11 @@ and operators instead. Existing short-target vertical and gg/G gaps are unchange
 
 ### Input-cost evidence
 
-Baseline `214f8bc`, then the history implementation, same installed 0.78.0 peers
-and Node v24.15.0. One before/after run of the existing
-`node --import tsx/esm script/perf-bench.ts --json` input set, four samples per
+Historical observations from 2026-10-10, retained rather than claimed as a new
+run. The corresponding rebuilt checkpoints are `3934f5b` before history and
+`00abfe0` after; these table values were not remeasured against those revisions.
+The original run used installed 0.78.0 peers and Node v24.15.0: one before/after
+run of `node --import tsx/esm script/perf-bench.ts --json`, four samples per
 motion. Medians are microseconds/op; these are observations, not speedup claims.
 
 | operation | before | after |
@@ -227,6 +233,10 @@ and 1.0.0 runtime behavior are not covered by these measurements.
 
 ## Package evidence
 
+The following are historical pre-rebuild package measurements. Current totals
+and enforced budgets live in `script/pack-check.ts` and the generated
+[scoreboard](scoreboard.md); they supersede these snapshots.
+
 The original unstacked PR measured 18 files / 59,181 bytes packed / 232,872 bytes
 unpacked. Intake integration plus compatibility preflight, safe puts and README
 contracts measured 19 files / 64,268 bytes packed / 250,897 bytes unpacked.
@@ -234,7 +244,7 @@ The degraded-mode follow-up measures **19 files / 64,380 bytes packed / 251,395 
 Budgets remain 19 files / 64,800 packed / 251,600 unpacked: 420 / 205 bytes headroom.
 No dependency was added. Tests and development docs remain outside the package.
 
-The #51 history change stacked on `214f8bc` measures **19 files / 69,241 bytes packed / 268,090 bytes unpacked**.
+The original #51 history integration measured **19 files / 69,241 bytes packed / 268,090 bytes unpacked**.
 Budgets become 19 files / 69,700 packed / 268,800 unpacked, leaving 459 / 710 bytes
 headroom. Runtime growth is the guarded host action and its boolean setting;
 README navigation/settings/limits prose is also shipped. No dependency or packed

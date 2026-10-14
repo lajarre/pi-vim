@@ -123,7 +123,7 @@ operations. Absolute numbers move with the machine; the deltas above reproduce.
 ## clipboard runtime probe — 2026-10-14
 
 `canSpawnJavaScriptHelper()` runs before clipboard reads/writes. Before this
-change (`3629754`), each call created a `require` and re-resolved `node:sea`.
+change (rebuilt checkpoint `f87352c`), each call created a `require` and re-resolved `node:sea`.
 The implementation in this commit memoizes the process-constant default
 result, including `false`; explicit test overrides bypass the cache and cannot
 poison it. No clipboard process, native backend or editor work is timed here.
@@ -148,7 +148,7 @@ Reproduce without installing dependencies or switching branches:
 
 ```sh
 mkdir -p .tmp/runtime-before
-git archive 3629754 clipboard-platform.ts | tar -xf - -C .tmp/runtime-before
+git archive f87352c clipboard-platform.ts | tar -xf - -C .tmp/runtime-before
 # Run once with PIVIM_ENTRY=.tmp/runtime-before/clipboard-platform.ts,
 # then with PIVIM_ENTRY=clipboard-platform.ts; alternate for three rounds.
 PIVIM_ENTRY=clipboard-platform.ts node --import tsx/esm --input-type=module <<'JS'

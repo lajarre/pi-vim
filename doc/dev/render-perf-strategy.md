@@ -70,11 +70,11 @@ cannot drop a needed escape sequence.
 
 ## branch triage — perf/last-line-caching
 
-- The branch's only unmerged commit vs main is `40ce74c` "perf: last line
+- At triage, the branch's only unmerged commit was "perf: last line
   render caching" (+12/−1 on index.ts).
-- Main already contains the same cache, landed by PR #20 (merged
-  2026-06-11): compare `lastLineCacheKey/lastLineCacheResult` in `40ce74c`
-  with the `lastLineCache = { l, w, label, result }` field of `ModalEditor`
+- Main already contains the same cache, landed by PR #20 as `6149853`
+  (merged 2026-06-11): the branch's `lastLineCacheKey/lastLineCacheResult`
+  corresponds to `ModalEditor`'s `lastLineCache = { l, w, label, result }`
   and the identical key comparison + truncation where `render` truncates the
   last line (search `lastLineCache` in index.ts; line numbers shift with the
   issue #32 modularization). Only field names differ; logic and cached
@@ -86,7 +86,7 @@ cannot drop a needed escape sequence.
 ## selection-paint evidence
 
 [Render benchmark](render-benchmark.md) records the initial highlight cost and
-2026-10-14 before/after measurements for bounded selection-end work, with a
+2026-10-31 before/after measurements for bounded selection-end work, with a
 reusable no-install harness. It does not measure render-invocation frequency
 or justify an idle short-circuit; the evidence bars above still apply.
 

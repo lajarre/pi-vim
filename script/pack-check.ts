@@ -326,9 +326,18 @@ const THRESHOLDS = {
   // overflowing. The cap is cached with the overlay. Measured 71011 B packed /
   // 273919 B unpacked / 19 files. Limits become 71600 / 274600, leaving
   // 589 B / 681 B headroom. No new packed file or dependency.
+  //
+  // 2026-10-31: Rebuilt intake retains history validation, prepared selection
+  // ranges, runtime-probe caching, cursor lifecycle fixes and display gating.
+  // The baseline input-key module and settings type retain their structure.
+  // Measured 69318 B packed / 267365 B unpacked / 19 files, down 2676 B /
+  // 10141 B from the previous 71994 B / 277506 B / 19-file tip.
+  // Limits become 69800 / 267900 / 19, leaving 482 B / 535 B headroom.
+  // Earlier blocks retain historical measurements; these limits supersede
+  // them. No new dependency; render/input evidence and tests are not packed.
   maxFiles: 19,
-  maxSize: 71600,
-  maxUnpackedSize: 274600,
+  maxSize: 69800,
+  maxUnpackedSize: 267900,
 } as const;
 
 function compareStrings(a: string, b: string): number {
