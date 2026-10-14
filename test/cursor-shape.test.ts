@@ -37,6 +37,75 @@ function fixture(settings: CursorShapeSettings) {
   return { tui, editor };
 }
 
+describe("cursor ownership across editor reconstruction", () => {
+  for (const initial of [false, true]) {
+    for (const reason of [undefined, "reload", "quit"]) {
+      it(`balances two factories from visibility=${initial}, shutdown=${String(reason)}`, async () => {
+        const restore = setPiVimSettingsReaderForTests(() => ({}));
+        const pi = createExtensionApiHarness();
+        type Factory = (
+          ...args: ConstructorParameters<typeof ModalEditor>
+        ) => ModalEditor;
+        let factory: Factory | undefined;
+        const tui = createCursorShapeTui({
+          initialShowHardwareCursor: initial,
+        });
+        try {
+          vim(pi);
+          await pi.emit(
+            "session_start",
+            {},
+            {
+              cwd: ".",
+              hasUI: true,
+              ui: {
+                theme: stubTheme,
+                notify() {},
+                setEditorComponent: (next: Factory) => {
+                  factory = next;
+                },
+              },
+            },
+          );
+          assert.ok(factory);
+          factory(tui, stubTheme, stubKeybindings);
+          assert.equal(tui.getShowHardwareCursor?.(), true);
+          factory(tui, stubTheme, stubKeybindings);
+          assert.deepEqual(tui.hardwareCursorValues, [true, initial, true]);
+          assert.deepEqual(tui.terminalWrites, ["\x1b[0 q"]);
+          await pi.emit("session_shutdown", { reason });
+          assert.deepEqual(
+            tui.hardwareCursorValues,
+            reason === "quit"
+              ? [true, initial, true]
+              : [true, initial, true, initial],
+          );
+          assert.equal(
+            tui.getShowHardwareCursor?.(),
+            reason === "quit" ? true : initial,
+          );
+          assert.deepEqual(
+            tui.terminalWrites,
+            reason === "quit"
+              ? ["\x1b[0 q", "\x1b[0 q", "\x1b[?25h"]
+              : ["\x1b[0 q", "\x1b[0 q"],
+          );
+          const writes = tui.terminalWrites.slice();
+          await pi.emit("session_shutdown", { reason });
+          assert.deepEqual(
+            tui.terminalWrites,
+            writes,
+            "cleanup must not run twice",
+          );
+        } finally {
+          await pi.emit("session_shutdown");
+          restore();
+        }
+      });
+    }
+  }
+});
+
 describe("configured cursor shape rendering", () => {
   for (const [mode, keys, label] of [
     ["insert", [], " INSERT "],

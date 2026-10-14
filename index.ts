@@ -4496,7 +4496,7 @@ export default function (pi: ExtensionAPI) {
         },
       });
       const compatible = getPiEditorCompatibilityError(editor) === null;
-      if (!compatible) cursorShapeCleanup?.();
+      cursorShapeCleanup?.();
       cursorShapeCleanup = compatible ? enableCursorShapeSupport(tui) : null;
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());

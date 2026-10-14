@@ -495,6 +495,8 @@ For a block cursor in Insert as well as Normal:
 
 Project settings replace the whole map, not individual global keys. Missing keys use their defaults; invalid values warn once at session start and default only the affected key. A malformed map defaults both keys. This is an intentional non-Vim terminal setting, not a `guicursor` implementation: actual glyphs and blinking depend on the terminal, and unsupported hardware-cursor APIs keep the software-cursor fallback.
 
+Editor reconstruction releases the previous cursor ownership before taking it again. Reload or legacy shutdown restores the original hardware-cursor visibility when the host exposes it; quitting resets the shape and leaves the shell cursor visible.
+
 ### modeColors
 
 `piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
