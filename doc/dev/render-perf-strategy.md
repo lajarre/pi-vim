@@ -83,6 +83,13 @@ cannot drop a needed escape sequence.
 - Recommendation: **archive the branch** (superseded). Archiving is a user
   action via worktree-tending, not this run's.
 
+## selection-paint evidence
+
+[Render benchmark](render-benchmark.md) records the initial highlight cost and
+2026-10-14 before/after measurements for bounded selection-end work, with a
+reusable no-install harness. It does not measure render-invocation frequency
+or justify an idle short-circuit; the evidence bars above still apply.
+
 ## status vs issue #31 acceptance criteria
 
 This doc records the "next optimization decision" as: build measurement
