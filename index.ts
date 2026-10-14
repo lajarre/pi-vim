@@ -1152,6 +1152,9 @@ export class ModalEditor extends CustomEditor {
     editor.state.cursorLine = postCursorLine;
     editor.state.cursorCol = postCursorCol;
     editor.preferredVisualCol = postPreferredCol;
+    // Match Pi's edits and replaceTextInBuffer: only a real mutation ends recall.
+    editor.historyIndex = -1;
+    editor.lastAction = null;
 
     editor.onChange?.(this.getText());
     editor.tui?.requestRender?.();
