@@ -245,9 +245,12 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
+  // Optional compact/status labels: 60004 B packed / 236372 B unpacked,
+  // versus baseline 58576 / 231210; still 17 files, no new dependencies.
+  // Budgets leave 496 B / 628 B headroom; QA/evidence: compact-label-qa.md.
   maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  maxSize: 60500,
+  maxUnpackedSize: 237000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

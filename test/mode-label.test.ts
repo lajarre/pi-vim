@@ -22,6 +22,23 @@ describe("fitModeLabel", () => {
     assert.equal(visibleWidth(result), 10);
   });
 
+  // These compact labels are pi-vim UI, intentionally not nvim's mode text.
+  it("keeps compact prefixes and grapheme-safe pending tails", () => {
+    for (const prefix of [" I ", " N ", " V ", " VL ", " :"]) {
+      const raw = `${prefix}long-command-é👩‍💻_ `;
+      assert.equal(fitModeLabel(raw, 80), raw);
+      assert.equal(
+        fitModeLabel(raw, visibleWidth(prefix) + 6),
+        `${prefix}…é👩‍💻_ `,
+      );
+      for (let width = 0; width <= 20; width++) {
+        assert.ok(visibleWidth(fitModeLabel(raw, width)) <= width);
+      }
+    }
+    assert.equal(fitModeLabel(" :command_ ", 6), " :…d_ ");
+    assert.equal(fitModeLabel(" N 123d4f_ ", 8), " N …4f_ ");
+  });
+
   it("emits just the keyword and ellipsis when no suffix fits", () => {
     assert.equal(fitModeLabel(" EX command_ ", 5), " EX …");
   });

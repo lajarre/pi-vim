@@ -287,6 +287,7 @@ async function installExtensionWithEditorFactory(
     hasUI: true,
     ui: {
       theme,
+      setStatus() {},
       setEditorComponent(factory: EditorFactory): void {
         editorFactory = factory;
       },

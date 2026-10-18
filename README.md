@@ -350,7 +350,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeLabelStyle`, `modeLabelPlacement`, `modeColors`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -358,6 +358,8 @@ Default-equivalent `settings.json`:
 {
   "piVim": {
     "clipboardMirror": "all",
+    "modeLabelStyle": "full",
+    "modeLabelPlacement": "editor",
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
@@ -393,6 +395,12 @@ Default-equivalent `settings.json`:
 `exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [pi-command bridge](#pi-command-bridge)); `false` restores a quit-only ex line. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
 
 `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the non-empty composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
+
+### Mode labels
+
+`modeLabelStyle` accepts `"full"` (default) or `"compact"` (`I` / `N` / `V` / `VL`; EX shows `:command_`). `modeLabelPlacement` accepts `"editor"` (default) or `"status"`, publishing the label under `pi-vim-mode` instead of duplicating it in the editor. Powerline can consume that key through `customItems`; it is not a dependency.
+
+Status labels retain pending-command/count feedback, balanced inner spaces, existing color/`labelSync` policies, and grapheme-safe fitting to at most `min(width, 32)` cells. Both settings are read at session start; invalid project values override global values with the default. These are intentional Pi UI choices, not nvim editing changes.
 
 ### borderSync and labelSync
 

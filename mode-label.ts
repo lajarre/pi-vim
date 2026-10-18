@@ -30,7 +30,7 @@ export function takeModeLabelSuffix(rawLabel: string, width: number): string {
 }
 
 // Fit `rawLabel` into `width`. When it overflows, keep the leading mode
-// keyword (` INSERT `/` NORMAL `/` EX `) plus an ellipsis and as much of the
+// keyword (or compact I/N/V/VL/: prefix) plus an ellipsis and as much of the
 // pending-command tail as fits; fall back to a plain right-truncation when
 // there is no recognizable keyword or no room for the keyword itself.
 export function fitModeLabel(rawLabel: string, width: number): string {
@@ -42,7 +42,13 @@ export function fitModeLabel(rawLabel: string, width: number): string {
       ? " NORMAL "
       : rawLabel.startsWith(" EX ")
         ? " EX "
-        : "";
+        : rawLabel.startsWith(" VL ")
+          ? " VL "
+          : /^ [INV] /.test(rawLabel)
+            ? rawLabel.slice(0, 3)
+            : rawLabel.startsWith(" :")
+              ? " :"
+              : "";
 
   if (!prefix || visibleWidth(prefix) >= width) {
     return truncateToWidth(rawLabel, width, "");

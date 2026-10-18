@@ -65,6 +65,8 @@ import {
 import {
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
+  type ModeLabelPlacement,
+  type ModeLabelStyle,
   readPiVimSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
@@ -242,6 +244,9 @@ type ModalEditorInternals = {
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 
 type ModalEditorOptions = {
+  modeLabelStyle?: ModeLabelStyle;
+  modeLabelPlacement?: ModeLabelPlacement;
+  onModeLabel?: (label: string) => void;
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
   // Per-mode paint policy for each surface. "mode" paints the mode color;
@@ -295,6 +300,11 @@ export class ModalEditor extends CustomEditor {
   private undoWindow: { floor: number; openVersion: number } | null = null;
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
+  private readonly modeLabelStyle: ModeLabelStyle;
+  private readonly modeLabelPlacement: ModeLabelPlacement;
+  private readonly onModeLabel?: (label: string) => void;
+  private statusWidth = 32;
+  private lastStatusLabel: string | undefined;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
   private readonly offBorderColor: ((s: string) => string) | null;
@@ -353,6 +363,10 @@ export class ModalEditor extends CustomEditor {
   ) {
     super(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
+    this.modeLabelStyle = opts?.modeLabelStyle ?? "full";
+    this.modeLabelPlacement = opts?.modeLabelPlacement ?? "editor";
+    this.onModeLabel = opts?.onModeLabel;
+    this.statusWidth = Math.min(32, tui.terminal.columns ?? 32);
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
     this.offBorderColor = opts?.offBorderColor ?? null;
@@ -360,6 +374,7 @@ export class ModalEditor extends CustomEditor {
     this.labelSync = opts?.labelSync ?? null;
     this.labelTransform = opts?.labelTransform ?? null;
     this.installModeBorderColorizer();
+    this.publishModeLabel();
   }
 
   setClipboardFn(fn: (text: string, signal?: AbortSignal) => unknown): void {
@@ -1288,6 +1303,7 @@ export class ModalEditor extends CustomEditor {
       this.handleInputCore(data);
     } finally {
       this.refreshPendingDispatchRestore();
+      this.publishModeLabel();
     }
   }
 
@@ -4095,9 +4111,31 @@ export class ModalEditor extends CustomEditor {
     this.lastCursorShapeSequence = sequence;
   }
 
+  private publishModeLabel(): void {
+    if (this.modeLabelPlacement !== "status" || !this.onModeLabel) return;
+    // Reserve the painted trailing spacer even when the mode/pending text clips.
+    const fitted = fitModeLabel(
+      this.getModeLabel().slice(0, -1),
+      Math.max(0, this.statusWidth - 1),
+    ).trimEnd();
+    const raw = this.statusWidth > 0 ? `${fitted} ` : "";
+    const paint = this.getModeLabelColorizer();
+    const label = paint ? paint(raw) : raw;
+    if (label === this.lastStatusLabel) return;
+    // Store before notifying: setStatus may request another render.
+    this.lastStatusLabel = label;
+    this.onModeLabel(label);
+  }
+
   render(width: number): string[] {
     const lines = super.render(width);
     this.syncCursorShapeForRender(lines);
+    if (this.modeLabelPlacement === "status") {
+      this.statusWidth = Math.min(32, width);
+      // Re-evaluate paint on each render, including theme/host invalidation.
+      this.publishModeLabel();
+      return lines;
+    }
     if (lines.length === 0) return lines;
 
     const rawLabel = fitModeLabel(this.getModeLabel(), width);
@@ -4130,44 +4168,59 @@ export class ModalEditor extends CustomEditor {
   }
 
   private getModeLabel(): string {
-    if ("insert" === this.mode) return " INSERT ";
-    if (this.pendingExCommand !== null) return ` EX ${this.pendingExCommand}_ `;
+    const compact = this.modeLabelStyle === "compact";
+    if ("insert" === this.mode) return compact ? " I " : " INSERT ";
+    if (this.pendingExCommand !== null) {
+      return `${compact ? " " : " EX "}${this.pendingExCommand}_ `;
+    }
+    const normal = compact ? "N" : "NORMAL";
 
     const prefixCount = this.prefixCount;
     const operatorCount = this.operatorCount;
 
     if (isVisualMode(this.mode)) {
-      const name = this.mode === "visual" ? "VISUAL" : "V-LINE";
+      const name =
+        this.mode === "visual"
+          ? compact
+            ? "V"
+            : "VISUAL"
+          : compact
+            ? "VL"
+            : "V-LINE";
       const pending = `${prefixCount}${this.pendingG ? `g${this.pendingGCount}` : ""}${this.pendingMotion ?? ""}`;
       return pending ? ` ${name} ${pending}_ ` : ` ${name} `;
     }
 
     if (this.pendingReplace) {
-      return prefixCount ? ` NORMAL ${prefixCount}r_ ` : " NORMAL r_ ";
+      return ` ${normal} ${prefixCount}r_ `;
     }
     if (this.pendingOperator && this.pendingMotion) {
-      return ` NORMAL ${prefixCount}${this.pendingOperator}${operatorCount}${this.pendingMotion}_ `;
+      return ` ${normal} ${prefixCount}${this.pendingOperator}${operatorCount}${this.pendingMotion}_ `;
     }
     if (this.pendingOperator) {
-      return ` NORMAL ${prefixCount}${this.pendingOperator}${operatorCount}_ `;
+      return ` ${normal} ${prefixCount}${this.pendingOperator}${operatorCount}_ `;
     }
-    if (this.pendingMotion) return ` NORMAL ${this.pendingMotion}_ `;
+    if (this.pendingMotion) return ` ${normal} ${this.pendingMotion}_ `;
     if (this.pendingG) {
-      return this.pendingGCount
-        ? ` NORMAL g${this.pendingGCount}_ `
-        : " NORMAL g_ ";
+      return ` ${normal} g${this.pendingGCount}_ `;
     }
 
     const count = `${prefixCount}${operatorCount}`;
-    if (count) return ` NORMAL ${count}_ `;
-    return " NORMAL ";
+    if (count) return ` ${normal} ${count}_ `;
+    return ` ${normal} `;
   }
 }
 
 export default function (pi: ExtensionAPI) {
   let cursorShapeCleanup: CursorShapeCleanup | null = null;
+  let clearModeStatus: (() => void) | undefined;
+  let sessionGeneration = 0;
+  let editorGeneration = 0;
 
   pi.on("session_start", (_event, ctx) => {
+    const session = ++sessionGeneration;
+    clearModeStatus?.();
+    clearModeStatus = undefined;
     const piVimSettings = readPiVimSettings(ctx.cwd);
     const clipboardMirrorPolicy = resolveClipboardMirrorPolicy(
       piVimSettings.clipboardMirror,
@@ -4183,7 +4236,15 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
 
-    const t = ctx.ui.theme;
+    // Status strings live outside the editor's render cache. Resolve the active
+    // theme lazily so a theme replacement repaints them on the next render.
+    const t =
+      piVimSettings.modeLabelPlacement === "status"
+        ? {
+            fg: (token: Parameters<typeof ctx.ui.theme.fg>[0], text: string) =>
+              ctx.ui.theme.fg(token, text),
+          }
+        : ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
     const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
     const { borderSync, labelSync } = resolveSurfaceSyncMaps(piVimSettings);
@@ -4201,9 +4262,26 @@ export default function (pi: ExtensionAPI) {
       piVimSettings.modeChange,
       (event) => pi.events.emit("pi-vim:mode-change", event),
     );
+    const statusPlacement = piVimSettings.modeLabelPlacement === "status";
+    if (statusPlacement) {
+      clearModeStatus = () => ctx.ui.setStatus("pi-vim-mode", undefined);
+    }
     ctx.ui.setEditorComponent((tui, theme, kb) => {
+      const generation = ++editorGeneration;
       cursorShapeCleanup = enableCursorShapeSupport(tui);
       const editor = new ModalEditor(tui, theme, kb, {
+        modeLabelStyle: piVimSettings.modeLabelStyle,
+        modeLabelPlacement: piVimSettings.modeLabelPlacement,
+        onModeLabel: statusPlacement
+          ? (label) => {
+              if (
+                session === sessionGeneration &&
+                generation === editorGeneration
+              ) {
+                ctx.ui.setStatus("pi-vim-mode", label);
+              }
+            }
+          : undefined,
         labelColorizers,
         borderColorizers,
         borderSync,
@@ -4230,6 +4308,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (event) => {
+    ++sessionGeneration;
+    clearModeStatus?.();
+    clearModeStatus = undefined;
     try {
       cursorShapeCleanup?.(event);
     } finally {
