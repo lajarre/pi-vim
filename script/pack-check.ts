@@ -245,9 +245,14 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
+  //
+  // In-process clipboard fallback for compiled (Bun) Pi hosts, where the Node
+  // helper child cannot run. Measured packed 58998 B, unpacked 232554 B. Budgets
+  // bumped 59000 -> 59400 and 231400 -> 232800, leaving ~400 B / ~245 B
+  // headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 59000,
-  maxUnpackedSize: 231400,
+  maxSize: 59400,
+  maxUnpackedSize: 232800,
 } as const;
 
 function compareStrings(a: string, b: string): number {

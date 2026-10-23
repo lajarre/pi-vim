@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 
 const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
@@ -184,9 +185,43 @@ function killClipboardProcess(child: ClipboardProcess): void {
   }
 }
 
+type CopyToClipboardFn = (text: string) => Promise<void> | void;
+
+/**
+ * Fallback for hosts that cannot run the Node helper child, e.g. a compiled
+ * (Bun) Pi binary whose execPath rejects Node flags, or a host without a
+ * resolvable package path. Calls the host's copyToClipboard in-process; the
+ * abort signal only stops waiting, it cannot cancel the copy itself.
+ */
+export function writeClipboardInProcess(
+  text: string,
+  signal: AbortSignal,
+  copy: unknown = (piCodingAgent as { copyToClipboard?: unknown })
+    .copyToClipboard,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(getAbortError(signal));
+      return;
+    }
+    if (typeof copy !== "function") {
+      reject(new ClipboardSpawnError("clipboard helper module unavailable"));
+      return;
+    }
+
+    const onAbort = () => reject(getAbortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => (copy as CopyToClipboardFn)(text))
+      .then(() => resolve(), reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 export function writeClipboardInChildProcess(
   text: string,
   signal: AbortSignal,
+  inProcessCopy?: unknown,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) {
@@ -194,9 +229,11 @@ export function writeClipboardInChildProcess(
       return;
     }
 
-    const helperSources = getClipboardHelperSources();
+    // Under Bun, execPath is the Pi binary itself (or bun), not node.
+    const helperSources =
+      process.versions.bun === undefined ? getClipboardHelperSources() : null;
     if (!helperSources) {
-      reject(new ClipboardSpawnError("clipboard helper module unavailable"));
+      resolve(writeClipboardInProcess(text, signal, inProcessCopy));
       return;
     }
 

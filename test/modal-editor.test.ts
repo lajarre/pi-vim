@@ -16,6 +16,8 @@ import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import {
   buildClipboardReadHelperSource,
   buildClipboardWriteHelperSource,
+  writeClipboardInChildProcess,
+  writeClipboardInProcess,
 } from "../clipboard-mirror.js";
 import installPiVim, {
   ModalEditor,
@@ -9798,5 +9800,66 @@ describe("visual mode — undo", () => {
     assert.equal(editor.getText(), "\ndef");
     sendKeys(editor, ["u"]);
     assert.equal(editor.getText(), "abc\ndef");
+  });
+});
+
+describe("in-process clipboard fallback (compiled Pi host)", () => {
+  it("copies the text through the host copyToClipboard", async () => {
+    const copied: string[] = [];
+    await writeClipboardInProcess(
+      "yanked",
+      new AbortController().signal,
+      async (text: string) => {
+        copied.push(text);
+      },
+    );
+    assert.deepEqual(copied, ["yanked"]);
+  });
+
+  it("propagates a failed copy", async () => {
+    await assert.rejects(
+      writeClipboardInProcess("x", new AbortController().signal, async () => {
+        throw new Error("copy boom");
+      }),
+      /copy boom/,
+    );
+  });
+
+  it("reports a host without copyToClipboard as an environment failure", async () => {
+    await assert.rejects(
+      writeClipboardInProcess("x", new AbortController().signal, null),
+      { name: "ClipboardSpawnError" },
+    );
+  });
+
+  it("skips the Node helper child under Bun and copies in-process", async () => {
+    Object.defineProperty(process.versions, "bun", {
+      value: "1.3.0",
+      configurable: true,
+    });
+    const copied: string[] = [];
+    try {
+      await writeClipboardInChildProcess(
+        "yanked",
+        new AbortController().signal,
+        async (text: string) => {
+          copied.push(text);
+        },
+      );
+    } finally {
+      delete (process.versions as { bun?: string }).bun;
+    }
+    assert.deepEqual(copied, ["yanked"]);
+  });
+
+  it("stops waiting when aborted while the copy is pending", async () => {
+    const controller = new AbortController();
+    const pending = writeClipboardInProcess(
+      "x",
+      controller.signal,
+      () => new Promise<void>(() => {}),
+    );
+    controller.abort();
+    await assert.rejects(pending, { name: "AbortError" });
   });
 });
