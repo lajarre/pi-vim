@@ -91,7 +91,7 @@ changing behavior.
 | `mode-label.ts` | grapheme-aware fitting of the footer mode label | yes |
 | `mode-colors.ts` | resolve/build per-mode colorizers from settings + theme | resolves config |
 | `mode-change-command.ts` | debounced shell command on mode transitions | side effect (spawn) |
-| `clipboard-mirror.ts` | mirror register writes to the system clipboard via child process, with a failure circuit breaker | side effect (spawn) |
+| `clipboard-mirror.ts` | mirror register writes to the system clipboard via child process (in-process on compiled Pi hosts), with a failure circuit breaker | side effect (spawn) |
 | `clipboard-policy.ts` | resolve the `all` / `yank` / `never` mirror policy | yes |
 
 ## modal state machine
