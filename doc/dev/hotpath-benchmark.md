@@ -120,6 +120,27 @@ so the base checkout must live inside this one (here under the git-ignored
 `npm ci` instead. Each run prints JSON; compare the `stats.median` of matching
 operations. Absolute numbers move with the machine; the deltas above reproduce.
 
+## public register insertion — 2026-11
+
+Base `d66d494` vs the runtime in `perf(put): insert registers through insertTextAtCursor` (its parent is the base). Node v24.15.0, darwin-arm64, installed pi-tui/coding-agent 0.78.0. Three serial base/head, head/base, base/head rounds of `script/perf-bench.ts --json`; four samples per row. Values are median-of-medians and median-of-p95s in µs/op (sample averages, not individual latency tails).
+
+The new `p_chars_*` rows use a fresh editor with `ab`, cursor at column zero, a one-line ASCII `x` register of the labelled size, clipboard reads disabled, and one timed `p`. Creation/register setup is outside timing; 24 operations per sample. The existing `50p` fixture is unchanged (120 operations per sample). These rows also appear in the generated scoreboard.
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `50p` | 161.988 | 164.552 | 65.654 | 73.454 |
+| `p_chars_1000` | 324.431 | 352.542 | 19.950 | 21.564 |
+| `p_chars_4000` | 1675.338 | 1685.156 | 50.958 | 51.403 |
+| `p_chars_16000` | 13102.799 | 13195.608 | 185.490 | 191.823 |
+
+The public call replaces per-character insertion and autocomplete/notification work with one call per filtered register copy. Existing Vim undo windows collapse the host snapshots, including linewise positioning. Calling the superclass avoids the external-injection override that intentionally cancels repeat recording. Counts, linewise placement, filtering, register contents and cursor semantics are unchanged.
+
+A preliminary public-call-only run still cost 1359 µs at 16K: final cursor placement built a grapheme array for the whole line. The final implementation locates that one grapheme using `Intl.Segmenter`'s `containing`, retaining the existing fallback when Segmenter is absent. Tests compare every UTF-16 offset with full segmentation (ASCII, wide, combining, joined emoji and flags), and curated put/undo/dot nvim cases pass. The final 16K median is 0.185 ms, with roughly linear size scaling. No terminal, clipboard process, or 1.4 runtime is measured; the earlier ad-hoc reference timings used a different probe and are not substituted for these measurements.
+
+Reproduce without installing or switching branches: archive `d66d494` TypeScript into `.tmp/put-base`, copy this revision's `script/perf-bench.ts` into its `script/` directory, and run `node --import tsx/esm .tmp/put-base/script/perf-bench.ts --json` from the repo root. Run the head with `node --import tsx/esm script/perf-bench.ts --json`, alternating three rounds. Compare only the responsiveness rows: startup/heap probes use the current cwd rather than the nested entrypoint.
+
+The existing all-whitespace first-nonblank parity gap remains out of scope: changing it would alter shared `^` and put placement policy, rather than preserve the observables of this insertion migration. Characterwise multiline puts retain their documented Pi cursor placement.
+
 ## clipboard runtime probe — 2026-10-14
 
 `canSpawnJavaScriptHelper()` runs before clipboard reads/writes. Before this

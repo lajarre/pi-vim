@@ -6,8 +6,7 @@ export type PiEditorAction =
   | [action: "moveToLineEnd"]
   | [action: "deleteToEndOfLine"]
   | [action: "addNewLine"]
-  | [action: "moveCursor", deltaLine: number, deltaCol: number]
-  | [action: "insertCharacter", text: string];
+  | [action: "moveCursor", deltaLine: number, deltaCol: number];
 
 /** Validate the whole contract before a command can make partial changes. */
 export function getPiEditorCompatibilityError(editor: object): string | null {
@@ -19,7 +18,6 @@ export function getPiEditorCompatibilityError(editor: object): string | null {
     deleteToEndOfLine: true,
     addNewLine: true,
     moveCursor: true,
-    insertCharacter: true,
   };
   for (const action of Object.keys(actions)) {
     if (typeof (editor as Record<string, unknown>)[action] !== "function") {

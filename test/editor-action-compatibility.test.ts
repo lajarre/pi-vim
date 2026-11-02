@@ -18,7 +18,6 @@ const ACTIONS = [
   "deleteToEndOfLine",
   "addNewLine",
   "moveCursor",
-  "insertCharacter",
 ] as const satisfies readonly PiEditorAction[0][];
 
 describe("editor action compatibility preflight", () => {
@@ -72,7 +71,7 @@ describe("editor action compatibility preflight", () => {
 
         // Model an upgraded host whose public input path still works but whose
         // old private action name is unavailable to the adapter. The installed
-        // host itself still needs that name (notably insertCharacter), so expose
+        // host itself still needs that name (for example moveCursor), so expose
         // it only while exercising its real, otherwise unchanged dispatcher.
         const hostAction = (editor as unknown as Record<string, unknown>)[
           action

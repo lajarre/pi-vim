@@ -57,6 +57,7 @@ import {
   findCharMotionTarget,
   findFirstNonWhitespaceColumn,
   findParagraphMotionTarget,
+  getGraphemeStartAtOffset,
   getLineGraphemes,
   reverseCharMotion,
   type WordMotionClass,
@@ -4072,7 +4073,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private getSafePutText(): string {
-    // Private insertCharacter bypasses Pi's input/paste filtering. Never let
+    // Programmatic insertion bypasses Pi's input/paste filtering. Never let
     // clipboard or register controls reach terminal rendering. Match Pi's
     // newline/tab normalization, but also exclude DEL and C1 controls.
     const text = this.getPasteRegisterText()
@@ -4094,8 +4095,8 @@ export class ModalEditor extends CustomEditor {
     const col = Math.max(0, Math.min(cursor.col, line.length));
     if (col <= 0) return;
 
-    const range = this.getGraphemeRangeAtCol(line, col - 1, 1);
-    if (range) this.moveCursorToCol(range.start);
+    const start = getGraphemeStartAtOffset(line, col - 1);
+    if (start !== null) this.moveCursorToCol(start);
   }
 
   private moveCursorToLastGraphemeOnLine(): void {
@@ -4171,10 +4172,10 @@ export class ModalEditor extends CustomEditor {
   }
 
   private insertRegisterText(text: string): void {
-    for (const char of text) {
-      if (char === "\n") runPiEditorAction(this, "addNewLine");
-      else runPiEditorAction(this, "insertCharacter", char);
-    }
+    // This is a Vim change, not an external injection: bypass our public
+    // override, which cancels recording and discards the active undo window.
+    // The host snapshots once; that window collapses counted puts as before.
+    super.insertTextAtCursor(text);
   }
 
   private deleteRange(

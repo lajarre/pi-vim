@@ -11,10 +11,26 @@ import {
   findParagraphMotionTarget,
   findPrevParagraphStart,
   findWordMotionTarget,
+  getGraphemeStartAtOffset,
+  getLineGraphemes,
   isBlankLine,
   isParagraphStart,
 } from "../motions.js";
 import { WordBoundaryCache } from "../word-boundary-cache.js";
+
+describe("getGraphemeStartAtOffset", () => {
+  for (const line of ["", "abc", "a中e\u0301👩‍💻🇫🇷z", "x".repeat(16000)]) {
+    it(`matches full segmentation at every offset (length ${line.length})`, () => {
+      for (const part of getLineGraphemes(line)) {
+        for (let col = part.start; col < part.end; col++) {
+          assert.equal(getGraphemeStartAtOffset(line, col), part.start);
+        }
+      }
+      assert.equal(getGraphemeStartAtOffset(line, -1), null);
+      assert.equal(getGraphemeStartAtOffset(line, line.length), null);
+    });
+  }
+});
 
 function makeGeneratedLineFixtures(count: number): string[] {
   let seed = 0x1badf00d;

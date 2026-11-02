@@ -27,11 +27,15 @@ Movement, deletion, undo, prompt-history recall, open-line commands, Insert-mode
 positioning shortcuts, and register insertion bypass `CustomEditor.handleInput`. Actual user input
 still goes through that dispatcher, including application and extension shortcuts.
 Calling the original operations retains Pi's kill ring, undo snapshots, and
-change notifications. Register insertion uses `insertCharacter` / `addNewLine`,
-not input events, so register contents cannot accidentally trigger shortcuts.
+change notifications. Register content is inserted in one public
+`super.insertTextAtCursor(text)` call per copy, not input events, so it cannot
+trigger shortcuts. The superclass call keeps the Vim undo/repeat window open
+(unlike the override for external injections); the window collapses counted
+puts and linewise positioning snapshots into one Vim undo unit. The host
+cancels autocomplete and emits one onChange per non-empty register copy.
 Before placement/counting, put text normalizes CRLF/CR and tabs as Pi does and
-filters other C0, DEL, and C1 controls. Private `insertCharacter` does not filter
-controls; accepting raw ESC/BEL would let a clipboard OSC sequence reach terminal
+filters other C0, DEL, and C1 controls. Public programmatic insertion does not
+filter controls; accepting raw ESC/BEL would let a clipboard OSC sequence reach terminal
 rendering. This intentionally differs from nvim's literal control-character puts
 and leaves the source register unchanged. A control-only put is a no-op, including
 cursor/history, while consuming its count. Focused tests assert buffer and render
@@ -85,8 +89,11 @@ checkout and on the baseline, alternating runs. Set `PIVIM_ENTRY` to the baselin
 
 ## Intake integration evidence (2026-10-10)
 
-All eight action methods exist in the installed pi-tui 0.78.0 and the published
-1.0.0 source. The latter was source-audited, not used as the runtime test host.
+The seven private action methods below exist in the installed pi-tui 0.78.0
+and the published 1.0.0 source. The latter was source-audited, not used as the
+runtime test host. The 2026-11 public put migration removes `insertCharacter`
+from the runtime contract; `insertTextAtCursor` is public at the 0.74 peer floor
+and in 0.78/1.4.
 
 | operation | signature in both versions | relevant behavior |
 | --- | --- | --- |
@@ -97,7 +104,6 @@ All eight action methods exist in the installed pi-tui 0.78.0 and the published
 | delete tail | `deleteToEndOfLine()` | Snapshots real deletes/joins, updates kill ring and onChange. |
 | newline | `addNewLine()` | Clears grouping, snapshots, splits line, moves to next line column zero. |
 | cursor | `moveCursor(deltaLine, deltaCol)` | Line argument first; visual vertical rows and one grapheme per horizontal sign. 1.0 also refreshes open autocomplete. |
-| character | `insertCharacter(char, skipUndoCoalescing?)` | Omitted second argument preserves word/whitespace snapshot grouping and onChange/autocomplete. |
 
 The default raw Ctrl+_ byte (`0x1f`, normalized by Pi to `ctrl+-`) invokes this
 same `undo()` through `tui.editor.undo`; no extra undo bookkeeping is lost by

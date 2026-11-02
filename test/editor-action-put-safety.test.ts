@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { ModalEditor } from "../index.js";
 import {
   EDITOR_BINDING_VARIANTS,
@@ -90,6 +91,69 @@ for (const variant of EDITOR_BINDING_VARIANTS) {
           assert.deepEqual(f.writes, []);
           assert.equal(f.submits, 0);
         }));
+    }
+
+    for (const text of ["X", "e\u0301👩‍💻", "qx\nyz", "qx\nyz\n"]) {
+      for (const key of ["p", "P"]) {
+        it(`${key} inserts each ${JSON.stringify(text)} copy atomically, preserving undo and repeat`, (t) =>
+          withEditorBindings(variant, () => {
+            const f = fixture(text, "register");
+            const history = f.editor as unknown as {
+              undoStack: { stack: unknown[] };
+            };
+            history.undoStack.stack.length = 0;
+            const insert = CustomEditor.prototype.insertTextAtCursor;
+            const calls: string[] = [];
+            t.mock.method(
+              CustomEditor.prototype,
+              "insertTextAtCursor",
+              function (this: CustomEditor, value: string) {
+                calls.push(value);
+                insert.call(this, value);
+              },
+            );
+            let changes = 0;
+            const onChange = f.editor.onChange;
+            f.editor.onChange = (value) => {
+              changes++;
+              onChange?.(value);
+            };
+            sendKeys(f.editor, ["3", key]);
+            const after = f.editor.getText();
+            const cursor = f.editor.getCursor();
+            const linewise = text.endsWith("\n");
+            assert.deepEqual(
+              calls,
+              Array(3).fill(linewise ? text.slice(0, -1) : text),
+            );
+            assert.equal(changes, linewise ? 6 : 3);
+            assert.equal(history.undoStack.stack.length, 1);
+            assert.equal(f.editor.getRegister(), text);
+            assert.equal(f.editor.getMode(), "normal");
+            assert.deepEqual(f.writes, []);
+            sendKeys(f.editor, ["u", "u"]);
+            assert.equal(f.editor.getText(), "ab");
+            assert.equal(history.undoStack.stack.length, 0);
+            sendKeys(f.editor, ["\x12", "\x12"]);
+            assert.equal(f.editor.getText(), after);
+            assert.deepEqual(f.editor.getCursor(), cursor);
+            assert.equal(history.undoStack.stack.length, 1);
+            sendKeys(f.editor, ["."]);
+            assert.equal(calls.length, 6);
+            assert.equal(history.undoStack.stack.length, 2);
+            sendKeys(f.editor, ["u"]);
+            assert.equal(f.editor.getText(), after);
+            sendKeys(f.editor, ["p", "\x12"]);
+            assert.equal(
+              calls.length,
+              7,
+              "a new put consumes the old count and clears redo",
+            );
+            assert.equal(f.editor.getRegister(), text);
+            assert.deepEqual(f.writes, []);
+            assert.equal(f.submits, 0);
+          }));
+      }
     }
 
     it("control-only put consumes counts without moving or invalidating redo", () =>

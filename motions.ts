@@ -139,6 +139,18 @@ const GRAPHEME_SEGMENTER =
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
     : null;
 
+/** Locate one cell without allocating a segment array for the entire line. */
+export function getGraphemeStartAtOffset(
+  line: string,
+  col: number,
+): number | null {
+  if (col < 0 || col >= line.length) return null;
+  if (GRAPHEME_SEGMENTER) {
+    return GRAPHEME_SEGMENTER.segment(line).containing(col)?.index ?? null;
+  }
+  return getLineGraphemes(line).find((part) => col < part.end)?.start ?? null;
+}
+
 export function getLineGraphemes(
   line: string,
 ): Array<{ start: number; end: number }> {

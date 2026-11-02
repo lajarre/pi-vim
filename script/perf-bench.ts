@@ -312,6 +312,19 @@ function runResponsivenessBenchmarks(): Record<string, SampledMetric> {
     samplesCount,
   );
 
+  for (const size of [1_000, 4_000, 16_000]) {
+    metrics[`p_chars_${size}`] = benchmarkSingleOpFresh(
+      () => createEditor("ab"),
+      (editor) => {
+        editor.setClipboardReadFn(() => null);
+        editor.setRegister("x".repeat(size));
+      },
+      (editor) => editor.handleInput("p"),
+      24,
+      samplesCount,
+    );
+  }
+
   const wordCases = [20, 50, 100, 200, 400] as const;
   const iterationsByWords: Record<number, number> = {
     20: 600,
