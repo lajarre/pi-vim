@@ -89,21 +89,70 @@ checkout and on the baseline, alternating runs. Set `PIVIM_ENTRY` to the baselin
 
 ## Intake integration evidence (2026-10-10)
 
-The seven private action methods below exist in the installed pi-tui 0.78.0
-and the published 1.0.0 source. The latter was source-audited, not used as the
-runtime test host. The 2026-11 public put migration removes `insertCharacter`
-from the runtime contract; `insertTextAtCursor` is public at the 0.74 peer floor
-and in 0.78/1.4.
+### Three-version dist seam audit — 2026-11-02
 
-| operation | signature in both versions | relevant behavior |
-| --- | --- | --- |
-| undo | `undo()` | Exits history browsing and pops one snapshot, no-op when empty; resets grouping/column and emits onChange. 1.0 also restores paste metadata. |
-| prompt history | `navigateHistory(direction)` | `-1` older / `1` newer; first browse snapshots once, valid recalls emit onChange. Cursor/draft behavior differs below. |
-| line start | `moveToLineStart()` | Clears lastAction; sets column zero. |
-| line end | `moveToLineEnd()` | Clears lastAction; sets UTF-16 line length. |
-| delete tail | `deleteToEndOfLine()` | Snapshots real deletes/joins, updates kill ring and onChange. |
-| newline | `addNewLine()` | Clears grouping, snapshots, splits line, moves to next line column zero. |
-| cursor | `moveCursor(deltaLine, deltaCol)` | Line argument first; visual vertical rows and one grapheme per horizontal sign. 1.0 also refreshes open autocomplete. |
+Audited the **published JavaScript dist**, not repository source: read-only
+`npm pack @earendil-works/pi-tui@0.74.0` and `@0.78.0` for the peer floor and
+previous dev host, and the worktree-local installed **1.4.0** dev host. All gates
+now run on coding-agent/pi-tui 1.4.0; older versions are static audits, not full
+runtime certification. No peer-floor change. The 2026-11 public put migration
+removed `insertCharacter` from the private action contract.
+
+Line references below are package-relative: **E** =
+`node_modules/@earendil-works/pi-tui/dist/components/editor.js`, **T** =
+`node_modules/@earendil-works/pi-tui/dist/tui.js`, **U** =
+`node_modules/@earendil-works/pi-tui/dist/undo-stack.js`, in each version's
+artifact. These cover `pi-editor-actions.ts`, `ModalEditorInternals` and the
+additional local casts in `index.ts`, Visual geometry/paint, cursor shaping,
+and mode-label/border composition. Public dependencies are labelled explicitly.
+
+| seam | 0.74.0 floor | 0.78.0 previous dev | 1.4.0 dev | semantics / difference |
+| --- | --- | --- | --- | --- |
+| `undo()` | E1642 | E1614 | E1775 | Exits browsing, pops once, resets action/column and notifies; 1.4 also clears draft and restores paste metadata. |
+| `navigateHistory(direction)` | E285 | E287 | E334 | -1 older / +1 newer; entry snapshot once, bounds clamp; recall placement and draft restoration differ below. |
+| `moveToLineStart()` | E1197 | E1199 | E1349 | Same: clear lastAction, set column zero. |
+| `moveToLineEnd()` | E1201 | E1203 | E1353 | Same: clear lastAction, set UTF-16 line length. |
+| `deleteToEndOfLine()` | E1234 | E1236 | E1386 | Same snapshot/kill-ring/notification behavior; 1.4 also clears saved draft. |
+| `addNewLine()` | E979 | E981 | E1108 | Same split/snapshot/column-zero behavior; 1.4 also clears saved draft. |
+| `moveCursor(deltaLine, deltaCol)` | E1428 | E1430 | E1580 | Visual vertical rows, grapheme horizontal signs; 1.4 refreshes open autocomplete at E1637. |
+| `state.lines/cursorLine/cursorCol` | E160–164 | E162–166 | E202–206 | Same mutable UTF-16 state shape; pi-vim mutates these for native range operations. |
+| `preferredVisualCol`, `lastAction` | E202,198 | E204,200 | E250,246 | Same nullable preferred column and grouping fields. |
+| `historyIndex` | E195 | E197 | E242 | -1 means not browsing; 1.4 additionally owns `historyDraft` at E243 (not a pi-vim field). |
+| `pushUndoSnapshot()` | E1639 | E1611 | E1772 | 1.4 wraps state with pastes/counter; pi-vim keeps snapshots opaque. |
+| `undoStack.stack`, `.length`, `.pop()` | E210; U8,21,14 | E212; U8,21,14 | E258; U8,21,14 | Same stack surface; pi-vim truncates/pops but never assumes snapshot payload shape. |
+| `setCursorCol(col)` | E1076 | E1078 | E1228 | Same preferred-column reset; retains paste-marker-aware host snapping bookkeeping. |
+| `onChange` (public callback) | E212 | E214 | E260 | Same optional callback; pi-vim chains it for redo/cache invalidation. |
+| `tui`, `requestRender()` | E167; T330 | E169; T330 | E209; T658 | Same receiver/callback use; newer TUI coalescing stays host-owned. |
+| `isInPaste`, `pasteBuffer`, `pasteCounter` | E192,191,189 | E194,193,191 | E239,238,236 | Same fields used to cancel pending EX paste; full paste registry remains host-owned. |
+| `autocompleteState`, `updateAutocomplete()` | E179,1910 | E181,1851 | E226,2038 | Same optional refresh after pi-vim range replacement; provider trigger parsing expanded in 1.4. |
+| `lastWidth`, `scrollOffset` | E171,173 | E173,175 | E213,217 | Same render-produced layout width and visual-row offset. |
+| `buildVisualLineMap(width)` | E1378 | E1380 | E1530 | Same logicalLine/startCol/length fields; 1.4 adds CJK wrap opportunities in shared wordWrapLine (E148–158). |
+| `render(width)` / `getPaddingX()` (public) | E320,231 | E322,233 | E393,279 | Same border/text/border layout and 30%-height/minimum-five viewport; autocomplete rows follow the lower border. |
+| `borderColor` (public), border/label rows | E175,331,357–371,412–422 | E177,333,359–373,414–424 | E219,385–391,428,473 | Old hosts repeat per-glyph color runs; 1.4 colors full rows and centers scroll labels; overlay preserves annotation cells/SGR. |
+| cursor metadata / focused emission | E372–395; T42 | E374–397; T42 | E430–457; T69–77 | Old SGR 7 cell becomes pi:fc/pi:/fc APCs; 1.4 emits pi:c even during autocomplete for IME. |
+| compositor marker extraction | T716–739 | T716–739 | T1065–1093 | 1.4 resolves fake cursors before extracting pi:c; marker adjacency must survive Visual paint. |
+| hardware-cursor getters/setters (public), terminal | T131,134,121 | T131,134,121 | T253,256,215 | Same receiver/boolean contract; terminal.write remains feature-detected; actual terminal glyphs need manual QA. |
+| `insertTextAtCursor(text)` (public put path) | E809 | E811 | E939 | Same one snapshot, autocomplete cancellation and notification; 1.4 additionally clears historyDraft. |
+| `insertCharacter` (removed dependency) | E867 | E869 | E997 | 1.4 expands provider/CJK completion triggers; Vim puts no longer call this method. |
+
+Pi's `CustomEditor` still extends this editor and routes real user keys through
+its application shortcut layer (coding-agent 1.4.0
+`dist/modes/interactive/components/custom-editor.js:5,62–112`). No synthetic
+key fallback is needed. TUI dispatch still lets editor exceptions propagate
+(T425 in 0.74/0.78, T780 in 1.4); the required-action preflight stays important.
+
+The 1.4 `system` theme deliberately returns reset-only `selectedBg` when terminal
+colors are unknown (coding-agent `dist/modes/interactive/theme/theme.js:405–416`
+and `system-theme.js:201–214`). This is not a host bug: pi-vim now treats identity
+or `SGR 49 + text + SGR 49` as absent paint and uses reverse video. Tests retain
+both host cursor grammars, narrow/centered border fixtures, and theme recovery.
+
+Limit: method presence is not proof of private-field semantics. In particular,
+pi-vim snapshots still store text/cursor, not the host's complete paste registry;
+real large-paste undo and wrapper/fullscreen interactions remain manual QA.
+A direct pi-vim restore sets historyIndex to -1 without owning historyDraft;
+the next host edit or first browse clears/replaces it. No second draft store
+or new host-private field dependency was added.
 
 The default raw Ctrl+_ byte (`0x1f`, normalized by Pi to `ctrl+-`) invokes this
 same `undo()` through `tui.editor.undo`; no extra undo bookkeeping is lost by
@@ -169,19 +218,19 @@ exclude rendering; no render-performance claim is made for the stock fallback.
 ## Prompt-history integration evidence (2026-10-10)
 
 Issue #51 adds normal-mode edge recall through `navigateHistory`, not synthetic
-Up/Down input. Both audited hosts expose `history`, `historyIndex` (`-1` means
+Up/Down input. All three audited hosts expose `history`, `historyIndex` (`-1` means
 not browsing), and public `addToHistory`. They trim entries, deduplicate adjacent
 entries, retain at most 100, clamp exhausted navigation, and push one undo
 snapshot on entering history. Their dispatch conditions are not identical:
 
-| behavior | pi-tui 0.78.0 | pi-tui 1.0.0 source |
-| --- | --- | --- |
-| insert Up entry | Empty, or already browsing on first visual row | First visual row and empty, browsing, or column zero (allows a non-empty draft) |
-| insert Down | Browsing on last visual row | Same |
-| older recall cursor | End of last logical line | Start of buffer |
-| newer recall cursor | End of last logical line | Same |
-| returning to index -1 | Clears editor | Restores the saved `historyDraft` state |
-| undo | Clears browsing index, restores snapshot | Also clears saved draft and restores paste metadata |
+| behavior | pi-tui 0.74.0 floor | pi-tui 0.78.0 previous dev | pi-tui 1.4.0 dev |
+| --- | --- | --- | --- |
+| insert Up entry | Empty, or browsing on first visual row (E617) | Same (E619) | First visual row and empty, browsing, or column zero; allows non-empty draft (E747) |
+| insert Down | Browsing on last visual row (E635) | Same (E637) | Same (E761) |
+| older recall cursor | End of last logical line (E301–310) | Same (E303–312) | Start of buffer (E363,371–375) |
+| newer recall cursor | End of last logical line | Same | Same |
+| returning to index -1 | Clears editor (E299) | Same (E301) | Restores saved historyDraft (E348–360) |
+| undo | Clears browsing index, restores snapshot | Same | Also clears saved draft and restores paste metadata |
 
 Normal-mode j/k deliberately retain the conservative empty-or-browsing guard,
 use logical edges, and normalize successful recalls to the last grapheme of the
@@ -198,7 +247,9 @@ and cursor but not browsing state. Pi's onChange clears stale redo; harmless
 inputs do not. Recall preserves the last dot command. Seeded tests assert these
 states plus register/clipboard neutrality, mode/label stability, Unicode,
 wrapped/logical edges, disabled settings, and remapped host bindings. A simulated
-start-of-buffer host checks cursor normalization; 1.0.0 was not runtime-tested.
+start-of-buffer host checks cursor normalization; the same tests now also run
+on the real 1.4.0 host. Earlier 1.0 source observations are superseded by the
+three-version dist audit above.
 The nvim oracle has no prompt history; its added cases cover buffer-local counts
 and operators instead. Existing short-target vertical and gg/G gaps are unchanged.
 
