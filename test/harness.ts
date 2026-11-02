@@ -3,6 +3,23 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as hostTui from "@earendil-works/pi-tui";
+
+// Pi 0.78 draws SGR cursors; 1.4 defers APC fake cursors to the compositor.
+// Strip only known metadata for display assertions, never arbitrary controls.
+export function stripHostCursorMarkers(text: string): string {
+  return text
+    .replaceAll(hostTui.CURSOR_MARKER, "")
+    .replaceAll("\x1b_pi:fc\x07", "")
+    .replaceAll("\x1b_pi:/fc\x07", "");
+}
+
+export const hostUsesFakeCursor = "renderFakeCursor" in hostTui;
+export function hostFakeCursor(text: string): string {
+  return hostUsesFakeCursor
+    ? `\x1b_pi:fc\x07${text}\x1b_pi:/fc\x07`
+    : `\x1b[7m${text}\x1b[0m`;
+}
 
 import { ModalEditor } from "../index.js";
 

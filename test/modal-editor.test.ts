@@ -41,8 +41,11 @@ import {
   createEditorWithSpy,
   createExtensionApiHarness,
   createMultiLineEditor,
+  hostFakeCursor,
+  hostUsesFakeCursor,
   sendKeys,
   setInternalCursor,
+  stripHostCursorMarkers,
   stubKeybindings,
   stubTheme,
   stubTui,
@@ -233,7 +236,7 @@ function findCursorMarkerLine(lines: string[]): string {
 }
 
 function removeCursorMarker(line: string): string {
-  return line.replace(CURSOR_MARKER, "");
+  return stripHostCursorMarkers(line);
 }
 
 function assertNoCursorShapeSequences(lines: string[]): void {
@@ -3494,7 +3497,7 @@ describe("cursor shape rendering", () => {
     const markerLine = findCursorMarkerLine(lines);
 
     assert.deepEqual(tui.terminalWrites, []);
-    assert.equal(markerLine.includes(SOFTWARE_CURSOR_SPACE), true);
+    assert.equal(markerLine.includes(hostFakeCursor(" ")), true);
     assertNoCursorShapeSequences(lines);
   });
 
@@ -3535,7 +3538,7 @@ describe("cursor shape rendering", () => {
     assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
   });
 
-  it("keeps the software cursor when focused render has no cursor marker", () => {
+  it("follows the host cursor marker policy during autocomplete", () => {
     const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
     const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
     const internal = editor as unknown as { autocompleteState?: string | null };
@@ -3544,15 +3547,19 @@ describe("cursor shape rendering", () => {
 
     const lines = editor.render(20);
 
+    // 0.78 suppresses the marker during autocomplete; 1.4 keeps it for IME.
     assert.equal(
       lines.some((line) => line.includes(CURSOR_MARKER)),
-      false,
+      hostUsesFakeCursor,
     );
     assert.equal(
-      lines.some((line) => line.includes(SOFTWARE_CURSOR_SPACE)),
+      lines.some((line) => line.includes(hostFakeCursor(" "))),
       true,
     );
-    assert.deepEqual(tui.terminalWrites, []);
+    assert.deepEqual(
+      tui.terminalWrites,
+      hostUsesFakeCursor ? [INSERT_CURSOR_SHAPE] : [],
+    );
     assertNoCursorShapeSequences(lines);
   });
 });
@@ -9858,7 +9865,11 @@ describe("visual mode — selection rendering", () => {
     const lines = editor.render(20).map(removeCursorMarker);
 
     assert.ok(lines[1]?.startsWith("<selected>first </selected>"));
-    assert.ok(lines[2]?.startsWith("<selected>second </selected>"));
+    assert.ok(
+      lines[2]
+        ?.replaceAll("</selected><selected>", "")
+        .startsWith("<selected>second </selected>"),
+    );
   });
 
   it("keeps line-wise highlighting aligned across wrapped rows", () => {
@@ -9867,7 +9878,11 @@ describe("visual mode — selection rendering", () => {
 
     const lines = editor.render(8).map(removeCursorMarker);
 
-    assert.ok(lines[1]?.startsWith("<selected>alpha </selected>"));
+    assert.ok(
+      lines[1]
+        ?.replaceAll("</selected><selected>", "")
+        .startsWith("<selected>alpha </selected>"),
+    );
     assert.ok(lines[2]?.startsWith("<selected>beta </selected>"));
   });
 });

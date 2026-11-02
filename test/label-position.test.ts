@@ -13,6 +13,7 @@ import { fitModeLabel } from "../mode-label.js";
 import type { LabelPosition, SurfaceSync } from "../settings.js";
 import {
   createCursorShapeTui,
+  hostFakeCursor,
   sendKeys,
   setInternalCursor,
   stubKeybindings,
@@ -423,7 +424,8 @@ describe("mode label positions", () => {
 describe("bottom-right byte compatibility", () => {
   // Captured from base 46b1f047b3dae17a54ef1dd567249baf06bc6e3c,
   // pi-tui 0.78.0, before changing the overlay. Literal ANSI bytes are part
-  // of the assertion, not just stripped display text.
+  // of the assertion, not just stripped display text. Only cursor bytes use
+  // the installed host's grammar: 0.78 SGR versus 1.4 fake-cursor APCs.
   for (const labelPosition of [undefined, "bottom-right"] as const) {
     it(`preserves base snapshots with ${labelPosition ?? "omitted"} position`, () => {
       const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
@@ -432,25 +434,25 @@ describe("bottom-right byte compatibility", () => {
       editor.setText("abc");
       assert.deepEqual(editor.render(16), [
         "────────────────",
-        "abc\x1b[7m \x1b[0m            ",
+        `abc${hostFakeCursor(" ")}            `,
         "────────\x1b[0m INSERT ",
       ]);
       sendKeys(editor, ["\x1b", "0"]);
       assert.deepEqual(editor.render(16), [
         "────────────────",
-        "\x1b[7ma\x1b[0mbc             ",
+        `${hostFakeCursor("a")}bc             `,
         "────────\x1b[0m NORMAL ",
       ]);
       editor.handleInput("d");
       assert.deepEqual(editor.render(10), [
         "──────────",
-        "\x1b[7ma\x1b[0mbc       ",
+        `${hostFakeCursor("a")}bc       `,
         " NORMAL … ",
       ]);
       sendKeys(editor, ["\x1b", ":", ..."abcdef"]);
       assert.deepEqual(editor.render(8), [
         "────────",
-        "\x1b[7ma\x1b[0mbc     ",
+        `${hostFakeCursor("a")}bc     `,
         " EX …f_ ",
       ]);
       const colored = new ModalEditor(
@@ -460,11 +462,15 @@ describe("bottom-right byte compatibility", () => {
         { labelPosition, labelColorizers },
       );
       colored.setText("x");
+      // 0.78 colors each border glyph; 1.4's border methods color one row.
+      const rowBorders = "renderTopBorder" in CustomEditor.prototype;
       assert.deepEqual(colored.render(12), [
-        "\x1b[34m─\x1b[39m".repeat(12),
-        "x\x1b[7m \x1b[0m          ",
-        "\x1b[34m─\x1b[39m".repeat(3) +
-          "\x1b[34m─\x1b[0m\x1b[7m\x1b[32m INSERT \x1b[39m\x1b[27m",
+        rowBorders ? fg(34)("─".repeat(12)) : "\x1b[34m─\x1b[39m".repeat(12),
+        `x${hostFakeCursor(" ")}          `,
+        (rowBorders
+          ? "\x1b[34m────"
+          : `${"\x1b[34m─\x1b[39m".repeat(3)}\x1b[34m─`) +
+          "\x1b[0m\x1b[7m\x1b[32m INSERT \x1b[39m\x1b[27m",
       ]);
     });
   }

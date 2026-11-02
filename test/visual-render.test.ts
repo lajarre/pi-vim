@@ -8,8 +8,10 @@ import { getVisualRenderSpan, highlightRenderedTextRange } from "../visual.js";
 import {
   createCursorShapeTui,
   createExtensionApiHarness,
+  hostUsesFakeCursor,
   sendKeys,
   setInternalCursor,
+  stripHostCursorMarkers,
   stubKeybindings,
   stubTheme,
   stubTui,
@@ -19,7 +21,7 @@ const OPEN = "\x1b[44m";
 const CLOSE = "\x1b[49m";
 const colorize = (text: string) => `${OPEN}${text}${CLOSE}`;
 const plain = (text: string) =>
-  stripVTControlCharacters(text.replaceAll(CURSOR_MARKER, ""));
+  stripVTControlCharacters(stripHostCursorMarkers(text));
 const selected = (text: string) =>
   text
     .split(OPEN)
@@ -109,12 +111,8 @@ describe("visual selection render integration", () => {
     sendKeys(editor, ["V", "8", "j"]);
     const lines = editor.render(24);
     assert.equal(lines.length, 7);
-    assert.equal(
-      plain(lines[0] ?? "")
-        .trimEnd()
-        .startsWith("─── ↑ 4 more"),
-      true,
-    );
+    // 0.78 left-aligns scroll indicators; 1.4 centers them.
+    assert.match(plain(lines[0] ?? ""), /^─+ ↑ 4 more ─+$/);
     assert.deepEqual(lines.slice(1, -1).map(selected), [
       "row4 ",
       "row5 ",
@@ -159,13 +157,27 @@ describe("visual selection render integration", () => {
     sendKeys(editor, ["v", "3", "l", "o"]);
     const row = editor.render(20)[1] ?? "";
     assert.equal(selected(row), "abcd");
-    assert.ok(row.includes(`${CURSOR_MARKER}${OPEN}\x1b[7ma`));
-    assert.ok(row.includes(`\x1b[0m${OPEN}bcd${CLOSE}`));
+    if (hostUsesFakeCursor) {
+      assert.ok(
+        row.includes(
+          `${CURSOR_MARKER}\x1b_pi:fc\x07${OPEN}a${CLOSE}\x1b_pi:/fc\x07${OPEN}bcd${CLOSE}`,
+        ),
+      );
+    } else {
+      assert.ok(row.includes(`${CURSOR_MARKER}${OPEN}\x1b[7ma`));
+      assert.ok(row.includes(`\x1b[0m${OPEN}bcd${CLOSE}`));
+    }
     assert.equal(plain(row).trimEnd(), "abcdef");
     editor.handleInput("o");
     const last = editor.render(20)[1] ?? "";
     assert.equal(selected(last), "abcd");
-    assert.ok(last.includes(`${CURSOR_MARKER}${OPEN}\x1b[7md${CLOSE}\x1b[0m`));
+    assert.ok(
+      last.includes(
+        hostUsesFakeCursor
+          ? `${CURSOR_MARKER}\x1b_pi:fc\x07${OPEN}d${CLOSE}\x1b_pi:/fc\x07`
+          : `${CURSOR_MARKER}${OPEN}\x1b[7md${CLOSE}\x1b[0m`,
+      ),
+    );
     assert.ok(!last.includes(`${OPEN}ef`));
   });
 

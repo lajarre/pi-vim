@@ -9,6 +9,7 @@ import {
 import {
   sendKeys,
   setInternalCursor,
+  stripHostCursorMarkers,
   stubKeybindings,
   stubTheme,
   stubTui,
@@ -61,7 +62,9 @@ for (const variant of EDITOR_BINDING_VARIANTS) {
             );
             assert.deepEqual(f.writes, []);
             assert.equal(f.submits, 0);
-            const rendered = f.editor.render(80).join("\n");
+            const rendered = stripHostCursorMarkers(
+              f.editor.render(80).join("\n"),
+            );
             assert.equal(rendered.includes("\x1b]52;"), false);
             for (const control of ["\x07", "\x9d", "\x9c"]) {
               assert.equal(rendered.includes(control), false);
