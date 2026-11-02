@@ -107,6 +107,18 @@ const RESPONSIVENESS_LABELS: Record<string, MetricLabel> = {
   "3fX": { label: "`3fX` across a 600-column line", kind: "command" },
   "200j": { label: "`200j` down a 320-line buffer", kind: "command" },
   "50p": { label: "`50p` char-wise put of a yanked word", kind: "command" },
+  p_chars_1000: {
+    label: "`p` char-wise put of 1,000 ASCII characters",
+    kind: "command",
+  },
+  p_chars_4000: {
+    label: "`p` char-wise put of 4,000 ASCII characters",
+    kind: "command",
+  },
+  p_chars_16000: {
+    label: "`p` char-wise put of 16,000 ASCII characters",
+    kind: "command",
+  },
   w_words_20: { label: "`w` on a 20-word line", kind: "keystroke" },
   w_words_50: { label: "`w` on a 50-word line", kind: "keystroke" },
   w_words_100: { label: "`w` on a 100-word line", kind: "keystroke" },

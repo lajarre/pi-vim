@@ -335,9 +335,17 @@ const THRESHOLDS = {
   // Limits become 69800 / 267900 / 19, leaving 482 B / 535 B headroom.
   // Earlier blocks retain historical measurements; these limits supersede
   // them. No new dependency; render/input evidence and tests are not packed.
+  //
+  // 2026-11: Maintainer adjustments add steady DEC shapes, reserve :x,
+  // preserve host APC cursor markers during Visual paint, use public put
+  // insertion with targeted grapheme lookup, and normalize Ctrl-P/Ctrl-N.
+  // README contracts ship; tests and benchmark evidence do not.
+  // Measured 70632 B packed / 270978 B unpacked / 19 files, up 1314 B /
+  // 3613 B from the rebuilt intake. Limits become 71100 / 271500 / 19,
+  // leaving 468 B / 522 B headroom. No dependency or packed file added.
   maxFiles: 19,
-  maxSize: 69800,
-  maxUnpackedSize: 267900,
+  maxSize: 71100,
+  maxUnpackedSize: 271500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
