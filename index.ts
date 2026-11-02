@@ -4489,7 +4489,13 @@ export default function (pi: ExtensionAPI) {
         labelTransform: reverseVideo,
         selectionColorizer: (s) => {
           try {
-            if (typeof t?.bg === "function") return t.bg("selectedBg", s);
+            if (typeof t?.bg === "function") {
+              const painted = t.bg("selectedBg", s);
+              // Pi 1.4's system theme has no panel color without a terminal
+              // background hint. Reset-only styling cannot show a selection.
+              if (painted !== s && painted !== `\x1b[49m${s}\x1b[49m`)
+                return painted;
+            }
           } catch {
             // Custom themes may omit selectedBg. Retry on the next render so
             // switching back to a complete theme restores its highlight.

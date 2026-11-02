@@ -460,9 +460,13 @@ describe("extension selection theme fallback", () => {
     }
   });
 
+  // Pi 0.78 custom themes can omit bg; Pi 1.4's system theme deliberately
+  // returns only default-background resets when no terminal hint is known.
   for (const bg of [
     undefined,
     "not a function",
+    (_token: string, text: string) => text,
+    (_token: string, text: string) => `\x1b[49m${text}\x1b[49m`,
     () => {
       throw new Error("Unknown theme background color: selectedBg");
     },
