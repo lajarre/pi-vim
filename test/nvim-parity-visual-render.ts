@@ -7,6 +7,11 @@ import { assertMatchesNvim, type NvimParityCase } from "./nvim-oracle.js";
 // linewise paint are asserted by visual-render.test.ts and documented in README.
 const CASES: NvimParityCase[] = [
   {
+    name: "render the host fake-cursor regression selection before yank",
+    initial: { text: "aaaa bbbbb ccccc", cursor: { line: 0, col: 0 } },
+    keys: ["v", "w", "y"],
+  },
+  {
     name: "render a live charwise selection across wrapped rows",
     initial: { text: "alpha beta gamma delta", cursor: { line: 0, col: 0 } },
     keys: ["v", "1", "5", "l"],

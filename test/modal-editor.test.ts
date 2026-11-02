@@ -9846,7 +9846,9 @@ describe("visual mode — selection rendering", () => {
 
     const line = removeCursorMarker(findCursorMarkerLine(editor.render(20)));
 
-    assert.ok(line.startsWith("<selected>hel</selected>lo"));
+    assert.ok(
+      line.startsWith("<selected>he</selected><selected>l</selected>lo"),
+    );
   });
 
   it("highlights whole lines and their EOL cells", () => {

@@ -184,7 +184,7 @@ describe("highlightRenderedTextRange", () => {
         4,
         (text) => `<selected>${text}</selected>`,
       ),
-      `a<selected>b${marker}cd</selected>ef`,
+      `a<selected>b</selected>${marker}<selected>cd</selected>ef`,
     );
   });
 

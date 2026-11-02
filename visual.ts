@@ -152,7 +152,13 @@ export function getVisualRenderSpan(
   return null;
 }
 
-const CURSOR_MARKER = "\x1b_pi:c\x07";
+// APC payloads are zero-width host metadata (cursor and fake-cursor markers
+// on newer pi-tui). Accept BEL and ST terminators without slicing per byte.
+const APC_SOURCE = `${String.fromCharCode(27)}_[\\s\\S]*?(?:${String.fromCharCode(7)}|${String.fromCharCode(27)}\\\\)`;
+const APC_PATTERN = new RegExp(APC_SOURCE, "y");
+const PAINT_BREAK_PATTERN = new RegExp(
+  `(${APC_SOURCE}|${String.fromCharCode(27)}\\[0m)`,
+);
 const CSI_PATTERN = new RegExp(
   `${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
   "y",
@@ -162,8 +168,9 @@ function rawIndexAtTextOffset(line: string, target: number): number {
   let raw = 0;
   let text = 0;
   while (raw < line.length && text < target) {
-    if (line.startsWith(CURSOR_MARKER, raw)) {
-      raw += CURSOR_MARKER.length;
+    APC_PATTERN.lastIndex = raw;
+    if (APC_PATTERN.test(line)) {
+      raw = APC_PATTERN.lastIndex;
       continue;
     }
     CSI_PATTERN.lastIndex = raw;
@@ -186,14 +193,23 @@ export function highlightRenderedTextRange(
   colorize: (text: string) => string,
 ): string {
   if (end <= start) return line;
+  // Validate the entire row, even metadata beyond the selected span. An
+  // unterminated APC makes text offsets unsafe: leave this frame untouched.
+  for (let apc = line.indexOf("\x1b_"); apc !== -1; ) {
+    APC_PATTERN.lastIndex = apc;
+    if (!APC_PATTERN.test(line)) return line;
+    apc = line.indexOf("\x1b_", APC_PATTERN.lastIndex);
+  }
   const rawStart = rawIndexAtTextOffset(line, start);
   const rawEnd = rawIndexAtTextOffset(line, end);
   if (rawEnd <= rawStart) return line;
 
   const selected = line.slice(rawStart, rawEnd);
+  // Keep APCs outside added SGR, especially the adjacent pi:c + pi:fc pair
+  // matched by the host compositor. Only their cell text receives styling.
   const highlighted = selected
-    .split("\x1b[0m")
-    .map((part) => colorize(part))
-    .join("\x1b[0m");
+    .split(PAINT_BREAK_PATTERN)
+    .map((part, index) => (index % 2 === 0 && part ? colorize(part) : part))
+    .join("");
   return line.slice(0, rawStart) + highlighted + line.slice(rawEnd);
 }

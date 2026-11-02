@@ -4,6 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import installPiVim, { ModalEditor } from "../index.js";
 import { setPiVimSettingsReaderForTests } from "../settings.js";
+import { getVisualRenderSpan, highlightRenderedTextRange } from "../visual.js";
 import {
   createCursorShapeTui,
   createExtensionApiHarness,
@@ -158,13 +159,13 @@ describe("visual selection render integration", () => {
     sendKeys(editor, ["v", "3", "l", "o"]);
     const row = editor.render(20)[1] ?? "";
     assert.equal(selected(row), "abcd");
-    assert.ok(row.includes(`${CURSOR_MARKER}\x1b[7ma`));
+    assert.ok(row.includes(`${CURSOR_MARKER}${OPEN}\x1b[7ma`));
     assert.ok(row.includes(`\x1b[0m${OPEN}bcd${CLOSE}`));
     assert.equal(plain(row).trimEnd(), "abcdef");
     editor.handleInput("o");
     const last = editor.render(20)[1] ?? "";
     assert.equal(selected(last), "abcd");
-    assert.ok(last.includes(`${CURSOR_MARKER}\x1b[7md${CLOSE}\x1b[0m`));
+    assert.ok(last.includes(`${CURSOR_MARKER}${OPEN}\x1b[7md${CLOSE}\x1b[0m`));
     assert.ok(!last.includes(`${OPEN}ef`));
   });
 
@@ -281,6 +282,120 @@ describe("visual selection render integration", () => {
       assert.deepEqual(painted.writes, control.writes);
     }
   });
+});
+
+// Host metadata is a presentation contract, not part of nvim's text oracle.
+describe("host cursor marker paint compatibility", () => {
+  const fakeStart = "\x1b_pi:fc\x07";
+  const fakeEnd = "\x1b_pi:/fc\x07";
+  const unmark = (text: string) =>
+    text.replaceAll(fakeStart, "").replaceAll(fakeEnd, "");
+  const focusedFakeCursor = new RegExp(
+    `(${CURSOR_MARKER})${fakeStart}(.*?)(?:${fakeEnd}|$)`,
+    "s",
+  );
+  for (const host of ["0.78", "1.4"]) {
+    function wrap(cell: string) {
+      return host === "1.4"
+        ? `${CURSOR_MARKER}${fakeStart}${cell}${fakeEnd}`
+        : `${CURSOR_MARKER}\x1b[7m${cell}\x1b[0m`;
+    }
+    function check(
+      row: string,
+      start: number,
+      end: number,
+      expected: string,
+      cell: string,
+    ) {
+      const result = highlightRenderedTextRange(row, start, end, colorize);
+      assert.equal(result.replaceAll(OPEN, "").replaceAll(CLOSE, ""), row);
+      assert.equal(selected(unmark(result)), expected);
+      if (host === "1.4") {
+        assert.equal(
+          result.match(focusedFakeCursor)?.[2],
+          `${OPEN}${cell}${CLOSE}`,
+        );
+        assert.ok(
+          result.includes(
+            `${CURSOR_MARKER}${fakeStart}${OPEN}${cell}${CLOSE}${fakeEnd}`,
+          ),
+        );
+      }
+    }
+    for (const cursor of [1, 3, 5]) {
+      it(`${host}: preserves markers with the cursor at selection offset ${cursor - 1}`, () => {
+        const text = "_abcde_";
+        const cell = text[cursor] ?? "";
+        const row = text.slice(0, cursor) + wrap(cell) + text.slice(cursor + 1);
+        check(row, 1, 6, "abcde", cell);
+      });
+    }
+    for (const cursor of [2, 3]) {
+      it(`${host}: preserves a cursor beside a wrapped row boundary (${cursor})`, () => {
+        const text = "_abcde_";
+        for (const [startCol, length] of [
+          [0, 3],
+          [3, 4],
+        ] as const) {
+          const span = getVisualRenderSpan(
+            "visual",
+            { line: 0, col: 1 },
+            { line: 0, col: 5 },
+            [text],
+            { logicalLine: 0, startCol, length },
+          );
+          assert.ok(span);
+          const row = text.slice(startCol, startCol + length);
+          const local = cursor - startCol;
+          const hasCursor = local >= 0 && local < row.length;
+          const cell = row[local] ?? "";
+          const marked = hasCursor
+            ? row.slice(0, local) + wrap(cell) + row.slice(local + 1)
+            : row;
+          if (hasCursor)
+            check(
+              marked,
+              span.start,
+              span.end,
+              row.slice(span.start, span.end),
+              cell,
+            );
+          else
+            assert.equal(
+              selected(
+                highlightRenderedTextRange(
+                  marked,
+                  span.start,
+                  span.end,
+                  colorize,
+                ),
+              ),
+              row.slice(span.start, span.end),
+            );
+        }
+      });
+    }
+  }
+
+  for (const terminator of ["\x07", "\x1b\\"]) {
+    it(`skips unknown APC metadata terminated by ${JSON.stringify(terminator)}`, () => {
+      const apc = `\x1b_other:metadata${terminator}`;
+      assert.equal(
+        highlightRenderedTextRange(`a${apc}bc`, 1, 2, colorize),
+        `a${apc}${OPEN}b${CLOSE}c`,
+      );
+    });
+  }
+  for (const row of [
+    "\x1b_unknown",
+    "a\x1b_unknown",
+    "abc\x1b_unknown",
+    "a\x1b_unknown\x1b[",
+  ]) {
+    it(`leaves an unterminated APC frame unchanged: ${JSON.stringify(row)}`, () => {
+      assert.equal(highlightRenderedTextRange(row, 0, 1, colorize), row);
+    });
+  }
 });
 
 describe("extension selection theme fallback", () => {

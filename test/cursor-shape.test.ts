@@ -275,6 +275,13 @@ describe("stripSoftwareCursorAfterMarker", () => {
     assert.equal(stripSoftwareCursorAfterMarker(line), line);
   });
 
+  it("leaves 1.4 fake-cursor markers and later reverse-video styling untouched", () => {
+    for (const suffix of ["cd", "\x1b[7mcd\x1b[27m"]) {
+      const line = `ab${CURSOR_MARKER}\x1b_pi:fc\x07X\x1b_pi:/fc\x07${suffix}`;
+      assert.equal(stripSoftwareCursorAfterMarker(line), line);
+    }
+  });
+
   it("removes the reverse-video wrapper but keeps the cursor glyph", () => {
     const line = `${CURSOR_MARKER}ab${SW_START}X${RESET}cd`;
     assert.equal(stripSoftwareCursorAfterMarker(line), `${CURSOR_MARKER}abXcd`);

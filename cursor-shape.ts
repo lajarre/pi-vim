@@ -114,6 +114,10 @@ export function stripSoftwareCursorAfterMarker(line: string): string {
   if (markerIndex === -1) return line;
 
   const searchStart = markerIndex + CURSOR_MARKER.length;
+  // pi-tui 0.78/1.0 use SGR-7 after pi:c; >=1.3 wrap the cell in
+  // pi:fc / pi:/fc APCs instead. The compositor resolves those itself.
+  // Do not mistake selection reverse-video later in that row for the cursor.
+  if (line.startsWith("\x1b_pi:fc\x07", searchStart)) return line;
   const cursorStart = line.indexOf(SOFTWARE_CURSOR_START, searchStart);
   if (cursorStart === -1) return line;
 

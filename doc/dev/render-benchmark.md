@@ -108,6 +108,28 @@ remain. Small control deltas (including the +1.8% normal 4K result) are reported
 not attributed to a changed non-visual code path. These runs are not statistical
 proof of zero regression or a bound on real terminal responsiveness.
 
+## host cursor marker compatibility — 2026-11
+
+Base `dea044d` vs the runtime in `fix(visual): keep host cursor markers intact when painting` (its parent is the base). Same harness, eleven fixtures, installed 0.78.0 peers, Node v24.15.0 / darwin-arm64. Three serial base/head, head/base, base/head rounds at 100 warmups, 30 batches of 20 renders; median of medians and median of batch p95s, µs/render. The head was measured before committing this evidence; no runtime changes followed measurement.
+
+| fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `insert_80_long` | 246.358 | 259.869 | 248.975 | 260.444 | +1.1% |
+| `visual_5_lines` | 11.517 | 14.287 | 14.571 | 17.687 | +26.5% |
+| `visual_line_400_words` | 500.331 | 514.567 | 509.267 | 524.981 | +1.8% |
+| `normal_80_long` | 253.967 | 289.492 | 248.519 | 258.306 | -2.1% |
+| `ex_80_long` | 246.521 | 265.381 | 256.127 | 296.548 | +3.9% |
+| `insert_resize_79_80` | 333.810 | 555.138 | 344.148 | 576.788 | +3.1% |
+| `visual_unicode_20` | 100.067 | 105.767 | 105.254 | 109.888 | +5.2% |
+| `visual_one_4096` | 826.156 | 838.971 | 834.444 | 849.421 | +1.0% |
+| `normal_4096` | 312.994 | 328.344 | 314.779 | 334.960 | +0.6% |
+| `visual_one_16384` | 3393.433 | 3444.646 | 3392.181 | 3494.185 | -0.0% |
+| `normal_16384` | 1284.956 | 1304.748 | 1295.031 | 1323.010 | +0.8% |
+
+This correctness fix costs about 3 µs on five short selected lines: validate APC termination and keep host metadata outside injected SGR. Idle controls remain within run noise (−2.1% to +3.9%); their code paths are unchanged. This is not evidence of an idle optimization or real-terminal latency. Synthetic 1.4 marker fixtures assert the compositor regex still matches at selection edges and wrapping boundaries; the timing harness uses the installed 0.78 host, not the unpacked 1.4 reference package.
+
+Reproduce with the commands below, substituting `dea044d` and this section's fix commit for the archive refs and using the same three-round protocol.
+
 ## reproduction
 
 Run from the repository root with its existing development dependencies.
