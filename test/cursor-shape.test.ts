@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import { CURSOR_MARKER } from "@earendil-works/pi-tui";
 
 import {
+  CURSOR_SHAPE_SEQUENCES,
   hasPromptCursorMarker,
   stripSoftwareCursorAfterMarker,
   stripSoftwareCursorWhenHardwareCursorIsUsed,
@@ -107,6 +108,38 @@ describe("cursor ownership across editor reconstruction", () => {
 });
 
 describe("configured cursor shape rendering", () => {
+  it("maps all six DEC shapes to their exact sequences", () => {
+    assert.deepEqual(CURSOR_SHAPE_SEQUENCES, {
+      block: "\x1b[1 q",
+      underline: "\x1b[3 q",
+      bar: "\x1b[5 q",
+      "steady-block": "\x1b[2 q",
+      "steady-underline": "\x1b[4 q",
+      "steady-bar": "\x1b[6 q",
+    });
+  });
+
+  it("writes steady shapes at render time without changing the defaults", () => {
+    const { tui, editor } = fixture({
+      insert: "steady-bar",
+      normal: "steady-block",
+    });
+    editor.render(40);
+    sendKeys(editor, ["\x1b"]);
+    editor.render(40);
+    editor.setCursorShapeSettings({
+      insert: "bar",
+      normal: "steady-underline",
+    });
+    editor.render(40);
+    assert.deepEqual(tui.terminalWrites, ["\x1b[6 q", "\x1b[2 q", "\x1b[4 q"]);
+    const defaults = fixture(resolveCursorShapeSettings(undefined).settings);
+    defaults.editor.render(40);
+    defaults.editor.handleInput("\x1b");
+    defaults.editor.render(40);
+    assert.deepEqual(defaults.tui.terminalWrites, ["\x1b[5 q", "\x1b[1 q"]);
+  });
+
   for (const [mode, keys, label] of [
     ["insert", [], " INSERT "],
     ["normal", ["\x1b"], " NORMAL "],

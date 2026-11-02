@@ -479,13 +479,16 @@ Give insert a solid mode color, let normal defer to thinking, and make both mode
 
 ### cursorShape
 
-`piVim.cursorShape` controls the hardware cursor on terminals supporting DECSCUSR. `insert` defaults to `bar`; `normal` defaults to `block` and also covers Visual, V-Line, and the EX mini-mode. All shapes use the blinking variants:
+`piVim.cursorShape` controls the hardware cursor on terminals supporting DECSCUSR. `insert` defaults to `bar`; `normal` defaults to `block` and also covers Visual, V-Line, and the EX mini-mode. The unprefixed shapes blink; the `steady-` variants do not:
 
 | value | terminal sequence |
 |---|---|
 | `block` | `ESC [ 1 SP q` (`\x1b[1 q`) |
 | `underline` | `ESC [ 3 SP q` (`\x1b[3 q`) |
 | `bar` | `ESC [ 5 SP q` (`\x1b[5 q`) |
+| `steady-block` | `ESC [ 2 SP q` (`\x1b[2 q`) |
+| `steady-underline` | `ESC [ 4 SP q` (`\x1b[4 q`) |
+| `steady-bar` | `ESC [ 6 SP q` (`\x1b[6 q`) |
 
 For a block cursor in Insert as well as Normal:
 

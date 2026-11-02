@@ -9,7 +9,13 @@ export type ModeColorSettings = {
 
 export type LabelPosition = "bottom-right" | "top-left";
 
-export type CursorShape = "block" | "underline" | "bar";
+export type CursorShape =
+  | "block"
+  | "underline"
+  | "bar"
+  | "steady-block"
+  | "steady-underline"
+  | "steady-bar";
 export type CursorShapeSettings = {
   insert: CursorShape;
   normal: CursorShape;
@@ -249,7 +255,14 @@ export function resolveCursorShapeSettings(value: unknown): {
   for (const key of MC) {
     if (!Object.hasOwn(value, key)) continue;
     const shape = value[key];
-    if (shape === "block" || shape === "underline" || shape === "bar") {
+    if (
+      shape === "block" ||
+      shape === "underline" ||
+      shape === "bar" ||
+      shape === "steady-block" ||
+      shape === "steady-underline" ||
+      shape === "steady-bar"
+    ) {
       settings[key] = shape;
     } else {
       invalid.push(key);
@@ -258,7 +271,7 @@ export function resolveCursorShapeSettings(value: unknown): {
   return {
     settings,
     ...(invalid.length > 0 && {
-      warning: `Invalid piVim.cursorShape ${invalid.join(", ")}; expected block, underline, or bar.`,
+      warning: `Invalid piVim.cursorShape ${invalid.join(", ")}; expected block, underline, bar, steady-block, steady-underline, or steady-bar.`,
     }),
   };
 }

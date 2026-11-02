@@ -218,8 +218,15 @@ describe("piVim cursorShape settings", () => {
     assert.deepEqual(resolveCursorShapeSettings({}).settings, result.settings);
   });
 
-  it("reads global values and accepts all three shapes for either mode", () => {
-    for (const shape of ["block", "underline", "bar"]) {
+  it("reads global values and accepts all six shapes for either mode", () => {
+    for (const shape of [
+      "block",
+      "underline",
+      "bar",
+      "steady-block",
+      "steady-underline",
+      "steady-bar",
+    ]) {
       assert.deepEqual(
         resolveCursorShapeSettings(
           readPiVimCursorShapeSetting(
@@ -283,7 +290,7 @@ describe("piVim cursorShape settings", () => {
         {
           settings: { insert: "bar", normal: "bar" },
           warning:
-            "Invalid piVim.cursorShape insert; expected block, underline, or bar.",
+            "Invalid piVim.cursorShape insert; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
         },
       );
       assert.deepEqual(
@@ -291,7 +298,7 @@ describe("piVim cursorShape settings", () => {
         {
           settings: { insert: "block", normal: "block" },
           warning:
-            "Invalid piVim.cursorShape normal; expected block, underline, or bar.",
+            "Invalid piVim.cursorShape normal; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
         },
       );
     }
@@ -300,7 +307,7 @@ describe("piVim cursorShape settings", () => {
       {
         settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
         warning:
-          "Invalid piVim.cursorShape insert, normal; expected block, underline, or bar.",
+          "Invalid piVim.cursorShape insert, normal; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
       },
     );
   });

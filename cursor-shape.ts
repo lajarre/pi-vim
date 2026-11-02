@@ -8,6 +8,9 @@ export const CURSOR_SHAPE_SEQUENCES = {
   block: BLOCK_CURSOR_SHAPE,
   underline: "\x1b[3 q",
   bar: INSERT_CURSOR_SHAPE,
+  "steady-block": "\x1b[2 q",
+  "steady-underline": "\x1b[4 q",
+  "steady-bar": "\x1b[6 q",
 } as const;
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
 const SHOW_HARDWARE_CURSOR = "\x1b[?25h";
