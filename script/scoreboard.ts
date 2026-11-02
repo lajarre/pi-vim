@@ -19,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
+import { findPackageRoot } from "./consumer-workspace.js";
 import { extractPackResult } from "./pack-json.js";
 
 const REPO_ROOT = process.cwd();
@@ -623,8 +624,19 @@ function renderPackSection(
   ];
 }
 
+function readHostVersion(name: string): string {
+  const manifest: unknown = JSON.parse(
+    readFileSync(path.join(findPackageRoot(name), "package.json"), "utf8"),
+  );
+  if (!isObject(manifest) || typeof manifest.version !== "string") {
+    fail(`missing installed host version for ${name}`);
+  }
+  return manifest.version;
+}
+
 function renderDocument(data: {
   date: string;
+  host: string;
   nvimVersion: string;
   cpu: string;
   platform: string;
@@ -652,6 +664,7 @@ function renderDocument(data: {
     "| --- | --- |",
     `| measured | ${data.date} |`,
     `| node | ${data.perf.nodeVersion} |`,
+    `| pi host | ${data.host} |`,
     `| nvim | ${data.nvimVersion} |`,
     `| platform | ${data.platform} |`,
     `| cpu | ${data.cpu} |`,
@@ -716,6 +729,7 @@ function main(): void {
 
   const document = renderDocument({
     date: new Date().toISOString().slice(0, 10),
+    host: `coding-agent ${readHostVersion("@earendil-works/pi-coding-agent")} / pi-tui ${readHostVersion("@earendil-works/pi-tui")}`,
     nvimVersion,
     cpu: cpus()[0]?.model ?? "unknown",
     platform: `${process.platform}-${process.arch}`,

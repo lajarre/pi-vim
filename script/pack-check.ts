@@ -343,9 +343,16 @@ const THRESHOLDS = {
   // Measured 70632 B packed / 270978 B unpacked / 19 files, up 1314 B /
   // 3613 B from the rebuilt intake. Limits become 71100 / 271500 / 19,
   // leaving 468 B / 522 B headroom. No dependency or packed file added.
+  //
+  // 2026-11-02: Pi 1.4 dev-host validation adds a one-render startup cursor
+  // probe, a paint-only compatibility fallback, and reset-only theme handling.
+  // README contracts and two devDependency declarations ship; tests/evidence
+  // do not. Measured 71511 B packed / 273599 B unpacked / 19 files (+879 B /
+  // +2621 B from the adjusted intake). Limits become 72000 / 274100 / 19,
+  // leaving 489 B / 501 B headroom. No runtime dependency or packed file added.
   maxFiles: 19,
-  maxSize: 71100,
-  maxUnpackedSize: 271500,
+  maxSize: 72000,
+  maxUnpackedSize: 274100,
 } as const;
 
 function compareStrings(a: string, b: string): number {
