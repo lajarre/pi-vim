@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { ModalEditor } from "../index.js";
-import type { PiEditorAction } from "../pi-editor-actions.js";
+import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import installPiVim, { ModalEditor } from "../index.js";
+import {
+  type PiEditorAction,
+  probePiEditorCursor,
+} from "../pi-editor-actions.js";
+import { setPiVimSettingsReaderForTests } from "../settings.js";
 import {
   createCursorShapeTui,
+  createExtensionApiHarness,
+  sendKeys,
+  setInternalCursor,
   stubKeybindings,
   stubTheme,
   stubTui,
@@ -19,6 +27,188 @@ const ACTIONS = [
   "addNewLine",
   "moveCursor",
 ] as const satisfies readonly PiEditorAction[0][];
+
+// Host presentation capability, intentionally outside nvim's text oracle.
+describe("cursor marker preflight", () => {
+  for (const cell of [
+    " ",
+    "\x1b[7m \x1b[0m",
+    "\x1b[7m \x1b[27m",
+    "\x1b_pi:fc\x07 \x1b_pi:/fc\x07",
+  ]) {
+    it(`locates the EOL cell using ${JSON.stringify(cell)}`, (t) => {
+      const render = t.mock.method(
+        CustomEditor.prototype,
+        "render",
+        function (this: CustomEditor, width: number) {
+          assert.equal(width, 16);
+          assert.equal(this.focused, true);
+          assert.equal(this.getText(), "a");
+          assert.deepEqual(this.getCursor(), { line: 0, col: 1 });
+          return [
+            "─".repeat(width),
+            `a${CURSOR_MARKER}${cell}${" ".repeat(14)}`,
+            "─".repeat(width),
+          ];
+        },
+      );
+      assert.equal(
+        probePiEditorCursor(stubTui, stubTheme, stubKeybindings),
+        true,
+      );
+      assert.equal(render.mock.callCount(), 1);
+    });
+  }
+
+  for (const row of [
+    "a ",
+    `${CURSOR_MARKER}a `,
+    `ab${CURSOR_MARKER} `,
+    `a${CURSOR_MARKER}\x1b_unknown\x07 `,
+    `a${CURSOR_MARKER}\x1b_pi:fc\x07 `,
+    `a${CURSOR_MARKER}\x1b[7m `,
+    `a${CURSOR_MARKER}\x1b_pi:fc\x07 \x1b_pi:/fc\x07\x1b_unterminated`,
+    `a${CURSOR_MARKER}x`,
+  ]) {
+    it(`rejects unknown or misplaced metadata: ${JSON.stringify(row)}`, (t) => {
+      t.mock.method(CustomEditor.prototype, "render", () => [
+        "border",
+        row,
+        "border",
+      ]);
+      assert.equal(
+        probePiEditorCursor(stubTui, stubTheme, stubKeybindings),
+        false,
+      );
+    });
+  }
+
+  it("accepts the installed host without terminal writes or render requests", () => {
+    const tui = createCursorShapeTui();
+    tui.requestRender = () => assert.fail("probe scheduled a live render");
+    assert.equal(probePiEditorCursor(tui, stubTheme, stubKeybindings), true);
+    assert.deepEqual(tui.terminalWrites, []);
+    assert.deepEqual(tui.hardwareCursorValues, []);
+  });
+
+  for (const throws of [false, true]) {
+    it(`warns once and disables only paint when the probe ${throws ? "throws" : "fails"}`, (t) => {
+      const tui = createCursorShapeTui();
+      const editor = new ModalEditor(tui, stubTheme, stubKeybindings, {
+        selectionColorizer: (text) => `\x1b[44m${text}\x1b[49m`,
+      });
+      const warnings: string[] = [];
+      const writes: string[] = [];
+      const changes: string[] = [];
+      editor.setNotifyFn((text) => warnings.push(text));
+      editor.setClipboardFn((text) => writes.push(text));
+      editor.setClipboardReadFn(() => null);
+      editor.setText("abcd");
+      setInternalCursor(editor, 0);
+      editor.setRegister("keep");
+      editor.onChange = (text) => changes.push(text);
+      editor.focused = true;
+      const internals = editor as unknown as {
+        undoStack: { stack: unknown[] };
+        redoStack: unknown[];
+        historyIndex: number;
+      };
+      const state = () => ({
+        text: editor.getText(),
+        cursor: editor.getCursor(),
+        mode: editor.getMode(),
+        register: editor.getRegister(),
+        undo: internals.undoStack.stack,
+        redo: internals.redoStack,
+        historyIndex: internals.historyIndex,
+      });
+      const before = structuredClone(state());
+      const hostRender = CustomEditor.prototype.render;
+      let probes = 0;
+      t.mock.method(
+        CustomEditor.prototype,
+        "render",
+        function (this: CustomEditor, width: number) {
+          if (this === editor) return hostRender.call(this, width);
+          probes++;
+          if (throws) throw new Error("new host render contract");
+          return ["border", "unknown cursor grammar", "border"];
+        },
+      );
+      assert.equal(editor.preflightHost(), true);
+      assert.equal(editor.preflightHost(), true);
+      assert.equal(probes, 1);
+      assert.deepEqual(state(), before);
+      assert.deepEqual(writes, []);
+      assert.deepEqual(changes, []);
+      assert.deepEqual(tui.terminalWrites, []);
+      assert.deepEqual(tui.hardwareCursorValues, []);
+      assert.equal(warnings.length, 1);
+      assert.match(
+        warnings[0],
+        /Visual highlighting disabled.*Vim editing remains enabled/,
+      );
+      sendKeys(editor, ["\x1b", "0", "v", "l"]);
+      const rows = editor.render(20);
+      assert.ok(rows.at(-1)?.includes(" VISUAL "));
+      assert.ok(!rows.join("").includes("\x1b[44m"));
+      assert.ok(tui.terminalWrites.join("").includes("\x1b[1 q"));
+      editor.handleInput("y");
+      assert.equal(editor.getRegister(), "ab");
+      assert.deepEqual(writes, ["ab"]);
+      assert.equal(editor.getMode(), "normal");
+      sendKeys(editor, ["p", "u"]);
+      assert.equal(editor.getText(), "abcd");
+      editor.handleInput("\x12");
+      assert.equal(editor.getText(), "aabbcd");
+      sendKeys(editor, [":", "x", "\r"]);
+      assert.match(warnings[1], /Reserved ex command/);
+      editor.render(20);
+      assert.equal(probes, 1);
+      assert.equal(warnings.length, 2);
+    });
+  }
+
+  it("runs once in the startup factory before the first input or live render", async (t) => {
+    const restore = setPiVimSettingsReaderForTests(() => ({}));
+    const pi = createExtensionApiHarness();
+    const warnings: string[] = [];
+    let editor: ModalEditor | undefined;
+    const render = t.mock.method(CustomEditor.prototype, "render", () => [
+      "border",
+      "changed grammar",
+      "border",
+    ]);
+    try {
+      installPiVim(pi);
+      await pi.emit("session_start", undefined, {
+        cwd: process.cwd(),
+        hasUI: true,
+        ui: {
+          theme: stubTheme,
+          notify: (text: string) => warnings.push(text),
+          setEditorComponent(
+            factory: (
+              ...args: ConstructorParameters<typeof CustomEditor>
+            ) => ModalEditor,
+          ) {
+            editor = factory(stubTui, stubTheme, stubKeybindings);
+          },
+        },
+      });
+      assert.ok(editor);
+      assert.equal(render.mock.callCount(), 1);
+      assert.equal(warnings.length, 1);
+      assert.equal(editor.preflightHost(), true);
+      assert.equal(render.mock.callCount(), 1);
+      sendKeys(editor, ["abc", "\x1b", "0", "x"]);
+      assert.equal(editor.getText(), "bc");
+    } finally {
+      await pi.emit("session_shutdown");
+      restore();
+    }
+  });
+});
 
 describe("editor action compatibility preflight", () => {
   for (const action of ACTIONS) {

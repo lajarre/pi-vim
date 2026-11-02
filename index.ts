@@ -64,6 +64,7 @@ import {
 } from "./motions.js";
 import {
   getPiEditorCompatibilityError,
+  probePiEditorCursor,
   runPiEditorAction,
 } from "./pi-editor-actions.js";
 import {
@@ -309,6 +310,8 @@ export class ModalEditor extends CustomEditor {
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private editorActionsAvailable: boolean | null = null;
+  private cursorMarkerProbe: (() => boolean) | null;
+  private visualPaintAvailable = true;
   private readonly labelPosition: LabelPosition;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
@@ -378,6 +381,7 @@ export class ModalEditor extends CustomEditor {
     opts?: ModalEditorOptions,
   ) {
     super(tui, theme, kb);
+    this.cursorMarkerProbe = () => probePiEditorCursor(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.labelPosition = opts?.labelPosition ?? "bottom-right";
     this.labelColorizers = opts?.labelColorizers ?? null;
@@ -1326,21 +1330,28 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private canUseVimActions(): boolean {
+  preflightHost(): boolean {
     // Validate before input or paint without touching editing state. A changed
     // private action contract need not break the host's public input path.
     if (this.editorActionsAvailable === null) {
       const error = getPiEditorCompatibilityError(this);
       this.editorActionsAvailable = error === null;
+      const probe = this.cursorMarkerProbe;
+      this.cursorMarkerProbe = null;
       if (error) {
         this.notifyFn(`${error}; using the stock Pi editor without Vim mode.`);
+      } else if (probe && !probe()) {
+        this.visualPaintAvailable = false;
+        this.notifyFn(
+          "Pi cursor marker compatibility error; Visual highlighting disabled. Vim editing remains enabled.",
+        );
       }
     }
     return this.editorActionsAvailable;
   }
 
   handleInput(data: string): void {
-    if (!this.canUseVimActions()) {
+    if (!this.preflightHost()) {
       super.handleInput(data);
       return;
     }
@@ -4326,11 +4337,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
-    const vim = this.canUseVimActions();
+    const vim = this.preflightHost();
     const lines = super.render(width);
     if (!vim) return lines;
     this.syncCursorShapeForRender(lines);
-    if (isVisualMode(this.mode)) {
+    if (this.visualPaintAvailable && isVisualMode(this.mode)) {
       this.renderVisualSelection(lines, width, this.mode);
     }
     if (lines.length === 0) return lines;
@@ -4503,12 +4514,12 @@ export default function (pi: ExtensionAPI) {
           return reverseVideo(s);
         },
       });
-      const compatible = getPiEditorCompatibilityError(editor) === null;
+      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
+      const compatible = editor.preflightHost();
       cursorShapeCleanup?.();
       cursorShapeCleanup = compatible ? enableCursorShapeSupport(tui) : null;
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
-      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
       editor.setCursorShapeSettings(cursorShape.settings);
       editor.setHistoryNavigation(historyNavigation.enabled);

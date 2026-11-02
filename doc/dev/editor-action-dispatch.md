@@ -54,6 +54,32 @@ Follow-up tests cover `2P.`, single-command undo windows, exhausted undo/redo,
 real-edit redo invalidation, harmless input, joined/combining graphemes,
 and open-line commands at empty/wrapped buffer edges.
 
+## Cursor render preflight — 2026-11-02
+
+After required-action validation, startup renders one detached `CustomEditor`
+containing `a`, focused with its cursor on the EOL space at column one. It checks
+`pi:c` followed by a bare cell, SGR-7 cell (reset 0 or 27), or the 1.4
+`pi:fc`/`pi:/fc` pair, and runs the actual Visual raw-offset scanner over that
+cell. A missing/misplaced marker, unknown grammar, malformed APC or probe
+exception warns once and disables only Visual paint for that editor instance.
+Normal/Insert/Visual commands, registers, undo/redo, EX, labels and hardware
+cursor shaping continue. Required-action failure still uses stock pass-through.
+
+Decision: use a detached editor, not temporary mutation/restoration of the live
+buffer (would risk undo, autocomplete and onChange side effects), nor inspection
+of the first live frame (unknown text/focus and not a startup guarantee). Cache
+per editor, not globally, so a reconstructed editor probes its current host.
+Constructor callers outside the startup factory get the same preflight on first
+input/render. The cached hot path does no probe work. Probe errors are surfaced,
+not classified as host bugs; actual live render/action exceptions still escape.
+
+Tests assert one render, supported and rejected grammars, unchanged text/cursor,
+mode/register/history, no terminal writes or render requests, and continued
+editing/selection/EX after paint disables. This is a Pi presentation capability,
+not Vim semantics; nvim cannot exercise it. See the dated hot-path/render
+benchmark sections for first-probe, warmed probe and same-host control timings.
+It is not a test of the real terminal compositor, wrapper stack or fullscreen UI.
+
 ## Existing gaps kept out of scope
 
 This dispatch change does not redesign normal-mode cursor clamps (`9l`, `D`,
@@ -143,7 +169,7 @@ key fallback is needed. TUI dispatch still lets editor exceptions propagate
 
 The 1.4 `system` theme deliberately returns reset-only `selectedBg` when terminal
 colors are unknown (coding-agent `dist/modes/interactive/theme/theme.js:405–416`
-and `system-theme.js:201–214`). This is not a host bug: pi-vim now treats identity
+and `system-theme.js:365–367,527–544`). This is not a host bug: pi-vim now treats identity
 or `SGR 49 + text + SGR 49` as absent paint and uses reverse video. Tests retain
 both host cursor grammars, narrow/centered border fixtures, and theme recovery.
 

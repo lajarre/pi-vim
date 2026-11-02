@@ -194,3 +194,71 @@ const sorted = [...samples].sort((a, b) => a - b);
 console.log({ firstUs, median: sorted[14], p95: sorted[27], samples, consumed });
 JS
 ```
+
+## Pi 1.4 host compatibility and startup probe — 2026-11-02
+
+Base `f8b20d8` (before compat commits); head: the cursor-marker startup probe
+change, including reset-only theme fallback. **Both use the installed
+coding-agent/pi-tui 1.4.0**, Node v24.15.0, darwin-arm64. Three serial alternating
+rounds (base/head, head/base, base/head), eight samples per operation using
+`script/hotpath-compare.ts`. Values are medians of the three per-run medians/p95s,
+in µs/op. They do not isolate 0.78-to-1.4 host performance.
+
+| operation | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| noop_key | 0.966 | 1.122 | 0.952 | 1.130 | -1.4% |
+| motion_h_4k | 546.442 | 550.456 | 548.079 | 550.427 | +0.3% |
+| motion_w_50 | 1.708 | 2.035 | 1.645 | 2.100 | -3.7% |
+| insert_type | 11.801 | 12.082 | 11.673 | 11.858 | -1.1% |
+| insert_edit | 17.284 | 17.435 | 16.727 | 17.604 | -3.2% |
+
+The required-action result and render capability are cached per instance; no
+probe occurs on repeated keys. The +0.3% wide-line control is within these batch
+variations; this is compatibility evidence, not an optimization claim.
+
+### Startup (same 1.4 host)
+
+`script/perf-bench.ts --json`, seven child processes per import metric, five
+heap samples. Run once per revision; these noisy import deltas **exclude editor
+construction/preflight**, which is measured separately below. The older history
+integration recorded 21.847 ms incremental import on 0.78 (not directly comparable).
+
+| startup metric | base ms | head ms |
+| --- | ---: | ---: |
+| runtime only | 73.157 | 74.574 |
+| host import | 642.644 | 650.957 |
+| extension import | 656.245 | 667.761 |
+| incremental extension import | 13.601 | 16.804 |
+
+Incremental heap: 780,480 → 785,416 B (+4,936 B); not peak memory or proof of a
+retained-heap bound. The import delta rose 3.203 ms in this single process batch;
+do not attribute all of that to the probe or call it a cold-start guarantee.
+
+The detached probe includes construction, `setText("a")`, **one** 16-column
+host render and the real selection scanner. Three fresh-process first calls
+were **1,587.333 / 1,640.750 / 1,535.625 µs** (median **1.587 ms**). After 100
+warmups, 30 batches of 100 calls per process gave **7.176 µs median / 9.908 µs
+p95** (median of three runs). Construction plus the first Escape, measured the
+same way on both revisions, changed **6.578 / 9.979 → 13.737 / 18.301 µs**
+(median / p95). Accept the one-time ~1.6 ms cold cost to detect incompatible
+paint before editing; no persistent renderer, timer or frame cache was added.
+
+Reproduce without another worktree or installation:
+
+```sh
+mkdir -p .tmp/compat-base
+git archive f8b20d8 '*.ts' | tar -x -C .tmp/compat-base
+PIVIM_ENTRY=.tmp/compat-base/index.ts node --import tsx/esm script/hotpath-compare.ts
+node --import tsx/esm script/hotpath-compare.ts
+# Alternate those commands for three rounds. For correct import targets:
+(cd .tmp/compat-base && node --import tsx/esm script/perf-bench.ts --json)
+node --import tsx/esm script/perf-bench.ts --json
+```
+
+For the probe-only metric, import `probePiEditorCursor` from
+`pi-editor-actions.ts`; pass `{ requestRender() {}, terminal: { rows: 40, cols: 80 } }`,
+a theme with identity `borderColor`/`bold` and `fg: (_k,s) => s`, and
+`{ matches: () => false }`. Time the first call, then 100 warmups and 30 batches
+of 100 calls, asserting every return is true. For the construction control,
+time `new ModalEditor(tui, theme, kb).handleInput("\u005cx1b")` instead. The startup
+probe is host presentation, not a Vim command, so no nvim parity row is added.

@@ -130,6 +130,58 @@ This correctness fix costs about 3 µs on five short selected lines: validate AP
 
 Reproduce with the commands below, substituting `dea044d` and this section's fix commit for the archive refs and using the same three-round protocol.
 
+## Pi 1.4 host compatibility — 2026-11-02
+
+Base `f8b20d8`; head: the cursor-marker startup probe plus reset-only theme
+fallback. Both use **coding-agent/pi-tui 1.4.0**, Node v24.15.0, darwin-arm64.
+`script/render-compare.ts`: three alternating serial rounds, 100 warmups, 30
+batches of 20 renders; medians of per-run medians/p95s, µs/render. The startup
+probe runs before these warmed samples, not once per frame.
+
+| fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| insert_80_long | 344.396 | 355.294 | 344.029 | 354.708 | -0.1% |
+| visual_5_lines | 13.671 | 16.475 | 14.042 | 15.963 | +2.7% |
+| visual_line_400_words | 708.137 | 727.723 | 709.290 | 723.790 | +0.2% |
+| normal_80_long | 344.960 | 354.704 | 345.415 | 356.702 | +0.1% |
+| ex_80_long | 340.375 | 351.267 | 346.435 | 352.019 | +1.8% |
+| insert_resize_79_80 | 366.644 | 375.487 | 367.383 | 377.017 | +0.2% |
+| visual_unicode_20 | 137.096 | 153.219 | 135.650 | 150.946 | -1.1% |
+| visual_one_4096 | 1137.577 | 1168.408 | 1160.792 | 1232.146 | +2.0% |
+| normal_4096 | 469.344 | 494.233 | 473.319 | 490.485 | +0.8% |
+| visual_one_16384 | 4625.963 | 4700.325 | 4634.817 | 4722.588 | +0.2% |
+| normal_16384 | 1894.146 | 1939.462 | 1893.229 | 1940.650 | -0.0% |
+
+Small-selection median rose 0.371 µs; the 4K Visual p95 rose 63.738 µs.
+Report these positive deltas without claiming statistical non-regression.
+No layout/segmentation optimization or idle-frame cache is part of this change.
+The compositor and actual terminal transport are not timed.
+
+The standard harness injects a selection colorizer directly. A separate probe
+uses the actual startup factory and installed themes to include the new fallback:
+`alpha beta gamma`, Escape/0/V, focused, 80 columns, 40 terminal rows, identity
+editor theme, actual UI `system`/`dark` theme. Three alternating rounds, 100
+warmups, 30 batches of 100 renders; µs/render:
+
+| factory selection theme | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| system, no terminal hints | 4.563 | 6.941 | 4.638 | 7.518 |
+| dark | 4.996 | 5.571 | 4.886 | 5.319 |
+
+System changes from invisible reset-only styling to visible reverse video;
+its +0.075 µs median is retained for correctness. Theme recovery remains
+per-render. Startup costs, including the first cold probe, are in the dated
+[hot-path section](hotpath-benchmark.md#pi-14-host-compatibility-and-startup-probe--2026-11-02).
+
+Reproduce the standard table by archiving only `*.ts` from `f8b20d8` under
+`.tmp/compat-base`, then alternate `PIVIM_ENTRY=.tmp/compat-base/index.ts` and
+`PIVIM_ENTRY=index.ts` with `PIVIM_WARMUP=100 PIVIM_SAMPLES=30 PIVIM_ITERATIONS=20`
+on `node --import tsx/esm script/render-compare.ts`. Both entries resolve the
+same installed 1.4.0 peers. For the factory probe use an empty settings-reader
+fixture, the existing extension API harness and `getThemeByName` from the
+installed coding-agent `dist/modes/interactive/theme/theme.js`; do not initialize
+terminal hints or launch a real TUI.
+
 ## reproduction
 
 Run from the repository root with its existing development dependencies.
