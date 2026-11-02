@@ -1665,6 +1665,7 @@ export class ModalEditor extends CustomEditor {
     "co",
     "j",
     "w",
+    "x",
     "r",
     "normal",
     "sort",

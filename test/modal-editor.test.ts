@@ -1805,7 +1805,20 @@ describe("ex pi-command bridge", () => {
   });
 
   it("reserves future vim ex names instead of dispatching them", () => {
-    for (const name of ["s", "g", "v", "d", "m", "t", "co", "j", "w", "r"]) {
+    // Intentional divergence: these names notify rather than execute Vim ex.
+    for (const name of [
+      "s",
+      "g",
+      "v",
+      "d",
+      "m",
+      "t",
+      "co",
+      "j",
+      "w",
+      "x",
+      "r",
+    ]) {
       const session = createBridgeSession("", [name]);
 
       runEx(session.editor, name);
@@ -1831,12 +1844,18 @@ describe("ex pi-command bridge", () => {
   });
 
   it("reserves a forced vim ex name", () => {
-    const session = createBridgeSession("", ["w"]);
-
-    runEx(session.editor, "w!");
-
-    assert.deepEqual(session.dispatched, []);
-    assert.deepEqual(session.notifications, ["Reserved ex command: :w!"]);
+    for (const name of ["w", "x"]) {
+      const session = createBridgeSession("draft", [name]);
+      const cursor = session.editor.getCursor();
+      runEx(session.editor, `${name}!`);
+      assert.deepEqual(session.dispatched, []);
+      assert.deepEqual(session.notifications, [
+        `Reserved ex command: :${name}!`,
+      ]);
+      assert.equal(session.editor.getText(), "draft");
+      assert.deepEqual(session.editor.getCursor(), cursor);
+      assert.equal(session.editor.getMode(), "normal");
+    }
   });
 
   it("reserves a name even when a pi command of that name exists", () => {
