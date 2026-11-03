@@ -350,9 +350,22 @@ const THRESHOLDS = {
   // do not. Measured 71511 B packed / 273599 B unpacked / 19 files (+879 B /
   // +2621 B from the adjusted intake). Limits become 72000 / 274100 / 19,
   // leaving 489 B / 501 B headroom. No runtime dependency or packed file added.
+  //
+  // 2026-11-03: Any-draft history and modal control-key ownership update
+  // dispatch and shipped README contracts; pi-tui's peer floor becomes 1.0.
+  // Measured 71887 B packed / 274518 B unpacked / 19 files (+376 B / +919 B
+  // from the 1.4 compatibility round). Limits become 72400 / 275100 / 19,
+  // leaving 513 B / 582 B headroom. No runtime dependency or packed file
+  // added; the default-binding matrix and benchmark evidence are not packed.
+  //
+  // 2026-11-04: Remove control-line aliases and split app callbacks from
+  // editor bindings outside Insert. Runtime routing and README contracts
+  // measure 72415 B packed / 276481 B unpacked / 19 files (+528 B / +1963 B).
+  // Limits become 72900 / 277100 / 19, leaving 485 B / 619 B headroom.
+  // No dependency or packed file added; tests and evidence remain excluded.
   maxFiles: 19,
-  maxSize: 72000,
-  maxUnpackedSize: 274100,
+  maxSize: 72900,
+  maxUnpackedSize: 277100,
 } as const;
 
 function compareStrings(a: string, b: string): number {
