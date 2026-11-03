@@ -154,7 +154,7 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | key | action |
 |---|---|
 | `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; counted line moves stay in the buffer |
-| Bare `k` on the first logical line / `j` on the last | Recall older / newer Pi prompts when empty or already browsing (newer requires browsing); [historyNavigation](#historynavigation) defaults on |
+| Bare `k` on the first logical line; `j` on the last | Recall older Pi prompts from any draft; newer requires browsing and restores the saved draft past newest; [historyNavigation](#historynavigation) defaults on |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
 | `gM`; `{count}gM` | Halfway the text of the line; a count of `1`-`100` moves to that percentage of it (higher counts mean halfway, per nvim); text is measured in graphemes, not screen cells |
@@ -405,11 +405,11 @@ Default-equivalent `settings.json`:
 
 ### historyNavigation
 
-`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On logical line zero, `k` recalls an older prompt only when the buffer is empty or history browsing is already active. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest returns to the draft (empty when browsing began with `k`). `false` keeps both keys buffer-local. Project settings can override global in either direction; non-boolean values use the default rather than the global value and show a warning at session start when a UI is available.
+`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On the first logical line, `k` recalls an older prompt from any draft, empty or not. Pi saves the draft when browsing starts. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest restores the saved draft's text and cursor. `false` keeps both keys buffer-local. Project settings can override global in either direction; non-boolean values use the default rather than the global value and show a warning at session start when a UI is available.
 
-Unlike zsh vi-mode, a non-empty, non-browsing draft is never replaced: `k` / `j` at its edges remain no-ops. This retains Pi 0.78's draft protection even on newer hosts. Edges are logical lines, not wrapped screen rows. After recall the cursor lands on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Insert-mode arrows retain Pi's own version-dependent behavior.
+Edges are logical lines, not wrapped screen rows. Recalled history entries place the cursor on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Returning to the saved draft instead keeps Pi's restored cursor position. Insert-mode arrows retain Pi's own behavior. `<C-p>` cycles models only in Insert; both control-key bindings remain Pi-owned there, while Normal/Visual reuse the `k` / `j` rules (Visual never recalls history).
 
-Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and protected-draft no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
+Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and buffer-local no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
 
 ### exCommand
 
@@ -549,7 +549,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 
 | area | this extension | full Vim |
 |---|---|---|
-| Prompt history | Bare normal `k` / `j` expose Pi history at logical buffer edges, with empty-draft protection; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
+| Prompt history | Bare normal `k` / `j` (also `<C-p>` / `<C-n>`) expose Pi history at logical edges from any draft; past newest restores the saved text and cursor; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
 | Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |

@@ -2825,17 +2825,16 @@ export class ModalEditor extends CustomEditor {
     const lines = this.getLines();
     const atEdge =
       this.getCursor().line === (direction === -1 ? 0 : lines.length - 1);
-    const empty = lines.length === 1 && lines[0] === "";
-    // Retain Pi 0.78's draft protection, even on hosts that allow non-empty
-    // column-zero drafts to enter history. Edges are logical, not visual.
-    if (!atEdge || (index < 0 && !(direction === -1 && empty))) return false;
+    // Pi >=1.0 saves any draft on entry. Only newer navigation needs an
+    // active browse; edges are logical lines, not wrapped visual rows.
+    if (!atEdge || (index < 0 && direction === 1)) return false;
 
     // Pi owns the initial undo snapshot. No Vim change/window or dot recording:
     // u restores the pre-browse draft; onChange invalidates stale redo.
     runPiEditorAction(this, "navigateHistory", direction);
-    if (editor.historyIndex !== index) {
-      // Hosts differ on older-recall placement. Normalize successful recalls
-      // only, leaving exhausted-history no-ops (including their cursor) alone.
+    if (editor.historyIndex !== index && editor.historyIndex !== -1) {
+      // Normalize recalled entries only. Returning past newest restores the
+      // host's saved draft cursor; exhausted-history no-ops also leave it alone.
       this.moveCursorToBufferEnd();
       runPiEditorAction(this, "moveToLineEnd");
       this.clampCursorToLastGrapheme();

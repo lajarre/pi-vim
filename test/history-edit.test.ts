@@ -32,11 +32,12 @@ function snapshot(editor: ModalEditor) {
 }
 
 // Prompt recall is an intentional non-Vim host feature. Once edited, the
-// recalled text must behave like an ordinary buffer, including edge motions.
+// recalled text behaves like any draft: counted edge motions stay buffer-local,
+// while bare k at the first logical line starts a fresh browse.
 describe("edits end host prompt browsing", () => {
   for (const keys of [["J"], ["g", "J"]]) {
     for (const repeat of [false, true]) {
-      it(`${repeat ? "dot-" : ""}${keys.join("")} keeps the edited recall through edge motions and undo`, () => {
+      it(`${repeat ? "dot-" : ""}${keys.join("")} keeps the edited recall through counted edge motions and undo`, () => {
         const { editor, state, writes } = fixture();
         if (repeat) {
           sendKeys(editor, ["k", "g", "g", ...keys, "u", "u"]);
@@ -55,7 +56,7 @@ describe("edits end host prompt browsing", () => {
         assert.equal(state.historyIndex, -1);
         assert.equal(state.undoStack.stack.length, 2);
         assert.equal(state.redoStack.length, 0);
-        sendKeys(editor, ["j", "k", "z"]);
+        sendKeys(editor, ["j", "1", "k", "z"]);
         assert.deepEqual(snapshot(editor), joined);
         assert.equal(state.historyIndex, -1);
         editor.handleInput("u");
@@ -103,6 +104,26 @@ describe("edits end host prompt browsing", () => {
     });
   }
 
+  it("a new browse saves an edited recall as its own draft and undo anchor", () => {
+    const { editor, state, writes } = fixture();
+    sendKeys(editor, ["k", "g", "g", "x"]);
+    const edited = snapshot(editor);
+    assert.equal(state.historyIndex, -1);
+    sendKeys(editor, ["k", "g", "g", "k", "j", "j"]);
+    assert.deepEqual(snapshot(editor), edited);
+    assert.equal(state.historyIndex, -1);
+    assert.equal(state.undoStack.stack.length, 3);
+    editor.handleInput("u");
+    assert.deepEqual(snapshot(editor), edited);
+    // Undoing the identical returned draft consumes the host anchor, not a
+    // new redo unit; this is the existing snapshot-change policy.
+    assert.equal(state.redoStack.length, 0);
+    editor.handleInput("u");
+    assert.equal(editor.getText(), "one\ntwo");
+    assert.equal(state.redoStack.length, 1);
+    assert.deepEqual(writes, ["o"]);
+  });
+
   it("1J is harmless and consumes its count while browsing", () => {
     const { editor, state, writes } = fixture();
     sendKeys(editor, ["k", "1", "J"]);
@@ -133,7 +154,7 @@ describe("edits end host prompt browsing", () => {
       };
       assert.deepEqual(snapshot(editor), edited);
       assert.equal(state.historyIndex, -1);
-      editor.handleInput("k");
+      sendKeys(editor, ["1", "k"]);
       assert.deepEqual(snapshot(editor), edited);
       sendKeys(editor, ["G", "j"]);
       assert.equal(editor.getText(), text);

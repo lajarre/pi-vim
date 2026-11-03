@@ -93,17 +93,28 @@ describe("normal-mode prompt history (intentional non-Vim host feature)", () => 
   });
 
   for (const text of ["draft", "   ", "first\nsecond", "\n"]) {
-    it(`protects a non-browsing draft ${JSON.stringify(text)}`, () => {
+    it(`saves and restores the draft and cursor ${JSON.stringify(text)}`, () => {
       const { editor, writes, state } = fixture(text);
+      setInternalCursor(editor, text.startsWith("\n") ? 0 : 1, 0);
       const before = snapshot(editor);
-      editor.handleInput("k");
+      for (const [key, entry, index] of [
+        ["k", NEWER, 0],
+        ["k", OLDER, 1],
+        ["j", NEWER, 0],
+      ] as const) {
+        editor.handleInput(key);
+        expectRecall(editor, entry, index);
+        assert.equal(state.undoStack.stack.length, 1);
+      }
+      editor.handleInput("j");
       assert.deepEqual(snapshot(editor), before);
+      assert.equal(state.historyIndex, -1);
+      assert.equal(state.undoStack.stack.length, 1);
       editor.handleInput("G");
       const bottom = snapshot(editor);
       editor.handleInput("j");
       assert.deepEqual(snapshot(editor), bottom);
-      assert.equal(state.historyIndex, -1);
-      assert.equal(state.undoStack.stack.length, 0);
+      assert.equal(state.lastRepeatableCommand, null);
       assert.deepEqual(writes, []);
     });
   }
@@ -279,29 +290,27 @@ describe("normal-mode prompt history (intentional non-Vim host feature)", () => 
     sendKeys(editor, ["u", "j", "z", REDO]);
     expectRecall(editor, OLDER, -1);
     assert.equal(state.redoStack.length, 0);
-    editor.handleInput("k");
+    sendKeys(editor, ["1", "k"]);
     expectRecall(editor, OLDER, -1);
     sendKeys(editor, ["u", "u", "9", REDO, REDO]);
     expectRecall(editor, OLDER, -1);
     assert.deepEqual(writes, []);
   });
 
-  it("recall clears stale redo, but disabled/protected/no-history inputs preserve it", () => {
-    for (const kind of ["recall", "disabled", "protected", "no-history"]) {
+  it("recall clears stale redo, but disabled/counted/no-history inputs preserve it", () => {
+    for (const kind of ["recall", "disabled", "counted", "no-history"]) {
       const { editor, state } = fixture(
-        kind === "protected" ? "base" : "",
+        "base",
         kind === "no-history" ? [] : undefined,
       );
       sendKeys(editor, ["i", "X", ESC, "u"]);
       assert.equal(state.redoStack.length, 1);
       if (kind === "disabled") editor.setHistoryNavigation(false);
+      if (kind === "counted") editor.handleInput("1");
       editor.handleInput("k");
       assert.equal(state.redoStack.length, kind === "recall" ? 0 : 1);
       editor.handleInput(REDO);
-      assert.equal(
-        editor.getText(),
-        kind === "recall" ? NEWER : kind === "protected" ? "Xbase" : "X",
-      );
+      assert.equal(editor.getText(), kind === "recall" ? NEWER : "Xbase");
       assert.equal(editor.getMode(), "normal");
     }
   });

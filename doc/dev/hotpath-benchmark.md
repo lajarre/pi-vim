@@ -141,6 +141,29 @@ Reproduce without installing or switching branches: archive `d66d494` TypeScript
 
 The existing all-whitespace first-nonblank parity gap remains out of scope: changing it would alter shared `^` and put placement policy, rather than preserve the observables of this insertion migration. Characterwise multiline puts retain their documented Pi cursor placement.
 
+## saved-draft history — 2026-11-03
+
+Base `de9f457` vs the runtime in `feat(history): enter history from a non-empty draft`.
+Same installed coding-agent/pi-tui 1.4.0, Node v24.15.0, darwin-arm64.
+Three serial base/head, head/base, base/head rounds of the five-operation
+`script/hotpath-compare.ts` set above, eight samples per run. Median of the
+three per-run medians/p95s, µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| noop_key | 0.933 | 1.103 | 0.943 | 1.146 |
+| motion_h_4k | 540.830 | 547.424 | 540.323 | 545.804 |
+| motion_w_50 | 1.687 | 1.998 | 1.648 | 1.945 |
+| insert_type | 11.548 | 11.854 | 11.643 | 11.980 |
+| insert_edit | 16.830 | 17.502 | 17.023 | 17.746 |
+
+The largest positive median delta is 0.193 µs for a fresh Insert edit (+1.1%).
+These are input-path controls, not successful-history-recall latency or terminal
+measurements. The history guard removes the empty-buffer check and preserves
+host-restored cursors; it adds no scan/cache. No performance improvement is claimed.
+Reproduce by archiving `de9f457 '*.ts'` into `.tmp/final-base` and alternating
+`PIVIM_ENTRY=.tmp/final-base/index.ts` with the default entrypoint as above.
+
 ## clipboard runtime probe — 2026-10-14
 
 `canSpawnJavaScriptHelper()` runs before clipboard reads/writes. Before this

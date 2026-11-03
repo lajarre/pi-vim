@@ -258,9 +258,10 @@ snapshot on entering history. Their dispatch conditions are not identical:
 | returning to index -1 | Clears editor (E299) | Same (E301) | Restores saved historyDraft (E348–360) |
 | undo | Clears browsing index, restores snapshot | Same | Also clears saved draft and restores paste metadata |
 
-Normal-mode j/k deliberately retain the conservative empty-or-browsing guard,
-use logical edges, and normalize successful recalls to the last grapheme of the
-last line. Counts/operators and pending prefixes bypass this path; visual modes
+Normal-mode k enters history from any draft at the first logical line;
+j at the last logical line requires browsing. Pi owns saving/restoring the
+draft. Recalled entries normalize to the last grapheme of the last line, but
+returning past newest preserves the host-restored draft cursor. Counts/operators and pending prefixes bypass this path; visual modes
 and replay are rejected before host dispatch. Exhausted navigation does not
 reposition the cursor. The new boolean defaults on, with project override; this
 exposes existing host history without granting a capability or maintaining a
@@ -268,7 +269,7 @@ second history/draft store. Insert arrows remain host-owned.
 
 No pi-vim undo window opens for recall. Pi's first-browse anchor survives
 `collapseUndoStackTo`; `u` before further edits restores the pre-browse draft
-(empty after normal-mode entry) and exits browsing. Redo restores recalled text
+(empty or non-empty) and exits browsing. Redo restores recalled text
 and cursor but not browsing state. Pi's onChange clears stale redo; harmless
 inputs do not. Recall preserves the last dot command. Seeded tests assert these
 states plus register/clipboard neutrality, mode/label stability, Unicode,
