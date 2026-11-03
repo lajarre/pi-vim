@@ -24,8 +24,12 @@ preflight avoids starting those Vim actions. This is not a synthetic-key fallbac
 no remapped key is fabricated, and Pi's actual input semantics remain in control.
 
 Movement, deletion, undo, prompt-history recall, open-line commands, Insert-mode
-positioning shortcuts, and register insertion bypass `CustomEditor.handleInput`. Actual user input
-still goes through that dispatcher, including application and extension shortcuts.
+positioning shortcuts, and register insertion bypass `CustomEditor.handleInput`.
+Insert input still uses that dispatcher, including application and extension
+shortcuts. Non-Insert modes resolve registered app actions before pending Vim
+arguments and invoke their host callbacks; unsupported editor input is consumed.
+EX keeps its line for app actions other than interrupt/clear. Explicit idle-Normal
+Enter/Escape still use the host dispatcher. See the ownership contract below.
 Calling the original operations retains Pi's kill ring, undo snapshots, and
 change notifications. Register content is inserted in one public
 `super.insertTextAtCursor(text)` call per copy, not input events, so it cannot
@@ -53,6 +57,54 @@ from both undo histories; it also tolerates undo messages preceding its result.
 Follow-up tests cover `2P.`, single-command undo windows, exhausted undo/redo,
 real-edit redo invalidation, harmless input, joined/combining graphemes,
 and open-line commands at empty/wrapped buffer edges.
+
+## App versus editor ownership — 2026-11-04
+
+Non-Insert input uses the injected live `KeybindingsManager` and the editor's
+public `actionHandlers` map, not a chord allowlist. Only registered `app.*`
+actions and CustomEditor's dynamic specials (interrupt, exit, suspend and
+clipboard paste) are admitted. Contextual selector bindings do not become
+main-editor actions merely because their default keys exist. Remaps, disabled
+bindings, and registrations added/removed after construction apply immediately,
+including printable remaps. Matching app input cancels argument, operator,
+count and prefix state before extension interception or callback execution.
+It preserves mode, selection, register, undo/redo and dot recording unless the
+host callback itself changes them. EX retains its exact text except for
+`app.interrupt` and `app.clear`, which cancel it. This is intentionally Pi
+application behavior, not nvim parity.
+
+Decision: invoke the resolved host callback rather than call the unrestricted
+`CustomEditor.handleInput` for app chords. The audited 1.4 host sends nonempty
+exit to delete-forward, and explicit editor-history remaps precede app handlers.
+Either would reintroduce editing outside Insert. The app-only route retains
+extension-shortcut precedence on admitted chords, dynamic `onEscape`/`onCtrlD`,
+the empty-prompt exit guard, the interrupt autocomplete guard, and `onPasteImage`.
+It deliberately omits the host's editor fallback, including autocomplete
+cancellation by an interrupt when autocomplete is showing. It never fabricates
+editing keys, mutates the binding manager or snapshots/restores around callbacks.
+Alternatives were unrestricted forwarding (leaks editor bindings) or a hardcoded
+control whitelist (breaks remaps). A new upstream app-only dispatcher could
+replace this local routing when available. The host seam is covered with real
+default/remapped bindings in `test/control-key-ownership.test.ts`.
+
+### deliberate routing exceptions
+
+| input / state | owner and behavior |
+| --- | --- |
+| Insert | Existing Pi dispatcher, plus existing Vim Escape and Alt insertion shims; unchanged |
+| Idle Normal Enter | Existing prompt submission through `super.handleInput`; a pending count/operator/prefix consumes Enter instead |
+| Typed EX Enter / Backspace | EX submit / grapheme deletion; never the prompt's readline bindings |
+| Escape / control-left-bracket | Existing modal cancellation or Visual exit first; idle Normal forwards canonical Escape through `super.handleInput`, while EX cancellation invokes Pi's interrupt callback |
+| Vim undo / redo controls | pi-vim's undo/redo; never contextual app actions, even if a remap shares the key |
+| Bracketed paste | Insert passes through to Pi; Normal/Visual strip and discard it; EX takes only its first line and waits for typed Enter. Payload is never an app shortcut |
+| Mouse reports | Unsupported non-Insert reports are consumed, not forwarded. Insert and any upstream fullscreen mouse routing remain Pi-owned |
+| Compatibility fallback | Failed required-action preflight still forwards all input unchanged to stock Pi |
+
+Application callbacks may intentionally change text (clear, external editor,
+clipboard paste, dequeue); blocking readline fallthrough does not suppress these
+app effects. Arbitrary extension shortcuts do not run in non-Insert modes unless
+the key is admitted as an app chord (or explicit idle-Normal submit/Escape). No changes to the
+pre-existing k/j logical-line history route, motion algorithms or paste policy.
 
 ## Cursor render preflight — 2026-11-02
 

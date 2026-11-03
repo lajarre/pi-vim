@@ -377,10 +377,11 @@ export class ModalEditor extends CustomEditor {
   constructor(
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
-    kb: CustomEditorConstructorArgs[2],
+    private readonly appKeybindings: CustomEditorConstructorArgs[2],
     opts?: ModalEditorOptions,
   ) {
-    super(tui, theme, kb);
+    super(tui, theme, appKeybindings);
+    const kb = appKeybindings;
     this.cursorMarkerProbe = () => probePiEditorCursor(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.labelPosition = opts?.labelPosition ?? "bottom-right";
@@ -1186,7 +1187,7 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private clearPendingState(): void {
+  private clearPendingState(clearEx = true): void {
     this.pendingMotion = null;
     this.pendingTextObject = null;
     this.pendingOperator = null;
@@ -1196,7 +1197,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
-    this.clearPendingExCommand();
+    if (clearEx) this.clearPendingExCommand();
   }
 
   private endBracketedPasteInExCommand(): void {
@@ -1365,6 +1366,10 @@ export class ModalEditor extends CustomEditor {
   private handleInputCore(data: string): void {
     this.ensureOnChangeHook();
 
+    const exPaste =
+      this.pendingExCommand !== null &&
+      (this.acceptingBracketedPasteInExCommand ||
+        data.includes(BRACKETED_PASTE_START));
     if (this.pendingExCommand !== null) {
       const normalized = this.normalizePendingExCommandInput(data);
       if (normalized === null) return;
@@ -1434,6 +1439,18 @@ export class ModalEditor extends CustomEditor {
           return;
         }
         super.handleInput(data);
+        return;
+      }
+
+      // App callbacks keep their bindings in every mode. Never hand their key
+      // to the host's editor fallback (exit/history bindings can otherwise edit).
+      // Paste payload is data, and Vim's undo/redo controls retain ownership.
+      const vimHistoryControl =
+        data === CTRL_R ||
+        data === CTRL_UNDERSCORE ||
+        (data.startsWith("\x1b[") &&
+          (matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_")));
+      if (!exPaste && !vimHistoryControl && this.handleAppAction(data)) {
         return;
       }
 
@@ -1530,9 +1547,55 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private handleAppAction(data: string): boolean {
+    const kb = this.appKeybindings;
+    let action: Parameters<CustomEditor["onAction"]>[0] | undefined;
+    for (const special of [
+      "app.clipboard.pasteImage",
+      "app.interrupt",
+      "app.exit",
+      "app.suspend",
+    ] as const) {
+      if (kb.matches(data, special)) {
+        action = special;
+        break;
+      }
+    }
+    if (!action) {
+      for (const registered of this.actionHandlers.keys()) {
+        if (registered.startsWith("app.") && kb.matches(data, registered)) {
+          action = registered;
+          break;
+        }
+      }
+    }
+    if (!action) return false;
+
+    this.clearPendingState(
+      action === "app.interrupt" || action === "app.clear",
+    );
+    this.cancelRepeatableCommand();
+    // Keep CustomEditor's extension precedence and dynamic special callbacks,
+    // but do not fall through to readline editing or explicit history bindings.
+    if (this.onExtensionShortcut?.(data)) return true;
+    if (action === "app.interrupt") {
+      if (!this.isShowingAutocomplete())
+        (this.onEscape ?? this.actionHandlers.get(action))?.();
+    } else if (action === "app.exit") {
+      if (this.getText().length === 0)
+        (this.onCtrlD ?? this.actionHandlers.get(action))?.();
+    } else if (action === "app.clipboard.pasteImage") {
+      this.onPasteImage?.();
+    } else {
+      this.actionHandlers.get(action)?.();
+    }
+    return true;
+  }
+
   private handleEscape(): void {
     if (this.pendingExCommand !== null) {
       this.clearPendingExCommand();
+      this.handleAppAction("\x1b");
       return;
     }
 
@@ -1644,8 +1707,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (!isPrintableChunk(data)) {
-      this.clearPendingExCommand();
-      this.handleInput(data);
+      // EX owns unsupported controls: do not close or redispatch as Normal input.
       return;
     }
 
@@ -1856,20 +1918,18 @@ export class ModalEditor extends CustomEditor {
     return true;
   }
 
-  private cancelPendingOperator(data: string): void {
+  private cancelPendingOperator(): void {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
     this.cancelRepeatableCommand();
-    if (!isPrintableChunk(data)) {
-      super.handleInput(data);
-    }
+    // Cancelling a Vim prefix consumes its argument, never a host app action.
   }
 
   private handlePendingMotion(data: string): void {
     if (!isPrintableInput(data)) {
       this.pendingMotion = null;
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1911,7 +1971,7 @@ export class ModalEditor extends CustomEditor {
     const hasCount = this.hasPendingCount();
 
     if (this.pendingOperator === "y" && hasCount) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1942,7 +2002,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (hasCount) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1953,7 +2013,7 @@ export class ModalEditor extends CustomEditor {
       data,
     );
     if (!range) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2035,7 +2095,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "G") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -2075,7 +2135,7 @@ export class ModalEditor extends CustomEditor {
       !supportsCountedLineEnd &&
       !supportsIgnoredCountMotion
     ) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2090,7 +2150,7 @@ export class ModalEditor extends CustomEditor {
         this.pendingOperator = null;
         return;
       }
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2101,7 +2161,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    this.cancelPendingOperator(data);
+    this.cancelPendingOperator();
   }
 
   private handlePendingChange(data: string): void {
@@ -2114,7 +2174,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "c") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -2169,7 +2229,7 @@ export class ModalEditor extends CustomEditor {
       !supportsCountedLineEnd &&
       !supportsIgnoredCountMotion
     ) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2185,7 +2245,7 @@ export class ModalEditor extends CustomEditor {
         this.setMode();
         return;
       }
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2199,7 +2259,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    this.cancelPendingOperator(data);
+    this.cancelPendingOperator();
   }
 
   private enterVisualMode(mode: VisualMode): void {
@@ -2387,6 +2447,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handleNormalMode(data: string): void {
+    const hadCount = this.prefixCount.length > 0;
     if (this.pendingZ) {
       this.clearPendingState();
       if (data === "Z" || data === "Q") {
@@ -2719,7 +2780,11 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (isPrintableChunk(data)) return;
-    super.handleInput(data);
+    // App actions were resolved above; never forward unsupported editor keys.
+    // Idle Normal submission remains an explicit exception, not a count suffix.
+    if (!hadCount && this.mode === "normal" && this.isSubmitEnterInput(data)) {
+      super.handleInput(data);
+    }
   }
 
   private openLineBelow(): void {
@@ -3833,7 +3898,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "G") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -3860,14 +3925,14 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (this.hasPendingCount()) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
     if (this.yankWithMotion(data)) {
       this.pendingOperator = null;
     } else {
-      this.cancelPendingOperator(data); // cancel on unrecognised motion
+      this.cancelPendingOperator(); // cancel on unrecognised motion
     }
   }
 

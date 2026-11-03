@@ -162,9 +162,18 @@ and bracketed-paste stripping in normal mode. The main dispatch is then
 wrapped in `prepareRepeatRecordingForInput` / `finishRepeatRecordingAfterInput`
 (a `try` / `finally`) so dot-repeat records the keystrokes of the last
 change regardless of which branch handles them. The branch order is a
-strict precedence: pending state is always consumed before normal-mode keys,
+strict precedence: after modal Escape and Insert routing, registered Pi app
+bindings cancel pending arguments/counts and reach their host callbacks. EX is
+retained unless the app action is interrupt/clear. Paste payload and Vim undo/redo
+controls do not take this route. Pending state then precedes normal-mode keys,
 which is why `f.`, `r.`, and `d.` take `.` as their argument rather than as
-a repeat.
+a repeat. Unsupported Normal/Visual editor input is consumed, including
+pending-argument cancellation. EX ignores unsupported editing controls in place.
+Only explicit idle-Normal Enter/Escape and Insert (or stock compatibility
+fallback) use the unrestricted host dispatcher; app routing excludes editor
+fallthrough.
+See [editor action dispatch](editor-action-dispatch.md) for the exceptions and
+host precedence decisions.
 
 ```mermaid
 flowchart TD
@@ -180,7 +189,9 @@ flowchart TD
     esc -- yes --> doEsc["handleEscape()"]
     esc -- no --> ins{"mode == insert?"}
     ins -- yes --> doIns["alt-key shims, else super.handleInput"]
-    ins -- no --> rep{"pendingReplace?"}
+    ins -- no --> app{"registered app chord?"}
+    app -- yes --> doApp["cancel pending state<br/>invoke host app callback, no editor fallback"]
+    app -- no --> rep{"pendingReplace?"}
     rep -- yes --> doRep["r{char}"]
     rep -- no --> exd{"pendingExCommand?"}
     exd -- yes --> doEx["handlePendingExCommand"]
@@ -207,7 +218,8 @@ normal mode. It also declines to consume anything while `pendingG` or
 `:` in normal mode calls `startPendingExCommand()`, seeding the buffer with
 `":"`. Subsequent keys append through `handlePendingExCommand` (with the
 paste/newline wait policy applied in the pre-pass, so a pasted newline is
-truncated away rather than submitting). `Esc` cancels; a **typed** `Enter` —
+truncated away rather than submitting). `Esc` cancels and invokes Pi's interrupt;
+a **typed** `Enter` —
 the only thing that can submit — calls `submitPendingExCommand()`, which
 resolves the line in a fixed precedence order:
 

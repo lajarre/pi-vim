@@ -1684,7 +1684,7 @@ describe("ex mini-mode", () => {
     assert.equal(session.editor.getRegister(), "h");
   });
 
-  it("non-printable input cancels ex mode and is reprocessed", () => {
+  it("unsupported control input preserves EX and does not replay as Normal", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, ["x", "u", ":", "q", "\x12"]);
@@ -1692,8 +1692,12 @@ describe("ex mini-mode", () => {
     assert.equal(session.quitCalls, 0);
     assert.deepEqual(session.notifications, []);
     assert.equal(session.editor.getMode(), "normal");
-    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
     assert.equal(session.editor.getRegister(), "h");
+    assert.match(session.editor.render(80).at(-1) ?? "", / EX :q_ /);
+    sendKeys(session.editor, ["\x1b", "\x12"]);
+    assert.equal(session.editor.getText(), "ello");
   });
 
   it("unsupported ex commands do not quit", () => {
@@ -8369,8 +8373,8 @@ describe("undo / redo — u / ctrl+r", () => {
     assert.equal(editor.getRegister(), "keep");
   });
 
-  it("ctrl+k still cancels pending delete and clears stale redo history", () => {
-    const { editor } = createEditorWithSpy("abcd");
+  it("ctrl+k consumes pending delete without a host edit or losing redo", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("abcd");
 
     sendKeys(editor, ["x", "u"]);
     assert.equal(editor.getText(), "abcd");
@@ -8378,14 +8382,16 @@ describe("undo / redo — u / ctrl+r", () => {
 
     sendKeys(editor, ["d", "\x0b"]);
 
-    assert.equal(editor.getText(), "");
+    assert.equal(editor.getText(), "abcd");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
     assert.equal(editor.getRegister(), "a");
+    assert.equal(editor.getMode(), "normal");
 
     sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), "");
+    assert.equal(editor.getText(), "bcd");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
     assert.equal(editor.getRegister(), "a");
+    assert.deepEqual(clipboardWrites, ["a"]);
   });
 
   it("redo does not stomp a newer unnamed register value", () => {
@@ -9332,15 +9338,18 @@ describe("operator cancellation", () => {
     assert.equal(editor.getRegister(), "");
   });
 
-  it("non-printable invalid motion is passed through after cancel", () => {
+  it("unsupported motion cancels and is consumed (intentional host policy)", () => {
     const { editor } = createEditorWithSpy("abc");
 
-    // d + RightArrow should cancel d and still move right.
-    // Then x should delete 'b' (not 'a').
-    sendKeys(editor, ["d", "\x1b[C", "x"]);
+    // Normal owns unsupported keys, including arrows; cancelling d cannot
+    // dispatch a host motion or shortcut. The following x deletes 'a'.
+    sendKeys(editor, ["d", "\x1b[C"]);
+    assert.equal(editor.getText(), "abc");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    sendKeys(editor, ["x"]);
 
-    assert.equal(editor.getText(), "ac");
-    assert.equal(editor.getRegister(), "b");
+    assert.equal(editor.getText(), "bc");
+    assert.equal(editor.getRegister(), "a");
   });
 });
 

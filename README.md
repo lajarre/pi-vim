@@ -73,6 +73,8 @@ Common quick wins:
 |---|---|
 | `Esc` / `Ctrl+[` | Insert → Normal mode |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
+| `Enter` | Submit the prompt through Pi from idle Normal mode |
+| Unsupported editing keys / controls | Consumed in Normal/Visual; cancel pending arguments/counts without editing |
 | `:` | Normal → EX mini-mode |
 | `ZZ` | Normal → quit only if the prompt is empty or whitespace-only (same guard as `:q`; no write) |
 | `ZQ` | Normal → force quit, discarding the prompt (same as `:q!`) |
@@ -86,9 +88,15 @@ Common quick wins:
 | `V` | Normal → line-wise Visual mode |
 | `Esc` / `Ctrl+[` | Visual → Normal mode (never reaches Pi) |
 
-`Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, not executed. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
+`Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, except a Pi app chord, which cancels the prefix and runs its app action. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
 
-Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert each filtered copy through Pi's public `insertTextAtCursor` API without triggering shortcuts; counted linewise puts keep each register copy intact and each put remains one Vim undo unit. Unlike nvim, puts normalize CRLF/CR to newlines, expand tabs to four spaces, and discard other C0, DEL, and C1 control characters so clipboard text cannot execute terminal escapes. The original register is unchanged. Actual Insert-mode input and unhandled keys still follow Pi's configured bindings. This uses runtime-checked Pi internals. Before input or rendering, pi-vim checks all required operations; if one is missing, it warns once and uses Pi's stock input, keybindings and rendering for that instance, without Vim labels, border colors or cursor shaping. Preflight leaves the buffer, cursor, registers and history untouched. Typing, submission, `/reload` and `/quit` remain available through Pi; no synthetic fallback keys are sent.
+Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert each filtered copy through Pi's public `insertTextAtCursor` API without triggering shortcuts; counted linewise puts keep each register copy intact and each put remains one Vim undo unit. Unlike nvim, puts normalize CRLF/CR to newlines, expand tabs to four spaces, and discard other C0, DEL, and C1 control characters so clipboard text cannot execute terminal escapes. The original register is unchanged. Actual Insert-mode input follows Pi's configured bindings.
+
+Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt, exit) work in every mode; Pi's text-editing shortcuts apply only in Insert.
+
+App chords cancel pending arguments/counts without changing the Vim mode or selection; the app callback may itself change the prompt. Unsupported editing controls and arrows are consumed in Normal/Visual. Idle-Normal `Enter` still submits; `Esc` aborts from idle Normal, but cancels pending Vim commands or leaves Visual first. Exit only fires on an empty prompt; it never falls through to deletion outside Insert. Vim undo/redo controls keep their own meaning.
+
+This uses runtime-checked Pi internals. Before input or rendering, pi-vim checks all required operations; if one is missing, it warns once and uses Pi's stock input, keybindings and rendering for that instance, without Vim labels, border colors or cursor shaping. Preflight leaves the buffer, cursor, registers and history untouched. Typing, submission, `/reload` and `/quit` remain available through Pi; no synthetic fallback keys are sent.
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
@@ -109,8 +117,10 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 |---------------|--------|
 | `:` | Enter EX mini-mode |
 | `Enter` | Execute pending ex command |
-| `Esc` | Cancel EX mini-mode |
+| `Esc` | Cancel EX and pass the interrupt to Pi |
 | `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
+| Pi app shortcuts | Run the app action and retain the EX line; interrupt/clear (`Esc` / `Ctrl+c` by default) cancel it |
+| Unsupported editing controls | Ignored; keep the EX line, buffer and cursor unchanged |
 | `:q` / Normal-mode `ZZ` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
 | `:q!` / Normal-mode `ZQ` | Force quit the current Pi session even when the prompt has text |
 | `:qa` | Same safe quit policy as `:q` |
@@ -407,7 +417,7 @@ Default-equivalent `settings.json`:
 
 `true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On the first logical line, `k` recalls an older prompt from any draft, empty or not. Pi saves the draft when browsing starts. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest restores the saved draft's text and cursor. `false` keeps both keys buffer-local. Project settings can override global in either direction; non-boolean values use the default rather than the global value and show a warning at session start when a UI is available.
 
-Edges are logical lines, not wrapped screen rows. Recalled history entries place the cursor on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Returning to the saved draft instead keeps Pi's restored cursor position. Insert-mode arrows retain Pi's own behavior. `<C-p>` cycles models only in Insert; both control-key bindings remain Pi-owned there, while Normal/Visual reuse the `k` / `j` rules (Visual never recalls history).
+Edges are logical lines, not wrapped screen rows. Recalled history entries place the cursor on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Returning to the saved draft instead keeps Pi's restored cursor position. Insert-mode arrows retain Pi's own behavior.
 
 Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and buffer-local no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
 
@@ -549,9 +559,10 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 
 | area | this extension | full Vim |
 |---|---|---|
-| Prompt history | Bare normal `k` / `j` (also `<C-p>` / `<C-n>`) expose Pi history at logical edges from any draft; past newest restores the saved text and cursor; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
+| Prompt history | Bare normal `k` / `j` expose Pi history at logical edges from any draft; past newest restores the saved text and cursor; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
 | Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
+| App shortcuts / unsupported controls | Pi app actions work in all modes; unsupported editing controls are Insert-only; EX retains its line except on interrupt/clear | Intentional divergence: Vim may assign commands to those controls; no Pi app actions |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
 | Visual selection rendering | Character-wise and line-wise selections use Pi's theme-aware highlight; no rectangular `<C-v>` selection | Selection is highlighted |

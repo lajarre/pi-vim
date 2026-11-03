@@ -141,6 +141,37 @@ Reproduce without installing or switching branches: archive `d66d494` TypeScript
 
 The existing all-whitespace first-nonblank parity gap remains out of scope: changing it would alter shared `^` and put placement policy, rather than preserve the observables of this insertion migration. Characterwise multiline puts retain their documented Pi cursor placement.
 
+## app/editor ownership split — 2026-11-04
+
+Base `932978f` vs the round4 runtime (alias removal plus app-only dispatch).
+Same installed coding-agent/pi-tui 1.4.0, Node v24.15.0, darwin-arm64. Three
+serial base/head, head/base, base/head rounds of `script/hotpath-compare.ts`,
+eight samples per run. Median of the three per-run medians/p95s, µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 0.976 | 1.111 | 0.983 | 1.105 |
+| `motion_h_4k` | 553.449 | 571.565 | 553.187 | 561.976 |
+| `motion_w_50` | 1.706 | 2.082 | 1.683 | 2.322 |
+| `insert_type` | 11.859 | 12.258 | 11.772 | 12.029 |
+| `insert_edit` | 17.973 | 18.238 | 17.282 | 18.535 |
+
+The ignored-key median rises 0.007 µs (+0.7%); short-word p95 rises 0.240 µs
+(+11.5%). No speedup or statistical non-regression claim. An initial version
+unconditionally decoded both Vim history controls on every printable input:
+ignored-key median was 0.972 → 1.463 µs. Restricting that decoding to raw control
+bytes/CSI encodings removed that measured overhead without caching bindings or
+restricting printable app remaps. The table above remeasures the final runtime.
+
+This existing harness uses a stub binding manager and no registered app actions;
+it measures the added dispatch structure, not the cost of real binding scans or
+host callbacks. The real-default/remap matrix tests correctness, not latency.
+Rendering, autocomplete, successful history recall, terminal transport and app
+side effects are not timed. Reproduce by extracting `git archive 932978f '*.ts'`
+under `.tmp/round4-base`, then alternating
+`PIVIM_ENTRY=.tmp/round4-base/index.ts node --import tsx/esm script/hotpath-compare.ts`
+with the same command without `PIVIM_ENTRY`, using the same installed peers.
+
 ## saved-draft history — 2026-11-03
 
 Base `de9f457` vs the runtime in `feat(history): enter history from a non-empty draft`.
@@ -163,6 +194,39 @@ measurements. The history guard removes the empty-buffer check and preserves
 host-restored cursors; it adds no scan/cache. No performance improvement is claimed.
 Reproduce by archiving `de9f457 '*.ts'` into `.tmp/final-base` and alternating
 `PIVIM_ENTRY=.tmp/final-base/index.ts` with the default entrypoint as above.
+
+## modal input ownership — 2026-11-03
+
+Base `30a6ee7` vs the runtime in `fix(input): keep control keys out of host actions in normal mode`.
+Same installed coding-agent/pi-tui 1.4.0, Node v24.15.0, darwin-arm64.
+Three serial base/head, head/base, base/head rounds of `script/hotpath-compare.ts`,
+eight samples per operation. Median of per-run medians/p95s in µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| noop_key | 0.927 | 1.080 | 0.943 | 1.093 |
+| motion_h_4k | 541.780 | 545.558 | 545.226 | 552.887 |
+| motion_w_50 | 1.660 | 2.010 | 1.678 | 2.090 |
+| insert_type | 11.691 | 11.788 | 11.581 | 12.102 |
+| insert_edit | 16.924 | 17.276 | 17.089 | 17.518 |
+
+The ignored-key median rises 0.016 µs (+1.7%); the wide-line control rises
+3.446 µs (+0.6%). These samples do not prove statistical non-regression or
+measure terminal transport. The printable fast return is retained; no global
+key decoder, recurring probe or cache was added. This fixes ownership, not speed.
+Reproduce by archiving `30a6ee7 '*.ts'` into `.tmp/final-B-base` and alternating
+`PIVIM_ENTRY=.tmp/final-B-base/index.ts` with the default entrypoint.
+
+Historical decision (superseded by the 2026-11-04 app/editor split above):
+consume unsupported keys at Normal/pending dispatch endpoints and
+ignore unsupported controls within EX, rather than blacklist individual Ctrl
+bindings or bypass CustomEditor into a second host editor dispatcher. Insert
+keeps the real host bindings; explicit Normal Enter and idle Escape remain
+host-owned. Unsupported arrows are consumed too, not a second navigation API.
+The behavior is intentionally a Pi modal-ownership policy, not a claim that
+Vim ignores the same controls. The committed default-binding matrix covers
+20 states × 4 controls × 2 encodings, plus Visual/V-Line find/till cancellation,
+positive host-action controls, preserved EX text, and explicit submission/abort.
 
 ## clipboard runtime probe — 2026-10-14
 
