@@ -6,7 +6,7 @@ Vim in Pi's prompt. Draft in INSERT, edit in NORMAL, select in VISUAL — and ru
 pi install npm:pi-vim
 ```
 
-Restart Pi after install; requires `@earendil-works/pi-tui >= 0.74.0`.
+Restart Pi after install; requires `@earendil-works/pi-tui >= 1.0.0` for saved-draft prompt history.
 
 [quickstart](#30-second-quickstart) · [key reference](#full-reference) · [settings](#settings-reference) · [limits](#limits-and-vim-differences)
 

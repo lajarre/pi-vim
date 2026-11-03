@@ -118,10 +118,12 @@ checkout and on the baseline, alternating runs. Set `PIVIM_ENTRY` to the baselin
 ### Three-version dist seam audit — 2026-11-02
 
 Audited the **published JavaScript dist**, not repository source: read-only
-`npm pack @earendil-works/pi-tui@0.74.0` and `@0.78.0` for the peer floor and
-previous dev host, and the worktree-local installed **1.4.0** dev host. All gates
-now run on coding-agent/pi-tui 1.4.0; older versions are static audits, not full
-runtime certification. No peer-floor change. The 2026-11 public put migration
+`npm pack @earendil-works/pi-tui@0.74.0` and `@0.78.0` for historical hosts,
+and the installed **1.4.0** dev host. All gates run on coding-agent/pi-tui 1.4.0;
+older versions are static audits, not full runtime certification. The minimum
+pi-tui peer is now **1.0.0**: saved-draft history replaces the pre-1.0 empty-draft
+guard. The 0.74/0.78 columns below are historical, no longer supported floors;
+1.0.0 has not been runtime-certified by this audit. Coding-agent remains `*`. The 2026-11 public put migration
 removed `insertCharacter` from the private action contract.
 
 Line references below are package-relative: **E** =
@@ -132,7 +134,7 @@ artifact. These cover `pi-editor-actions.ts`, `ModalEditorInternals` and the
 additional local casts in `index.ts`, Visual geometry/paint, cursor shaping,
 and mode-label/border composition. Public dependencies are labelled explicitly.
 
-| seam | 0.74.0 floor | 0.78.0 previous dev | 1.4.0 dev | semantics / difference |
+| seam | 0.74.0 historical | 0.78.0 historical | 1.4.0 dev (min peer 1.0.0) | semantics / difference |
 | --- | --- | --- | --- | --- |
 | `undo()` | E1642 | E1614 | E1775 | Exits browsing, pops once, resets action/column and notifies; 1.4 also clears draft and restores paste metadata. |
 | `navigateHistory(direction)` | E285 | E287 | E334 | -1 older / +1 newer; entry snapshot once, bounds clamp; recall placement and draft restoration differ below. |
@@ -249,7 +251,7 @@ not browsing), and public `addToHistory`. They trim entries, deduplicate adjacen
 entries, retain at most 100, clamp exhausted navigation, and push one undo
 snapshot on entering history. Their dispatch conditions are not identical:
 
-| behavior | pi-tui 0.74.0 floor | pi-tui 0.78.0 previous dev | pi-tui 1.4.0 dev |
+| behavior | pi-tui 0.74.0 historical | pi-tui 0.78.0 historical | pi-tui 1.4.0 dev (min peer 1.0.0) |
 | --- | --- | --- | --- |
 | insert Up entry | Empty, or browsing on first visual row (E617) | Same (E619) | First visual row and empty, browsing, or column zero; allows non-empty draft (E747) |
 | insert Down | Browsing on last visual row (E635) | Same (E637) | Same (E761) |
