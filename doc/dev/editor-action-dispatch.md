@@ -28,7 +28,8 @@ positioning shortcuts, and register insertion bypass `CustomEditor.handleInput`.
 Insert input still uses that dispatcher, including application and extension
 shortcuts. Non-Insert modes resolve registered app actions before pending Vim
 arguments and invoke their host callbacks; unsupported editor input is consumed.
-EX keeps its line for app actions other than interrupt/clear. Explicit idle-Normal
+EX's typed `<C-p>` / `<C-n>` take precedence over app actions and extension
+interception; other app actions keep its line unless they are interrupt/clear. Explicit idle-Normal
 Enter/Escape still use the host dispatcher. See the ownership contract below.
 Calling the original operations retains Pi's kill ring, undo snapshots, and
 change notifications. Register content is inserted in one public
@@ -94,6 +95,7 @@ default/remapped bindings in `test/control-key-ownership.test.ts`.
 | Insert | Existing Pi dispatcher, plus existing Vim Escape and Alt insertion shims; unchanged |
 | Idle Normal Enter | Existing prompt submission through `super.handleInput`; a pending count/operator/prefix consumes Enter instead |
 | Typed EX Enter / Backspace | EX submit / grapheme deletion; never the prompt's readline bindings |
+| Typed EX `<C-p>` / `<C-n>` | EX command-line history, even when an app action or extension binds the chord; no history navigation from pasted controls |
 | Escape / control-left-bracket | Existing modal cancellation or Visual exit first; idle Normal forwards canonical Escape through `super.handleInput`, while EX cancellation invokes Pi's interrupt callback |
 | Vim undo / redo controls | pi-vim's undo/redo; never contextual app actions, even if a remap shares the key |
 | Bracketed paste | Insert passes through to Pi; Normal/Visual strip and discard it; EX takes only its first line and waits for typed Enter. Payload is never an app shortcut |

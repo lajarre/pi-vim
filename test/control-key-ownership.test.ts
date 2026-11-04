@@ -146,6 +146,9 @@ function fixture(setup: readonly string[], bindings = {}) {
     forwarded.push(key);
     return false;
   };
+  if (setup[0] === ":") {
+    sendKeys(editor, [":", "ex-a", "\r", ":", "ex-b", "\r"]);
+  }
   sendKeys(editor, [...setup]);
   const state = internals(editor);
   const snapshot = () =>
@@ -179,17 +182,25 @@ function assertNoPending(state: ReturnType<typeof internals>) {
 
 // Intentional divergence from nvim: application shortcuts are Pi-owned; unknown
 // editor controls cannot edit in modal states. Explicit submit/EX Enter and Vim
-// Escape/undo/redo remain exceptions. Spies isolate routing from app side effects.
+// Escape/undo/redo remain exceptions, as do EX's C-p/C-n history keys. Spies
+// isolate routing from app side effects; EX history wins even over app bindings.
 describe("control-key ownership with real Pi defaults (host-only policy)", () => {
   for (const encoding of ["raw", "kitty"] as const) {
     for (const mode of STATES) {
       for (const key of APP_KEYS) {
-        it(`${encoding} / ${mode.name} / ${key.name} reaches the app`, () => {
+        it(`${encoding} / ${mode.name} / ${key.name} obeys app/EX ownership`, () => {
           const f = fixture(mode.setup);
           const before = f.snapshot();
           assert.equal(f.state.redoStack.length, 1);
           assert.equal(f.kb.matches(key[encoding], key.action), true);
           f.editor.handleInput(key[encoding]);
+          if (mode.name === "ex" && key.name === "Ctrl-P") {
+            assert.deepEqual(f.fired, []);
+            assert.deepEqual(f.forwarded, []);
+            assert.deepEqual(f.snapshot(), { ...before, ex: ":ex-b" });
+            assertNoPending(f.state);
+            return;
+          }
           assert.deepEqual(f.fired, [key.action]);
           assert.deepEqual(f.forwarded, [key[encoding]]);
           assert.deepEqual(f.snapshot(), {
@@ -207,6 +218,10 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
       for (const key of EDITOR_KEYS) {
         it(`${encoding} / ${mode.name} / ${key.name} stays out of editor bindings`, () => {
           const f = fixture(mode.setup);
+          if (mode.name === "ex" && key.name === "Ctrl-N") {
+            f.editor.handleInput(APP_KEYS[0][encoding]);
+            assert.equal(f.state.pendingExCommand, ":ex-b");
+          }
           const before = f.snapshot();
           f.editor.handleInput(key[encoding]);
           assert.deepEqual(f.fired, []);
@@ -218,10 +233,12 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
           }
           assert.deepEqual(f.forwarded, []);
           assert.deepEqual(f.submitted, []);
-          assert.deepEqual(f.snapshot(), {
-            ...before,
-            ex: key.name === "Enter" && mode.name === "ex" ? null : before.ex,
-          });
+          const expected = { ...before };
+          if (mode.name === "ex") {
+            if (key.name === "Enter") expected.ex = null;
+            if (key.name === "Ctrl-N") expected.ex = ":q";
+          }
+          assert.deepEqual(f.snapshot(), expected);
           assertNoPending(f.state);
         });
       }
@@ -256,7 +273,7 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
     }
   });
 
-  it("Ctrl-N is not a motion; only a registered app binding admits it", () => {
+  it("Ctrl-N is not a motion; EX history beats even a registered app binding", () => {
     for (const mode of STATES) {
       const f = fixture(mode.setup);
       f.editor.onAction("app.session.toggleNamedFilter", () =>
@@ -264,7 +281,7 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
       );
       const before = f.snapshot();
       f.editor.handleInput("\x0e");
-      assert.deepEqual(f.fired, ["filter"]);
+      assert.deepEqual(f.fired, mode.name === "ex" ? [] : ["filter"]);
       assert.deepEqual(f.snapshot(), before);
       assertNoPending(f.state);
     }
@@ -295,13 +312,19 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
     assert.deepEqual(f.forwarded, []);
   });
 
-  it("registered app actions beat conflicting editor history remaps", () => {
+  it("registered app actions beat editor history remaps except within EX", () => {
     for (const mode of STATES) {
       const f = fixture(mode.setup, { "tui.editor.historyPrevious": "ctrl+p" });
       const before = f.snapshot();
       f.editor.handleInput("\x10");
-      assert.deepEqual(f.fired, ["app.model.cycleForward"]);
-      assert.deepEqual(f.snapshot(), before);
+      assert.deepEqual(
+        f.fired,
+        mode.name === "ex" ? [] : ["app.model.cycleForward"],
+      );
+      assert.deepEqual(f.snapshot(), {
+        ...before,
+        ex: mode.name === "ex" ? ":ex-b" : before.ex,
+      });
     }
   });
 

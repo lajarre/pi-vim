@@ -141,6 +141,45 @@ Reproduce without installing or switching branches: archive `d66d494` TypeScript
 
 The existing all-whitespace first-nonblank parity gap remains out of scope: changing it would alter shared `^` and put placement policy, rather than preserve the observables of this insertion migration. Characterwise multiline puts retain their documented Pi cursor placement.
 
+## EX history ownership — 2026-11-04
+
+Base `b0a915b` vs the EX-history runtime. Same installed coding-agent/pi-tui
+1.4.0, Node v24.15.0, darwin-arm64. Three serial base/head, head/base,
+base/head rounds of `script/hotpath-compare.ts`, eight samples per run.
+Median of the three per-run medians/p95s, µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 0.954 | 1.136 | 0.946 | 1.145 |
+| `motion_h_4k` | 538.355 | 540.414 | 539.342 | 542.058 |
+| `motion_w_50` | 1.680 | 2.008 | 1.675 | 2.001 |
+| `insert_type` | 11.591 | 11.874 | 11.444 | 11.676 |
+| `insert_edit` | 17.003 | 17.926 | 16.685 | 17.515 |
+
+The history-key decoder only runs while EX is open; the other non-Insert paths
+add a null check, and Insert returns before it. The wide-line median rises
+0.987 µs (+0.2%) and ignored-key p95 rises 0.009 µs (+0.8%). These are batch
+averages, not real-terminal latency bounds or evidence of a speedup. The
+harness uses stub bindings, not real app callbacks. No render algorithm or
+cache changed; the final EX append helper's explicit string assignment is
+outside these measured paths.
+
+One before/after `script/perf-bench.ts --json` run (seven startup samples,
+five memory samples per build) measured extension import medians 631.711 /
+647.095 ms, host-only import medians 619.166 / 641.869 ms, and incremental
+heap 792,992 / 806,240 B, a 13,248 B increase in these samples (not an
+isolated module-allocation measurement). Host-only startup also slowed, so these non-alternating startup samples
+do not isolate a history-module startup penalty. History retains at most 100
+strings; their lengths, like EX input itself, are not separately capped.
+
+Reproduce the input comparison by extracting `git archive b0a915b '*.ts'`
+under `.tmp/exhist-base`, then alternating
+`PIVIM_ENTRY=.tmp/exhist-base/index.ts node --import tsx/esm script/hotpath-compare.ts`
+with the same command without `PIVIM_ENTRY`. This reuses installed peers,
+without installing, switching branches or creating worktrees. EX browse
+correctness, paste safety and app-key precedence are tested separately; no
+successful-recall or terminal-transport performance claim is made.
+
 ## app/editor ownership split — 2026-11-04
 
 Base `932978f` vs the round4 runtime (alias removal plus app-only dispatch).

@@ -30,6 +30,7 @@ import {
   hasPromptCursorMarker,
   stripSoftwareCursorWhenHardwareCursorIsUsed,
 } from "./cursor-shape.js";
+import { ExHistory } from "./ex-history.js";
 import {
   isBackspaceLikeInput,
   isCountStarter,
@@ -285,6 +286,7 @@ export class ModalEditor extends CustomEditor {
   private pendingReplace: boolean = false;
   private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
+  private readonly exHistory = new ExHistory();
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private discardingPasteAfterNewlineInExCommand: boolean = false;
@@ -1169,6 +1171,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private startPendingExCommand(): void {
+    this.exHistory.reset();
     this.pendingExCommand = ":";
     this.endBracketedPasteInExCommand();
   }
@@ -1179,6 +1182,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingEscWhileAcceptingBracketedPasteInExCommand;
 
     this.pendingExCommand = null;
+    this.exHistory.reset();
     this.endBracketedPasteInExCommand();
 
     if (shouldDiscardBracketedPasteTail) {
@@ -1442,8 +1446,18 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
-      // App callbacks keep their bindings in every mode. Never hand their key
-      // to the host's editor fallback (exit/history bindings can otherwise edit).
+      // EX is a modal text field: its history keys beat even app bindings.
+      // Pasted controls are data, not history navigation.
+      if (
+        this.pendingExCommand !== null &&
+        !exPaste &&
+        this.handlePendingExHistoryControl(data)
+      ) {
+        return;
+      }
+
+      // Other app callbacks keep their bindings in every mode. Never hand their
+      // key to the host's editor fallback (exit/history bindings can edit).
       // Paste payload is data, and Vim's undo/redo controls retain ownership.
       const vimHistoryControl =
         data === CTRL_R ||
@@ -1627,6 +1641,22 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private handlePendingExHistoryControl(data: string): boolean {
+    if (matchesKey(data, "ctrl+p")) {
+      this.pendingExCommand = `:${this.exHistory.older()}`;
+    } else if (matchesKey(data, "ctrl+n")) {
+      this.pendingExCommand = `:${this.exHistory.newer()}`;
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  private appendPendingExCommand(text: string): void {
+    this.pendingExCommand = (this.pendingExCommand ?? ":") + text;
+    this.exHistory.reset(this.pendingExCommand.slice(1));
+  }
+
   private deleteLastPendingExCommandGrapheme(): void {
     const current = this.pendingExCommand ?? "";
     const graphemes = getLineGraphemes(current);
@@ -1643,6 +1673,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     this.pendingExCommand = current.slice(0, previousGrapheme.end);
+    this.exHistory.reset(this.pendingExCommand.slice(1));
   }
 
   private handlePendingExCommandControlChunk(data: string): boolean {
@@ -1658,7 +1689,7 @@ export class ModalEditor extends CustomEditor {
     let printable = "";
     const flushPrintable = () => {
       if (!printable) return;
-      this.pendingExCommand += printable;
+      this.appendPendingExCommand(printable);
       printable = "";
     };
 
@@ -1711,7 +1742,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    this.pendingExCommand += data;
+    this.appendPendingExCommand(data);
   }
 
   private hasNonEmptyPrompt(): boolean {
@@ -1757,8 +1788,10 @@ export class ModalEditor extends CustomEditor {
   }
 
   private submitPendingExCommand(): void {
-    const command = this.pendingExCommand?.slice(1).trim() ?? "";
+    const line = this.pendingExCommand?.slice(1) ?? "";
+    this.exHistory.push(line);
     this.clearPendingExCommand();
+    const command = line.trim();
     if (!command) return;
 
     const force = command.endsWith("!");

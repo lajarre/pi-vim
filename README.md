@@ -92,7 +92,7 @@ Common quick wins:
 
 Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert each filtered copy through Pi's public `insertTextAtCursor` API without triggering shortcuts; counted linewise puts keep each register copy intact and each put remains one Vim undo unit. Unlike nvim, puts normalize CRLF/CR to newlines, expand tabs to four spaces, and discard other C0, DEL, and C1 control characters so clipboard text cannot execute terminal escapes. The original register is unchanged. Actual Insert-mode input follows Pi's configured bindings.
 
-Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt, exit) work in every mode; Pi's text-editing shortcuts apply only in Insert.
+Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt, exit) work in every mode except EX's `<C-p>` / `<C-n>` history keys; Pi's text-editing shortcuts apply only in Insert.
 
 App chords cancel pending arguments/counts without changing the Vim mode or selection; the app callback may itself change the prompt. Unsupported editing controls and arrows are consumed in Normal/Visual. Idle-Normal `Enter` still submits; `Esc` aborts from idle Normal, but cancels pending Vim commands or leaves Visual first. Exit only fires on an empty prompt; it never falls through to deletion outside Insert. Vim undo/redo controls keep their own meaning.
 
@@ -119,7 +119,8 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 | `Enter` | Execute pending ex command |
 | `Esc` | Cancel EX and pass the interrupt to Pi |
 | `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
-| Pi app shortcuts | Run the app action and retain the EX line; interrupt/clear (`Esc` / `Ctrl+c` by default) cancel it |
+| `<C-p>` / `<C-n>` | Recall older / newer submitted ex lines; past newest restores the draft, oldest clamps |
+| Pi app shortcuts (except `<C-p>` / `<C-n>`) | Run the app action and retain the EX line; interrupt/clear (`Esc` / `Ctrl+c` by default) cancel it |
 | Unsupported editing controls | Ignored; keep the EX line, buffer and cursor unchanged |
 | `:q` / Normal-mode `ZZ` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
 | `:q!` / Normal-mode `ZQ` | Force quit the current Pi session even when the prompt has text |
@@ -132,6 +133,10 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 | `:!{cmd}` | Run `{cmd}` in Pi's shell via `!{cmd}`, e.g. `:!ls` runs `!ls`; `:!!{cmd}` runs it excluded from context |
 | reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
 | unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
+
+`<C-p>` / `<C-n>` browse the last 100 distinct submitted lines in this session (no persistence or setting), moving exact duplicates to newest, placing the cursor at the end, and treating edits after recall as a new draft; Enter submits the recalled line, while Up/Down do not browse history.
+The EX line deliberately owns `<C-p>` / `<C-n>` even when Pi binds them to app actions such as model cycling: it is a modal text field, like Vim's command line.
+Unlike nvim, editing a recall resets browsing instead of retaining its history position, and canceled lines are not recorded: only Enter on a non-empty line adds history, verbatim before trimming and regardless of dispatch outcome (including quit, shell, unknown and whitespace-only lines).
 
 `ZZ` and `ZQ` are Normal-mode keys, not EX commands, and need no Enter. A refused `ZZ` stays in the session and warns `Prompt is not empty; use ZQ or :q! to quit anyway`, following Vim's own no-file rule (`ZZ` on a modified buffer with no file name refuses with E32 and stays). Neither alias submits the prompt or writes a file; both use Pi's shutdown lifecycle, which may wait for an active agent to become idle.
 
@@ -563,7 +568,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Prompt history | Bare normal `k` / `j` expose Pi history at logical edges from any draft; past newest restores the saved text and cursor; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
 | Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
-| App shortcuts / unsupported controls | Pi app actions work in all modes; unsupported editing controls are Insert-only; EX retains its line except on interrupt/clear | Intentional divergence: Vim may assign commands to those controls; no Pi app actions |
+| App shortcuts / unsupported controls | Pi app actions work in all modes except EX's `<C-p>` / `<C-n>`; unsupported editing controls are Insert-only; EX retains its line except on interrupt/clear | Intentional divergence: Vim may assign commands to those controls; no Pi app actions |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
 | Visual selection rendering | Character-wise and line-wise selections use Pi's theme-aware highlight; no rectangular `<C-v>` selection | Selection is highlighted |
@@ -574,6 +579,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
 | `ZZ` / `ZQ` | Normal-only: `ZZ` uses the `:q` prompt guard, following Vim's own no-file rule (a modified buffer with no file name refuses with E32 and stays), while `ZQ` forces quit | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both are Normal-mode commands |
+| Ex history | `<C-p>` / `<C-n>` recall up to 100 distinct submitted lines; edits reset browsing; no persistence or Up/Down history; canceled lines excluded | Vim retains the browse position after edits, records canceled lines and supports prefix-matching Up/Down |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
