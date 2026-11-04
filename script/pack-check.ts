@@ -383,9 +383,16 @@ const THRESHOLDS = {
   // +9226 B from EX history). Limits become 76600 / 290800 / 20, leaving
   // 501 B / 681 B headroom. No dependency or packed file added; parity,
   // motion/render benchmarks and maintainer QA remain outside the package.
+  //
+  // 2026-11-04: Alias public host cursor bindings to existing hjkl dispatch,
+  // with construction-time snapshots and README ownership/gap contracts.
+  // Measured 77188 B packed / 293444 B unpacked / 20 files (+1089 B /
+  // +3325 B from gj/gk). Limits become 77700 / 294100 / 20, leaving
+  // 512 B / 656 B headroom. No runtime dependency or packed file added;
+  // tests, benchmark evidence and maintainer QA remain outside the package.
   maxFiles: 20,
-  maxSize: 76600,
-  maxUnpackedSize: 290800,
+  maxSize: 77700,
+  maxUnpackedSize: 294100,
 } as const;
 
 function compareStrings(a: string, b: string): number {
