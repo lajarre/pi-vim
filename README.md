@@ -169,6 +169,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | key | action |
 |---|---|
 | `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; counted line moves stay in the buffer |
+| `gj` / `{count}gj` | Move down by wrapped display rows, retaining the wanted screen column; never recall prompt history |
+| `gk` / `{count}gk` | Move up by wrapped display rows, retaining the wanted screen column; never recall prompt history |
 | Bare `k` on the first logical line; `j` on the last | Recall older Pi prompts from any draft; newer requires browsing and restores the saved draft past newest; [historyNavigation](#historynavigation) defaults on |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
@@ -177,6 +179,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | `W` / `B` / `E`; `{count}W/B/E` | whitespace-delimited `WORD` motions |
 | `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |
 | `%` | Jump to the matching `()`, `[]`, or `{}` partner |
+
+`gj` / `gk` use Pi's wrapped-line map at the latest rendered editor width, including padding and the reserved cursor cell. Before the first render they treat each logical line as one row. Counts clamp at the top/bottom row, where the motion is a no-op; short rows clamp to their last grapheme (Visual can include the logical EOL), then longer rows restore the wanted column. They also extend `v` / `V` selections. Operators use exclusive characterwise ranges, with Vim's usual exception when ending at column zero of a later logical line: exclude the preceding newline, or operate linewise when starting at/before the first nonblank. `dgj`, `cgk`, and their counted forms support undo and dot-repeat; repeat uses the current width. An unavailable or invalid host map after rendering cancels the motion with a notice.
 
 `word` splits punctuation from keyword chars; `WORD` treats any non-whitespace run as one token (`foo-bar`, `path/to`). Paragraph starts are non-blank lines at BOF or after blank lines (`^\s*$`). `{` / `}` are navigation-only; brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
 
@@ -239,6 +243,7 @@ word, WORD, char-find, and linewise motions; the counts multiply and clamp at
 | `d$` / `d0` / `d^`; `{count}d$` | To EOL / BOL / first non-whitespace; a counted `$` spans down through that many line ends |
 | `d_` / `dd`; `d{count}_` / `{count}dd` | Current or counted whole lines |
 | `d{count}j` / `d{count}k` / `dG` | Linewise down/up/to EOF |
+| `dgj` / `dgk`; `d{count}gj` / `d{count}gk` | Delete through display-row motion (exclusive; operator and motion counts multiply) |
 | `df{c}` / `dt{c}` / `dF{c}` / `dT{c}`; `d{count}f{c}` | Char-find ranges |
 | `d%` | Inclusive range through the matching pair target |
 | `diw` / `daw`; `diW` / `daW` | Inner/around word or WORD |
@@ -256,6 +261,7 @@ ends like `d$`). `j`, `k`, `G`, and counted `cc` are unsupported and cancel.
 |---|---|
 | `cw` / `ce` / `cb`; `cW` / `cE` / `cB` | Change word/WORD motion ranges + Insert |
 | `c{count}w/e/b`; `c{count}W/E/B` | Change counted word/WORD motions + Insert |
+| `cgj` / `cgk`; `c{count}gj` / `c{count}gk` | Change through display-row motion + Insert (exclusive; operator and motion counts multiply) |
 | `ciw` / `caw`; `ciW` / `caW` | Change word/WORD text objects + Insert |
 | `c{count}iw` / `c{count}iW`; `c{count}aw` / `c{count}aW` | Change counted word/WORD text objects + Insert |
 | `ci"` / `ca"` (`'`, <code>`</code>) | Change inside/around quotes + Insert |
@@ -298,6 +304,7 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 |---|---|
 | `yy` / `Y`; `{count}yy` / `{count}Y` | Whole line(s) + trailing `\n` |
 | `y{count}j` / `y{count}k` / `yG`; `y_` / `y{count}_` | Linewise ranges |
+| `ygj` / `ygk`; `y{count}gj` / `y{count}gk` | Yank through display-row motion (exclusive; operator and motion counts multiply) |
 | `yw` / `ye` / `yb`; `yW` / `yE` / `yB` | word/WORD motion ranges |
 | `y$` / `y0` / `y^`; `yf{c}` | EOL / BOL / first non-whitespace / char-find |
 | `y%` | Inclusive range through the matching pair target |
@@ -581,7 +588,8 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | `ZZ` / `ZQ` | Normal-only: `ZZ` uses the `:q` prompt guard, following Vim's own no-file rule (a modified buffer with no file name refuses with E32 and stays), while `ZQ` forces quit | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both are Normal-mode commands |
 | Ex history | `<C-p>` / `<C-n>` recall up to 100 distinct submitted lines; edits reset browsing; no persistence or Up/Down history; canceled lines excluded | Vim retains the browse position after edits, records canceled lines and supports prefix-matching Up/Down |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
-| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+| Display rows | `gj` / `gk` follow Pi's word-aware wrapping and host-expanded tabs, not Vim's hard-wrap/tabstop layout; no wrapping before first render; resizing resets the wanted row column | Vim's configured window wrapping and tabstop rules |
+| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, `gj/gk`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---
 

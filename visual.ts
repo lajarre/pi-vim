@@ -7,6 +7,7 @@
  * line-wise selections span whole lines and ignore the columns.
  */
 
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { getLineGraphemes } from "./motions.js";
 import type { Mode } from "./types.js";
 
@@ -17,6 +18,81 @@ export type VisualLayoutLine = {
   startCol: number;
   length: number;
 };
+
+/** A buffer-local display-row motion; columns are screen cells, not UTF-16. */
+export function findDisplayLineTarget(
+  lines: readonly string[],
+  rows: readonly VisualLayoutLine[],
+  cursor: VisualPosition,
+  delta: number,
+  wantedColumn: number | null,
+  allowEol = false,
+  preferredCol = cursor.col,
+): (VisualPosition & { wantedColumn: number }) | null {
+  // The optional host map must cover the buffer in order, without gaps. Never
+  // turn an incompatible layout into an operator range over unrelated text.
+  let logicalLine = 0;
+  let startCol = 0;
+  for (const row of rows) {
+    if (
+      !row ||
+      row.logicalLine !== logicalLine ||
+      row.startCol !== startCol ||
+      !Number.isInteger(row.length) ||
+      row.length < 0 ||
+      (row.length === 0 && lines[logicalLine] !== "") ||
+      startCol + row.length > (lines[logicalLine]?.length ?? -1)
+    ) {
+      return null;
+    }
+    startCol += row.length;
+    if (startCol === lines[logicalLine]?.length) {
+      logicalLine++;
+      startCol = 0;
+    }
+  }
+  if (logicalLine !== lines.length || startCol !== 0) return null;
+
+  const current = rows.findIndex(
+    (row, index) =>
+      row.logicalLine === cursor.line &&
+      cursor.col >= row.startCol &&
+      (cursor.col < row.startCol + row.length ||
+        (cursor.col === row.startCol + row.length &&
+          rows[index + 1]?.logicalLine !== row.logicalLine)),
+  );
+  if (current < 0) return null;
+  const source = rows[current];
+  const targetIndex = Math.max(0, Math.min(current + delta, rows.length - 1));
+  const target = rows[targetIndex];
+  const sourceText = lines[cursor.line] ?? "";
+  const column =
+    wantedColumn ??
+    visibleWidth(sourceText.slice(source.startCol, preferredCol)) +
+      Math.max(0, preferredCol - sourceText.length);
+  // At a buffer edge even an EOL cursor must remain exactly where it was.
+  if (targetIndex === current) return { ...cursor, wantedColumn: column };
+
+  const text = (lines[target.logicalLine] ?? "").slice(
+    target.startCol,
+    target.startCol + target.length,
+  );
+  let cells = 0;
+  let col = target.startCol;
+  for (const grapheme of getLineGraphemes(text)) {
+    col = target.startCol + grapheme.start;
+    cells += visibleWidth(text.slice(grapheme.start, grapheme.end));
+    if (cells > column) break;
+  }
+  if (
+    allowEol &&
+    rows[targetIndex + 1]?.logicalLine !== target.logicalLine &&
+    cells <= column
+  ) {
+    col = target.startCol + target.length;
+  }
+  return { line: target.logicalLine, col, wantedColumn: column };
+}
 
 export type VisualRenderSpan = { start: number; end: number };
 export type VisualRenderRange = {

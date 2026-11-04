@@ -207,3 +207,63 @@ The [render performance strategy](render-perf-strategy.md) still requires
 render-invocation evidence before idle-frame short-circuiting. This benchmark
 does not supply that evidence. No label-position or history-specific render
 claim is made here.
+
+## display-line motions — 2026-11-04
+
+Base `e9cfe97` vs the runtime in `feat(motion): add gj and gk display-line motions`.
+Node v24.15.0, darwin-arm64, coding-agent/pi-tui 1.4.0. Same eleven fixtures
+and three serial base/head, head/base, base/head rounds as above: 100 warmups,
+30 batches of 20 renders. Medians of per-run medians and batch p95s, µs/render.
+Only the latest host layout width is retained on render; row maps are built
+on demand by `gj`/`gk`, not added to the ordinary render path.
+
+| fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| insert_80_long | 340.512 | 356.865 | 341.658 | 360.462 | +0.3% |
+| visual_5_lines | 13.806 | 16.458 | 14.181 | 16.648 | +2.7% |
+| visual_line_400_words | 705.938 | 721.290 | 703.075 | 724.092 | -0.4% |
+| normal_80_long | 341.981 | 355.269 | 345.375 | 358.256 | +1.0% |
+| ex_80_long | 344.412 | 354.790 | 347.298 | 356.748 | +0.8% |
+| insert_resize_79_80 | 365.040 | 372.552 | 364.627 | 377.915 | -0.1% |
+| visual_unicode_20 | 136.275 | 148.767 | 136.681 | 149.550 | +0.3% |
+| visual_one_4096 | 1142.552 | 1239.681 | 1131.983 | 1228.225 | -0.9% |
+| normal_4096 | 465.479 | 481.933 | 460.492 | 476.710 | -1.1% |
+| visual_one_16384 | 4575.346 | 4666.954 | 4615.788 | 4679.908 | +0.9% |
+| normal_16384 | 1876.908 | 1938.488 | 1878.363 | 1931.602 | +0.1% |
+
+The largest relative median increase is 0.375 µs on five selected lines;
+16K Visual rises 40.442 µs. These observations are not statistical proof of
+non-regression or terminal responsiveness. No render cache or optimization
+is introduced; the strategy's optimization evidence bars remain unchanged.
+
+The existing `script/hotpath-compare.ts` also ran three serial alternating
+rounds with its default eight samples per fixture, against the same entries:
+
+| input fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| noop_key | 0.956 | 1.102 | 0.941 | 1.102 | -1.6% |
+| motion_h_4k | 546.780 | 550.281 | 545.338 | 551.396 | -0.3% |
+| motion_w_50 | 1.700 | 1.997 | 1.669 | 2.020 | -1.8% |
+| insert_type | 11.663 | 11.909 | 11.729 | 12.115 | +0.6% |
+| insert_edit | 17.293 | 17.816 | 17.126 | 17.538 | -1.0% |
+
+New `script/perf-bench.ts` fixtures time complete `gj` / `9999gj` commands
+on unbroken 4K/16K text at 20/80 text columns. Four batches of 30 operations;
+render/setup and `0` reset are outside timing. The feature did not exist at
+base, so there is no semantically equivalent pre-feature movement timing.
+One post-change run reports median µs/command:
+
+| chars | text width | gj | 9999gj |
+| ---: | ---: | ---: | ---: |
+| 4096 | 20 | 456.111 | 472.182 |
+| 4096 | 80 | 438.181 | 437.957 |
+| 16384 | 20 | 1779.731 | 1790.296 |
+| 16384 | 80 | 1794.055 | 1772.500 |
+
+Each command rebuilds and validates the host map once, then jumps directly
+by row index; count does not multiply map construction. This retains the
+host's O(buffer-size) layout cost (about 1.8 ms for 16K here), without a new
+layout cache or invalidation protocol. `npm run scoreboard -- --write`
+re-measures these fixtures. Reproduce the comparisons with the commands
+above using `e9cfe97` and this feature commit as archive refs; run the motion
+fixtures with `node --import tsx/esm script/perf-bench.ts --json`.

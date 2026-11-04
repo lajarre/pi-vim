@@ -35,6 +35,8 @@ export type NvimParityCase = {
   typedInput?: boolean;
   /** Exercise paint between inputs; the oracle still compares semantic state. */
   renderWidths?: readonly number[];
+  /** Fixed text width on both hosts, with nvim wrap enabled (no gutters). */
+  displayWidth?: number;
 };
 
 export type NvimParitySnapshot = {
@@ -84,6 +86,7 @@ const NVIM_MODE_MAP: Record<string, NvimParityMode> = {
 
 const NVIM_DRIVER_LUA = [
   "local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
+  "if input.displayWidth then vim.o.columns = input.displayWidth; vim.wo.wrap = true; vim.wo.linebreak = false; vim.wo.number = false; vim.wo.relativenumber = false; vim.wo.signcolumn = 'no'; vim.wo.foldcolumn = '0'; vim.wo.showbreak = ''; vim.wo.breakindent = false; assert(vim.api.nvim_win_get_width(0) == input.displayWidth, 'fixture window width mismatch') end",
   "local lines = vim.split(input.text, '\\n', { plain = true })",
   "if #lines == 0 then lines = { '' } end",
   "local undo_levels = vim.bo.undolevels",
@@ -188,8 +191,13 @@ export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
   const { undoStack } = editor as unknown as { undoStack: { clear(): void } };
   undoStack.clear();
 
+  // With no padding Pi reserves one cursor cell outside its layout width.
+  if (testCase.displayWidth !== undefined)
+    editor.render(testCase.displayWidth + 1);
   for (const key of testCase.keys) {
     editor.handleInput(key);
+    if (testCase.displayWidth !== undefined)
+      editor.render(testCase.displayWidth + 1);
     for (const width of testCase.renderWidths ?? []) editor.render(width);
   }
 
@@ -213,6 +221,7 @@ export async function runNvimParityCase(
     register: testCase.initial.register ?? "",
     keys: testCase.keys.map(toNvimKey),
     typedInput: testCase.typedInput ?? false,
+    displayWidth: testCase.displayWidth,
   };
 
   const child = spawn(

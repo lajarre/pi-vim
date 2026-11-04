@@ -296,6 +296,28 @@ function runResponsivenessBenchmarks(): Record<string, SampledMetric> {
     samplesCount,
   );
 
+  // Display-row map construction scales with the buffer, not the count.
+  // Setup/render/reset stay outside the timed operation; width is text cells.
+  for (const size of [4_096, 16_384]) {
+    for (const width of [20, 80]) {
+      for (const command of ["gj", "9999gj"]) {
+        metrics[`${command}_chars_${size}_width_${width}`] =
+          benchmarkSingleOpWithReset(
+            () => createEditor("x".repeat(size)),
+            (editor) => {
+              editor.render(width + 1);
+            },
+            (editor) => {
+              for (const key of command) editor.handleInput(key);
+            },
+            (editor) => editor.handleInput("0"),
+            30,
+            samplesCount,
+          );
+      }
+    }
+  }
+
   metrics["50p"] = benchmarkSingleOpFresh(
     () => createEditor("seed next"),
     (editor) => {

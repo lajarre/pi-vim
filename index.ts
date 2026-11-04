@@ -105,6 +105,7 @@ import {
 } from "./types.js";
 import {
   clampVisualPosition,
+  findDisplayLineTarget,
   getInclusiveEndColumn,
   getVisualLineRange,
   getVisualRenderSpan,
@@ -283,6 +284,8 @@ export class ModalEditor extends CustomEditor {
   private pendingZ: boolean = false;
   private pendingG: boolean = false;
   private pendingGCount: string = "";
+  private displayLineWidth: number | null = null;
+  private displayWantedColumn: number | null = null;
   private pendingReplace: boolean = false;
   private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
@@ -569,6 +572,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override setText(text: string): void {
+    this.displayWantedColumn = null;
     this.discardUndoWindow();
     this.clearRedoStack();
     this.clearRepeatState();
@@ -740,6 +744,7 @@ export class ModalEditor extends CustomEditor {
     editor.onChange = (text: string) => {
       originalOnChange?.(text);
       this.bufferChangeVersion++;
+      this.displayWantedColumn = null;
       this.centralInvalidationCheck();
     };
 
@@ -1369,6 +1374,18 @@ export class ModalEditor extends CustomEditor {
 
   private handleInputCore(data: string): void {
     this.ensureOnChangeHook();
+    if (
+      this.displayWantedColumn !== null &&
+      data !== "g" &&
+      !["v", "V", "d", "c", "y"].includes(data) &&
+      !(
+        isDigit(data) &&
+        (data !== "0" || this.hasPendingCount() || this.pendingG)
+      ) &&
+      !(this.pendingG && (data === "j" || data === "k"))
+    ) {
+      this.displayWantedColumn = null;
+    }
 
     const exPaste =
       this.pendingExCommand !== null &&
@@ -1516,6 +1533,20 @@ export class ModalEditor extends CustomEditor {
 
       if (this.pendingMotion) {
         this.handlePendingMotion(data);
+        return;
+      }
+
+      if (this.pendingOperator && (this.pendingG || data === "g")) {
+        if (!this.pendingG) {
+          this.pendingG = true;
+        } else {
+          this.pendingG = false;
+          if (data === "j" || data === "k") {
+            this.executeDisplayLineMotion(data);
+          } else {
+            this.cancelPendingOperator();
+          }
+        }
         return;
       }
 
@@ -2504,7 +2535,13 @@ export class ModalEditor extends CustomEditor {
       this.pendingGCount = "";
 
       if (!hadGCount) {
+        if (data === "j" || data === "k") {
+          this.executeDisplayLineMotion(data);
+          return;
+        }
+
         if (data === "g") {
+          this.displayWantedColumn = null;
           const count = this.takeTotalCount(1);
           this.moveCursorToLineStart(count - 1);
           return;
@@ -2851,6 +2888,7 @@ export class ModalEditor extends CustomEditor {
         this.moveCursorToFirstNonWhitespace();
         break;
       case "$": {
+        this.displayWantedColumn = Number.POSITIVE_INFINITY;
         const { line } = this.getCurrentLineAndCol();
         if (isVisualMode(this.mode)) {
           this.moveCursorToCol(line.length);
@@ -3019,6 +3057,101 @@ export class ModalEditor extends CustomEditor {
     const direction = delta > 0 ? 1 : -1;
     for (let i = 0; i < Math.abs(delta); i++) {
       runPiEditorAction(this, "moveCursor", 0, direction);
+    }
+  }
+
+  private executeDisplayLineMotion(direction: "j" | "k"): void {
+    const count = this.takeTotalCount(1);
+    const operator = this.pendingOperator;
+    this.pendingOperator = null;
+    const editor = this as unknown as ModalEditorInternals;
+    const lines = this.getLines();
+    const cursor = this.getCursor();
+    let rows: VisualLayoutLine[];
+    if (this.displayLineWidth === null) {
+      // No render yet: one row per logical line, never host prompt history.
+      rows = lines.map((line, logicalLine) => ({
+        logicalLine,
+        startCol: 0,
+        length: line.length,
+      }));
+    } else {
+      try {
+        if (typeof editor.buildVisualLineMap !== "function") {
+          throw new Error("Wrapped-line map unavailable");
+        }
+        rows = editor.buildVisualLineMap(this.displayLineWidth);
+      } catch {
+        this.notifyFn("Pi display-line layout unavailable; motion cancelled.");
+        this.cancelRepeatableCommand();
+        return;
+      }
+    }
+    const target = Array.isArray(rows)
+      ? findDisplayLineTarget(
+          lines,
+          rows,
+          cursor,
+          direction === "j" ? count : -count,
+          this.displayWantedColumn,
+          isVisualMode(this.mode),
+          editor.preferredVisualCol ?? cursor.col,
+        )
+      : null;
+    if (!target) {
+      this.notifyFn("Pi display-line layout invalid; motion cancelled.");
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (target.line === cursor.line && target.col === cursor.col) {
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (!operator) {
+      this.moveCursorToAbsoluteIndex(
+        this.getAbsoluteIndex(target.line, target.col),
+      );
+      this.displayWantedColumn = target.wantedColumn;
+      return;
+    }
+
+    this.displayWantedColumn = null;
+    const { start, end } = orderVisualEndpoints(cursor, target);
+    const startAbs = this.getAbsoluteIndex(start.line, start.col);
+    let endAbs = this.getAbsoluteIndex(end.line, end.col);
+    // Vim's exclusive-motion exception: at column zero of a later logical
+    // line, exclude its preceding newline, or use whole lines when starting
+    // at/before the first nonblank. A wrapped row start is not a logical BOL.
+    if (end.line > start.line && end.col === 0) {
+      if (start.col <= findFirstNonWhitespaceColumn(lines[start.line] ?? "")) {
+        if (operator === "d") {
+          this.deleteLineRange(start.line, end.line - 1);
+        } else if (operator === "c") {
+          this.writeToRegister(
+            this.getLinewisePayload(start.line, end.line - 1),
+          );
+          this.replaceTextInBuffer(
+            [...lines.slice(0, start.line), "", ...lines.slice(end.line)].join(
+              "\n",
+            ),
+            this.getAbsoluteIndex(start.line, 0),
+          );
+          this.setMode();
+        } else {
+          this.yankLineRange(start.line, end.line - 1);
+          this.moveCursorToAbsoluteIndex(startAbs);
+        }
+        return;
+      }
+      endAbs--;
+    }
+    if (operator === "y") {
+      this.yankRangeByAbsolute(startAbs, endAbs);
+      this.moveCursorToAbsoluteIndex(startAbs);
+    } else {
+      this.deleteRangeByAbsolute(startAbs, endAbs);
+      if (operator === "c") this.setMode();
+      else this.clampCursorAfterTextObjectDeletion();
     }
   }
 
@@ -4436,6 +4569,14 @@ export class ModalEditor extends CustomEditor {
   render(width: number): string[] {
     const vim = this.preflightHost();
     const lines = super.render(width);
+    // The host subtracts padding / the reserved cursor cell. Reuse its exact
+    // layout width, not the outer terminal width or its pre-render default.
+    const layoutWidth = (this as unknown as ModalEditorInternals).lastWidth;
+    if (typeof layoutWidth === "number" && layoutWidth > 0) {
+      if (this.displayLineWidth !== layoutWidth)
+        this.displayWantedColumn = null;
+      this.displayLineWidth = layoutWidth;
+    }
     if (!vim) return lines;
     this.syncCursorShapeForRender(lines);
     if (this.visualPaintAvailable && isVisualMode(this.mode)) {
