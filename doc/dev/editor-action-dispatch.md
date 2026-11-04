@@ -132,6 +132,42 @@ not Vim semantics; nvim cannot exercise it. See the dated hot-path/render
 benchmark sections for first-probe, warmed probe and same-host control timings.
 It is not a test of the real terminal compositor, wrapper stack or fullscreen UI.
 
+## Clipboard host capability — 2026-11-04
+
+Pi 0.x shipped `@mariozechner/clipboard`; the audited coding-agent 1.4.0 and
+1.5.0 `package.json` files do not. A reusable Node executable is therefore not
+proof that the legacy read helper can load its backend. `clipboard-mirror.ts`
+resolves that dependency with `createRequire` anchored at Pi's entry module,
+without loading the native addon in the editor process. Its lazy probe caches
+both presence and absence; tests inject isolated resolvers. Missing Pi modules
+also select platform commands, rather than disabling reads altogether.
+
+The read route is Node + available module → legacy helper; otherwise → the
+existing `clipboard-platform.ts` command list. All attempts retain the shared
+750 ms monotonic deadline, 1 MiB output bound, display gating and empty-vs-failed
+read distinction. No new notifier or recurring capability probe is added.
+Dependency installation/removal during a running process requires restarting
+Pi to refresh the decision. This is host compatibility, not a Vim put semantic
+change; curated cases compare counted charwise/linewise puts through both
+transports. The all-whitespace first-line `^` parity gap stays out of scope:
+changing shared cursor placement is independent of clipboard module discovery.
+
+Writes deliberately stay with Pi's exported `copyToClipboard` on Node. Both
+published versions re-export it from `dist/index.js`; their identical
+`dist/utils/clipboard.js` first tries pi-tui's native clipboard on macOS, then
+`pbcopy` through `dist/utils/clipboard-command.js`. Remote sessions also emit
+OSC 52 after the direct attempt. Local macOS command/native failure alone does
+not trigger OSC 52. Pi 1.5 adds `cwd: "/"` to command spawns; pi-vim does not
+need to reproduce either version's write policy.
+
+Six isolated real-helper checks (native, forced `pbcopy`, remote OSC 52 for
+both versions) transported UTF-8 stdin correctly. Native/command sinks were
+replaced with file sinks, and OSC 52 was captured rather than forwarded to the
+terminal. The 1.5 read-only tarball used matching already-installed host
+dependencies through a resolver hook, with no installation or package edits;
+1.4 dependencies cannot load its full entry point. Actual OS clipboard and
+terminal behavior still require the maintainer QA runbook.
+
 ## Existing gaps kept out of scope
 
 This dispatch change does not redesign normal-mode cursor clamps (`9l`, `D`,

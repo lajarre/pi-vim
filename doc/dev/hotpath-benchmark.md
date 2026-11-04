@@ -282,6 +282,74 @@ console.log({ firstUs, median: sorted[14], p95: sorted[27], samples, consumed })
 JS
 ```
 
+### Clipboard module resolver — 2026-11-04
+
+Node v24.15.0, darwin-arm64, coding-agent 1.4.0 without
+`@mariozechner/clipboard`. Same first-call / 10,000 warmup / 30 × 20,000
+probe protocol above, three fresh-process alternating before/after rounds.
+Values are median of run medians/p95s, µs/call (batch averages).
+
+| probe (2026-11-04) | before median | before p95 | after median | after p95 |
+| --- | ---: | ---: | ---: | ---: |
+| absent-module resolution: uncached lookup vs cached boolean | 48.144819 | 48.870906 | 0.005406 | 0.024779 |
+| read dispatch: `ad734a2` vs this fix, simulated command success | 0.019288 | 0.064183 | 0.018471 | 0.065690 |
+
+The first row compares the rejected resolve-on-every-put design with the
+cached probe, **not** the previous release (which did not check availability).
+Median first lookup: 342.792 µs uncached vs 464.375 µs cached, including lazy
+Pi resolution/source construction in the latter. The dispatch row measures
+the actual previous helper route vs the new platform route: first dispatch
+348.875 → 612.583 µs. The one-time extra lookup is paid on the first read;
+afterward the capability is only a boolean, including cached `false`.
+Tests count exactly one injected resolution across repeated puts for both
+outcomes. No lookup is added to ordinary keystrokes or write dispatch.
+
+No child startup, OS clipboard, rendering or editor insertion is timed. This
+is evidence for the cache and routing cost, not a claim of faster end-to-end
+puts or a statistical non-regression result. The shared 750 ms process budget
+is unchanged. Reproduce from the repo root without switching branches:
+
+```sh
+mkdir -p .tmp/clipboard-base
+git archive ad734a2 clipboard-mirror.ts clipboard-platform.ts | tar -xf - -C .tmp/clipboard-base
+# Run PROBE=resolve-before, resolve-after, read-before, read-after in fresh
+# processes; reverse each before/after pair in round 2, repeat round 1 in round 3.
+PROBE=resolve-after node --import tsx/esm --input-type=module <<'JS'
+import { createRequire } from 'node:module';
+import { performance } from 'node:perf_hooks';
+const variant = process.env.PROBE;
+const { readClipboardInChildProcess, createClipboardModuleProbe } = await import(
+  variant === 'read-before'
+    ? './.tmp/clipboard-base/clipboard-mirror.ts' : './clipboard-mirror.ts'
+);
+const moduleUrl = import.meta.resolve('@earendil-works/pi-coding-agent');
+const uncached = () => {
+  try { return Boolean(createRequire(moduleUrl).resolve('@mariozechner/clipboard')); }
+  catch { return false; }
+};
+const options = {
+  platform: 'darwin', now: () => 0,
+  run: () => ({ status: 0, signal: null, stdout: 'x' }),
+};
+const probe = variant === 'resolve-before' ? uncached
+  : variant === 'resolve-after' ? createClipboardModuleProbe()
+  : () => readClipboardInChildProcess(options) === 'x';
+let consumed = 0;
+const firstStart = performance.now();
+consumed += Number(probe());
+const firstUs = (performance.now() - firstStart) * 1000;
+for (let i = 0; i < 10000; i++) consumed += Number(probe());
+const samples = [];
+for (let batch = 0; batch < 30; batch++) {
+  const start = performance.now();
+  for (let i = 0; i < 20000; i++) consumed += Number(probe());
+  samples.push((performance.now() - start) * 1000 / 20000);
+}
+const sorted = [...samples].sort((a, b) => a - b);
+console.log({ variant, firstUs, median: sorted[14], p95: sorted[27], consumed });
+JS
+```
+
 ## Pi 1.4 host compatibility and startup probe — 2026-11-02
 
 Base `f8b20d8` (before compat commits); head: the cursor-marker startup probe

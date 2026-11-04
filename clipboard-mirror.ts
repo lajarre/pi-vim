@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -93,6 +94,7 @@ function tryResolvePiCodingAgentModuleUrl(): string | undefined {
 const CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE = 2;
 
 type ClipboardHelperSources = {
+  moduleUrl: string;
   read: string;
   write: string;
 };
@@ -138,6 +140,7 @@ function getClipboardHelperSources(): ClipboardHelperSources | null {
   const moduleUrl = tryResolvePiCodingAgentModuleUrl();
   clipboardHelperSources = moduleUrl
     ? {
+        moduleUrl,
         read: buildClipboardReadHelperSource(moduleUrl),
         write: buildClipboardWriteHelperSource(moduleUrl),
       }
@@ -145,25 +148,49 @@ function getClipboardHelperSources(): ClipboardHelperSources | null {
   return clipboardHelperSources;
 }
 
-export function readClipboardInChildProcess(
-  options: ClipboardReadOptions = {},
-): string | null {
-  if (!(options.canSpawnHelper ?? canSpawnJavaScriptHelper)()) {
-    return readClipboardCommands(
-      getClipboardReadCommands(options.platform, options.env),
-      options,
-    );
-  }
+export function createClipboardModuleProbe(
+  resolveModule: (moduleUrl: string) => string = (moduleUrl) =>
+    createRequire(moduleUrl).resolve("@mariozechner/clipboard"),
+): () => boolean {
+  let available: boolean | undefined;
+  return () => {
+    if (available !== undefined) return available;
+    const moduleUrl = getClipboardHelperSources()?.moduleUrl;
+    try {
+      available = moduleUrl !== undefined && Boolean(resolveModule(moduleUrl));
+    } catch {
+      // Pi 1.x no longer ships the legacy native clipboard dependency.
+      available = false;
+    }
+    return available;
+  };
+}
 
-  const helperSources = getClipboardHelperSources();
-  if (!helperSources) return null;
+// Host dependencies cannot change during a process; cache absence too. Tests
+// create isolated probes so injected resolvers never poison the process cache.
+const hasClipboardModule = createClipboardModuleProbe();
+
+type ClipboardHelperReadOptions = ClipboardReadOptions & {
+  hasClipboardModule?: () => boolean;
+};
+
+export function readClipboardInChildProcess(
+  options: ClipboardHelperReadOptions = {},
+): string | null {
+  const helperSources =
+    (options.canSpawnHelper ?? canSpawnJavaScriptHelper)() &&
+    (options.hasClipboardModule ?? hasClipboardModule)()
+      ? getClipboardHelperSources()
+      : null;
   return readClipboardCommands(
-    [
-      {
-        command: process.execPath,
-        args: ["--input-type=module", "-e", helperSources.read],
-      },
-    ],
+    helperSources
+      ? [
+          {
+            command: process.execPath,
+            args: ["--input-type=module", "-e", helperSources.read],
+          },
+        ]
+      : getClipboardReadCommands(options.platform, options.env),
     options,
   );
 }

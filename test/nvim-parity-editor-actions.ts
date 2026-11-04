@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createClipboardModuleProbe,
+  readClipboardInChildProcess,
+} from "../clipboard-mirror.js";
+import {
   EDITOR_BINDING_VARIANTS,
   withEditorBindings,
 } from "./editor-action-fixtures.js";
+import { createEditorWithSpy, sendKeys } from "./harness.js";
 import {
   type NvimParityCase,
   runNvimParityCase,
@@ -161,6 +166,62 @@ const CASES: NvimParityCase[] = [
     keys: ["o", "Z", ESC, "."],
   },
 ];
+
+describe("nvim put parity through both Node clipboard backends", () => {
+  for (const present of [true, false]) {
+    for (const text of ["λ😀", "  λ😀\nnext\n"]) {
+      for (const command of ["p", "P"]) {
+        it(`${command} module=${present}, linewise=${text.endsWith("\n")}`, async () => {
+          const { editor, clipboardWrites } = createEditorWithSpy("ab");
+          // Seed the same source in nvim's unnamed register: OS integration is
+          // Pi-specific, but placement, mode, cursor and register must match.
+          editor.setRegister(text);
+          const commands: string[] = [];
+          editor.setClipboardReadFn(() =>
+            readClipboardInChildProcess({
+              canSpawnHelper: () => true,
+              hasClipboardModule: createClipboardModuleProbe(() => {
+                if (present) return "legacy-module";
+                throw Object.assign(new Error("missing module"), {
+                  code: "MODULE_NOT_FOUND",
+                });
+              }),
+              platform: "darwin",
+              run: (executable) => {
+                commands.push(executable);
+                return { status: 0, signal: null, stdout: text };
+              },
+            }),
+          );
+          const keys = ["2", command];
+          sendKeys(editor, keys);
+          assert.deepEqual(commands, [
+            present ? process.execPath : "/usr/bin/pbpaste",
+          ]);
+          const nvim = await runNvimParityCase({
+            name: `clipboard ${command}`,
+            initial: {
+              text: "ab",
+              cursor: { line: 0, col: 0 },
+              register: text,
+            },
+            keys,
+          });
+          assert.deepEqual(
+            {
+              text: editor.getText(),
+              cursor: editor.getCursor(),
+              mode: editor.getMode(),
+              register: editor.getRegister(),
+            },
+            nvim,
+          );
+          assert.deepEqual(clipboardWrites, []);
+        });
+      }
+    }
+  }
+});
 
 for (const variant of EDITOR_BINDING_VARIANTS) {
   describe(`nvim parity editor actions with ${variant} Pi bindings`, () => {

@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import {
   buildClipboardWriteHelperSource,
+  createClipboardModuleProbe,
   readClipboardInChildProcess,
   writeClipboardInChildProcess,
 } from "../clipboard-mirror.js";
@@ -290,11 +291,12 @@ describe("clipboard transport reads (isolated; no host clipboard)", () => {
     );
   });
 
-  it("ordinary Node keeps the Pi-owned read helper", () => {
+  it("ordinary Node keeps the Pi-owned read helper when its module is present", () => {
     assert.equal(
       readClipboardInChildProcess({
         ...standalone,
         canSpawnHelper: () => true,
+        hasClipboardModule: createClipboardModuleProbe(() => "legacy-module"),
         run: (command, args) => {
           assert.equal(command, process.execPath);
           assert.deepEqual(args.slice(0, 2), ["--input-type=module", "-e"]);
