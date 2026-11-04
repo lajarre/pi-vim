@@ -33,6 +33,7 @@ const REQUIRED_FILES = [
   "README.md",
   "package.json",
   "index.ts",
+  "ex-history.ts",
   "motions.ts",
   "settings.ts",
   "types.ts",
@@ -369,9 +370,15 @@ const THRESHOLDS = {
   // routes. Measured 72782 B packed / 277678 B unpacked / 19 files.
   // Limits become 73300 / 278300 / 19, leaving 518 B / 622 B headroom.
   // No dependency or packed file added; tests and probe evidence stay excluded.
-  maxFiles: 19,
-  maxSize: 73300,
-  maxUnpackedSize: 278300,
+  //
+  // 2026-11-04: EX C-p/C-n history adds ex-history.ts, typed-key routing and
+  // README contracts. Measured 73772 B packed / 280893 B unpacked / 20 files
+  // (+990 B / +3215 B / +1 file from the clipboard-host fix). Limits become
+  // 74300 / 281600 / 20, leaving 528 B / 707 B headroom. No dependency added;
+  // parity tests, benchmark evidence and maintainer QA stay out of the package.
+  maxFiles: 20,
+  maxSize: 74300,
+  maxUnpackedSize: 281600,
 } as const;
 
 function compareStrings(a: string, b: string): number {
