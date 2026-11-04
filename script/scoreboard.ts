@@ -134,6 +134,17 @@ const RESPONSIVENESS_LABELS: Record<string, MetricLabel> = {
   yw_words_400: { label: "`yw` on a 400-word line", kind: "command" },
 };
 
+for (const size of [4_096, 16_384]) {
+  for (const width of [20, 80]) {
+    for (const command of ["gj", "9999gj"]) {
+      RESPONSIVENESS_LABELS[`${command}_chars_${size}_width_${width}`] = {
+        label: `\`${command}\` on ${size.toLocaleString("en-US")} ASCII characters, ${width} text columns`,
+        kind: "command",
+      };
+    }
+  }
+}
+
 const WRAP_WIDTH = 78;
 
 /**

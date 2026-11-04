@@ -376,9 +376,16 @@ const THRESHOLDS = {
   // (+990 B / +3215 B / +1 file from the clipboard-host fix). Limits become
   // 74300 / 281600 / 20, leaving 528 B / 707 B headroom. No dependency added;
   // parity tests, benchmark evidence and maintainer QA stay out of the package.
+  //
+  // 2026-11-04: gj/gk display-row motions add validated host-map geometry,
+  // sticky screen columns, exclusive operators and README contracts.
+  // Measured 76099 B packed / 290119 B unpacked / 20 files (+2327 B /
+  // +9226 B from EX history). Limits become 76600 / 290800 / 20, leaving
+  // 501 B / 681 B headroom. No dependency or packed file added; parity,
+  // motion/render benchmarks and maintainer QA remain outside the package.
   maxFiles: 20,
-  maxSize: 74300,
-  maxUnpackedSize: 281600,
+  maxSize: 76600,
+  maxUnpackedSize: 290800,
 } as const;
 
 function compareStrings(a: string, b: string): number {
