@@ -363,9 +363,15 @@ const THRESHOLDS = {
   // measure 72415 B packed / 276481 B unpacked / 19 files (+528 B / +1963 B).
   // Limits become 72900 / 277100 / 19, leaving 485 B / 619 B headroom.
   // No dependency or packed file added; tests and evidence remain excluded.
+  //
+  // 2026-11-04: Detect the legacy clipboard module once per process and use
+  // platform-command reads on Node hosts without it; README states both
+  // routes. Measured 72782 B packed / 277678 B unpacked / 19 files.
+  // Limits become 73300 / 278300 / 19, leaving 518 B / 622 B headroom.
+  // No dependency or packed file added; tests and probe evidence stay excluded.
   maxFiles: 19,
-  maxSize: 72900,
-  maxUnpackedSize: 277100,
+  maxSize: 73300,
+  maxUnpackedSize: 278300,
 } as const;
 
 function compareStrings(a: string, b: string): number {
