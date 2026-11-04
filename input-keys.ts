@@ -21,7 +21,10 @@ export function createCursorBindingResolver(
   ).flatMap(([action, motion]) =>
     keybindings.getKeys(action).map((key) => ({ key, motion })),
   );
-  return (data) => bindings.find(({ key }) => matchesKey(data, key))?.motion;
+  return (data) =>
+    isBackspaceLikeInput(data)
+      ? "h"
+      : bindings.find(({ key }) => matchesKey(data, key))?.motion;
 }
 
 export function isEscapeLikeInput(data: string): boolean {

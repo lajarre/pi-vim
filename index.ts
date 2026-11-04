@@ -1587,6 +1587,11 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (this.pendingOperator && data === "h") {
+        this.executeLeftOperator();
+        return;
+      }
+
       if (this.pendingOperator === "d") {
         this.handlePendingDelete(data);
         return;
@@ -2166,6 +2171,30 @@ export class ModalEditor extends CustomEditor {
     const { line, col } = this.getCurrentLineAndCol();
     if (line.length > 0 && col >= line.length) {
       this.moveCursorToPreviousGraphemeStart();
+    }
+  }
+
+  private executeLeftOperator(): void {
+    const operator = this.pendingOperator;
+    const count = this.takeTotalCount(1);
+    this.pendingOperator = null;
+    const { line, col } = this.getCurrentLineAndCol();
+    const graphemes = getLineGraphemes(line).filter((part) => part.start < col);
+    const startCol = graphemes[Math.max(0, graphemes.length - count)]?.start;
+    if (startCol === undefined) {
+      if (operator === "y") this.writeToRegister("");
+      this.cancelRepeatableCommand();
+      return;
+    }
+    const start = this.getAbsoluteIndex(this.getCursor().line, startCol);
+    const end = this.getAbsoluteIndex(this.getCursor().line, col);
+    if (operator === "y") {
+      this.yankRangeByAbsolute(start, end);
+      this.moveCursorToAbsoluteIndex(start);
+    } else {
+      this.deleteRangeByAbsolute(start, end);
+      if (operator === "c") this.setMode();
+      else this.clampCursorAfterTextObjectDeletion();
     }
   }
 
