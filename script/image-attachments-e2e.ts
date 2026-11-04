@@ -292,10 +292,11 @@ function createRuntimeHarness(
 
 function createE2eKeybindings(): typeof stubKeybindings {
   return {
+    getKeys: () => [],
     matches(data: string, action: string): boolean {
       return data === SUBMIT_INPUT && action === "tui.input.submit";
     },
-  } as typeof stubKeybindings;
+  } as unknown as typeof stubKeybindings;
 }
 
 async function installSupportedOrder(

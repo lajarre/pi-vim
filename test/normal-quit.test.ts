@@ -126,6 +126,7 @@ describe("normal-mode quit aliases", () => {
   for (const escapeKey of ["\x1b", "\x1b[91;5u"]) {
     it(`cancels on ${JSON.stringify(escapeKey)} without forwarding an agent abort`, () => {
       const keybindings = {
+        getKeys: () => [],
         matches: (data: string, action: string) =>
           data === "\x1b" && action === "app.interrupt",
       } as unknown as ConstructorParameters<typeof ModalEditor>[2];

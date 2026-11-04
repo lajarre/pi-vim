@@ -174,8 +174,11 @@ function takePiSnapshot(editor: ModalEditor): NvimParitySnapshot {
   };
 }
 
-export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
-  const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+export function runPiParityCase(
+  testCase: NvimParityCase,
+  keybindings: ConstructorParameters<typeof ModalEditor>[2] = stubKeybindings,
+): NvimParitySnapshot {
+  const editor = new ModalEditor(stubTui, stubTheme, keybindings);
   editor.setClipboardFn(() => undefined);
   editor.setClipboardReadFn(() => null);
   editor.setText(testCase.initial.text);

@@ -170,6 +170,7 @@ export const stubTheme = {
 
 export const stubKeybindings = {
   matches: () => false,
+  getKeys: () => [],
 } as unknown as ModalEditorConstructorArgs[2];
 
 /**

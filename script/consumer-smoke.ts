@@ -375,7 +375,7 @@ async function activateAndProbe(
       fg: (_k: string, s: string) => s,
       bold: (s: string) => s,
     },
-    { matches: () => false },
+    { matches: () => false, getKeys: () => [] },
   );
   assertEditorSurface(editor);
   disableClipboardWrites(editor);

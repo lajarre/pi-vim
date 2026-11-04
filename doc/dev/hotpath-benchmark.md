@@ -452,7 +452,49 @@ node --import tsx/esm script/perf-bench.ts --json
 For the probe-only metric, import `probePiEditorCursor` from
 `pi-editor-actions.ts`; pass `{ requestRender() {}, terminal: { rows: 40, cols: 80 } }`,
 a theme with identity `borderColor`/`bold` and `fg: (_k,s) => s`, and
-`{ matches: () => false }`. Time the first call, then 100 warmups and 30 batches
+`{ matches: () => false, getKeys: () => [] }`. Time the first call, then 100 warmups and 30 batches
 of 100 calls, asserting every return is true. For the construction control,
 time `new ModalEditor(tui, theme, kb).handleInput("\u005cx1b")` instead. The startup
 probe is host presentation, not a Vim command, so no nvim parity row is added.
+
+## host cursor aliases — 2026-11-04
+
+Base `67c82aa` versus the cursor-alias runtime, Node v24.15.0, darwin-arm64,
+installed coding-agent/pi-tui 1.4.0. Three serial alternating rounds
+(base/head, head/base, base/head), eight samples each, using the same
+`script/hotpath-compare.ts` against both builds. The benchmark now supplies
+public default cursor keys to both builds; empty binding stubs would hide
+translation work. Median of per-run medians/p95s, µs/op:
+
+| operation | base median | alias median | base p95 | alias p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 0.962 | 2.471 | 1.160 | 2.639 |
+| `motion_h_4k` | 556.679 | 561.062 | 560.071 | 562.202 |
+| `motion_w_50` | 1.725 | 3.238 | 2.068 | 3.592 |
+| `insert_type` | 12.074 | 11.766 | 12.483 | 11.989 |
+| `insert_edit` | 17.946 | 19.039 | 18.564 | 20.113 |
+
+The six default bindings add ~1.5 µs on cheap Normal inputs (157% on
+no-op, 88% on the short word fixture). The 4k motion increases 0.8%; the
+Insert lifecycle includes Normal entry and increases 6.1%, while sustained
+Insert decreases 2.6% in these samples. Accept this bounded absolute cost for
+binding correctness, not as a speedup. No new parser, cache or render
+optimization is justified by these measurements. Configurations with many
+bindings, live terminal rendering and other runtimes remain unmeasured.
+
+A separate construction-only probe measured 4.403 → 4.727 µs median and
+4.746 → 5.068 µs p95. It constructs editors with the same stub TUI/theme and
+public `getKeybindings()` manager, reads `getText()` into a consumed total,
+and never renders or sends input: 1,000 warmups, eight samples of 5,000
+constructions per process, three alternating base/head rounds, same median
+aggregation. It includes allocation/GC noise and excludes lazy preflight.
+
+Reproduce the five-operation set without installing or switching branches:
+
+```sh
+mkdir -p .tmp/cursorbind-base
+git archive 67c82aa '*.ts' | tar -x -C .tmp/cursorbind-base
+PIVIM_ENTRY=.tmp/cursorbind-base/index.ts node --import tsx/esm script/hotpath-compare.ts
+node --import tsx/esm script/hotpath-compare.ts
+# Repeat in head/base then base/head order; aggregate per-run median and p95.
+```

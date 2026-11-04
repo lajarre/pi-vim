@@ -9792,6 +9792,7 @@ describe("visual mode — entering and leaving", () => {
     // manager claims the key as app.interrupt, so the stub must say so for
     // this assertion to mean anything.
     const interruptKeybindings = {
+      getKeys: () => [],
       matches: (data: string, action: string) =>
         data === "\x1b" && action === "app.interrupt",
     } as unknown as ConstructorParameters<typeof ModalEditor>[2];

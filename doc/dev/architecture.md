@@ -88,7 +88,7 @@ changing behavior.
 | `motions.ts` | char-find / word / paragraph motion targets, grapheme splitting | yes |
 | `text-objects.ts` | word / delimited / matching-pair range resolution | yes |
 | `word-boundary-cache.ts` | line-keyed cache of word-motion boundaries | stateful cache, no editor state |
-| `input-keys.ts` | escape/enter/backspace/printable/digit/count classification of a raw input chunk | yes |
+| `input-keys.ts` | escape/enter/backspace/printable/digit/count classification; snapshot the public manager's cursor bindings into a pure raw-input → hjkl resolver | resolver is pure after construction |
 | `ex-history.ts` | session-local submitted EX lines (100 distinct, newest first), browse position and draft restoration | stateful store, no I/O or host editor state |
 | `visual.ts` | anchor/cursor ordering, line-wise line range, grapheme-aware inclusive selection end, stale-anchor clamping | yes |
 | `cursor-shape.ts` | cursor-shape escape sequences, software-cursor marker stripping | render helpers |
@@ -165,7 +165,16 @@ pre-passes run before the main dispatch: EX input normalization (the paste
 and bracketed-paste stripping in normal mode. The main dispatch is then
 wrapped in `prepareRepeatRecordingForInput` / `finishRepeatRecordingAfterInput`
 (a `try` / `finally`) so dot-repeat records the keystrokes of the last
-change regardless of which branch handles them. The branch order is a
+change regardless of which branch handles them. Between paste filtering and
+that wrapper, host cursor bindings translate to canonical `hjkl` in motion
+contexts (Normal, Visual, counts/operators and `g`), before wanted-column
+bookkeeping too. The public editor-factory `KeybindingsManager.getKeys` is
+read once per construction; `/reload` supplies the refreshed manager to a new
+editor. `matchesKey` remains the only decoder. Insert, EX, literal arguments,
+Escape and Vim undo/redo bypass translation. Canonical replay bypasses alias
+translation and app interception for `hjkl`, so printable remaps cannot
+change the recorded motion. See the cursor-binding decision in
+[editor action dispatch](editor-action-dispatch.md#cursor-binding-aliases--2026-11-04). The branch order is a
 strict precedence: after modal Escape and Insert routing, EX's typed `<C-p>` /
 `<C-n>` browse its own history before any app callback (pasted controls never
 browse); other registered Pi app bindings cancel pending arguments/counts and

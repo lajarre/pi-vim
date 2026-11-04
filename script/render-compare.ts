@@ -120,7 +120,7 @@ for (const fixture of fixtures) {
   const editor = new ModalEditor(
     tui,
     theme,
-    { matches: () => false },
+    { matches: () => false, getKeys: () => [] },
     {
       selectionColorizer: (s: string) => theme.bg("selectedBg", s),
       labelColorizers: {

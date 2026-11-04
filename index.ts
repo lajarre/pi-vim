@@ -32,6 +32,7 @@ import {
 } from "./cursor-shape.js";
 import { ExHistory } from "./ex-history.js";
 import {
+  createCursorBindingResolver,
   isBackspaceLikeInput,
   isCountStarter,
   isDigit,
@@ -379,6 +380,10 @@ export class ModalEditor extends CustomEditor {
   private pendingAsyncDispatches: number = 0;
   private restoreLatestDispatchStateFn: (() => void) | null = null;
 
+  private readonly cursorMotionForInput: ReturnType<
+    typeof createCursorBindingResolver
+  >;
+
   constructor(
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
@@ -386,6 +391,7 @@ export class ModalEditor extends CustomEditor {
     opts?: ModalEditorOptions,
   ) {
     super(tui, theme, appKeybindings);
+    this.cursorMotionForInput = createCursorBindingResolver(appKeybindings);
     const kb = appKeybindings;
     this.cursorMarkerProbe = () => probePiEditorCursor(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
@@ -1374,19 +1380,6 @@ export class ModalEditor extends CustomEditor {
 
   private handleInputCore(data: string): void {
     this.ensureOnChangeHook();
-    if (
-      this.displayWantedColumn !== null &&
-      data !== "g" &&
-      !["v", "V", "d", "c", "y"].includes(data) &&
-      !(
-        isDigit(data) &&
-        (data !== "0" || this.hasPendingCount() || this.pendingG)
-      ) &&
-      !(this.pendingG && (data === "j" || data === "k"))
-    ) {
-      this.displayWantedColumn = null;
-    }
-
     const exPaste =
       this.pendingExCommand !== null &&
       (this.acceptingBracketedPasteInExCommand ||
@@ -1397,6 +1390,7 @@ export class ModalEditor extends CustomEditor {
       data = normalized;
     } else if (this.mode !== "insert") {
       if (this.discardingBracketedPasteInNormalMode) {
+        this.displayWantedColumn = null;
         if (isEscapeLikeInput(data)) {
           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
@@ -1428,11 +1422,54 @@ export class ModalEditor extends CustomEditor {
 
       const { filtered, stripped } = this.stripBracketedPasteInNormalMode(data);
       if (stripped) {
+        this.displayWantedColumn = null;
         this.clearPendingState();
         this.cancelRepeatableCommand();
       }
       if (filtered === null) return;
       data = filtered;
+    }
+
+    const vimHistoryControl =
+      data === CTRL_R ||
+      data === CTRL_UNDERSCORE ||
+      (data.startsWith("\x1b[") &&
+        (matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_")));
+    // Cursor bindings own motion input, even when Pi also retains an app's
+    // default on that key. Literal arguments and EX are not motion contexts.
+    // Record canonical hjkl so dot neither re-reads bindings nor re-translates
+    // a printable alias. Insert, paste, Escape and Vim undo/redo stay untouched.
+    const cursorMotion =
+      this.mode !== "insert" &&
+      this.pendingExCommand === null &&
+      !vimHistoryControl &&
+      !isEscapeLikeInput(data)
+        ? this.replayingRepeat
+          ? ["h", "j", "k", "l"].includes(data)
+            ? data
+            : undefined
+          : this.cursorMotionForInput(data)
+        : undefined;
+    if (
+      cursorMotion &&
+      !this.pendingMotion &&
+      !this.pendingReplace &&
+      !this.pendingTextObject &&
+      !this.pendingZ
+    )
+      data = cursorMotion;
+
+    if (
+      this.displayWantedColumn !== null &&
+      data !== "g" &&
+      !["v", "V", "d", "c", "y"].includes(data) &&
+      !(
+        isDigit(data) &&
+        (data !== "0" || this.hasPendingCount() || this.pendingG)
+      ) &&
+      !(this.pendingG && (data === "j" || data === "k"))
+    ) {
+      this.displayWantedColumn = null;
     }
 
     this.prepareRepeatRecordingForInput(data);
@@ -1476,12 +1513,12 @@ export class ModalEditor extends CustomEditor {
       // Other app callbacks keep their bindings in every mode. Never hand their
       // key to the host's editor fallback (exit/history bindings can edit).
       // Paste payload is data, and Vim's undo/redo controls retain ownership.
-      const vimHistoryControl =
-        data === CTRL_R ||
-        data === CTRL_UNDERSCORE ||
-        (data.startsWith("\x1b[") &&
-          (matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_")));
-      if (!exPaste && !vimHistoryControl && this.handleAppAction(data)) {
+      if (
+        !cursorMotion &&
+        !exPaste &&
+        !vimHistoryControl &&
+        this.handleAppAction(data)
+      ) {
         return;
       }
 

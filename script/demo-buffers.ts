@@ -34,6 +34,7 @@ const stubTheme = {
 
 const stubKeybindings = {
   matches: () => false,
+  getKeys: () => [],
 } as unknown as ModalEditorConstructorArgs[2];
 
 const ESC = "\x1b";

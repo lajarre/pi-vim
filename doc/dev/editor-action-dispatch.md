@@ -108,6 +108,50 @@ app effects. Arbitrary extension shortcuts do not run in non-Insert modes unless
 the key is admitted as an app chord (or explicit idle-Normal submit/Escape). No changes to the
 pre-existing k/j logical-line history route, motion algorithms or paste policy.
 
+## Cursor-binding aliases — 2026-11-04
+
+The public `ExtensionUIContext.setEditorComponent` factory supplies a typed
+`KeybindingsManager`; its inherited public `getKeys` returns resolved defaults,
+replacements, lists and disabled actions. `input-keys.ts` snapshots only the
+four cursor actions per editor construction and matches events with the existing
+Pi `matchesKey` decoder. No runtime private import, TUI singleton, filesystem
+parser or additional configuration is needed. The audited host reloads bindings
+before re-emitting `session_start`, which installs a fresh editor and snapshot.
+
+Decision: translate cursor bindings to `hjkl` after paste filtering but before
+wanted-column bookkeeping and repeat recording. Normal/Visual, pending counts,
+operators and `g` therefore share the exact existing motions; dot replays the
+canonical motion without reinterpreting printable aliases. Literal arguments
+(`f`/`t`/`r`, text objects and `Z`), EX, Escape and Vim undo/redo remain outside
+motion translation. Cursor-bound controls cancel pending literal arguments
+without invoking an overlapping app callback. Insert and compatibility fallback
+retain the original host input path.
+
+The installed 1.4 manager does **not** enforce one action per key. Reassigning
+`ctrl+p` to `tui.editor.cursorUp` leaves `app.model.cycleForward`'s default in
+place; `matches` returns true for both. Explicit duplicates are reported by
+`getConflicts`, not removed, and implicit collisions with defaults are not even
+reported. The public 1.5 reference likewise describes overlapping action
+precedence. Left/right defaults also include `ctrl+b`/`ctrl+f`.
+
+Cursor bindings take precedence over app callbacks outside Insert. Alternatives:
+app-first would prevent the requested Ctrl-P alias; modifying the manager would
+change Insert semantics; defaults-only/file parsing would ignore an available
+public API. Insert still obeys host precedence, so its Ctrl-P cursor fixture
+explicitly disables model cycling. If multiple cursor actions share a key,
+resolution is Up, Down, Right, Left, matching the host editor's directional
+checks. These conflicting configurations should be resolved in Pi's bindings.
+
+Known `hjkl` gaps remain out of scope: Normal EOL/short-line clamps, `dk` column
+zero, `yk` starting cursor, the dual-count vertical-delete rule, and unsupported
+horizontal operator suffixes. Fixing these in the alias would create the second
+motion path the feature forbids; changing the shared motions requires separate
+coverage and scope. Unit tests compare full state against canonical keys,
+including these gaps; curated nvim cases cover supported motions, linewise
+operators, Visual, Unicode, wrapping, undo/redo and dot. Existing skipped
+line-motion cases are unchanged for that reason. Edge prompt recall and app
+conflicts are intentional Pi behavior, tested without an nvim equivalent.
+
 ## Cursor render preflight — 2026-11-02
 
 After required-action validation, startup renders one detached `CustomEditor`

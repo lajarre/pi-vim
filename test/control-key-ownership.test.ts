@@ -1,63 +1,10 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { after, describe, it } from "node:test";
-import {
-  CustomEditor,
-  type KeybindingsManager as PiKeybindingsManager,
-} from "@earendil-works/pi-coding-agent";
-import { ModalEditor } from "../index.js";
-import { sendKeys, setInternalCursor, stubTheme, stubTui } from "./harness.js";
-
-// Resolve the actual host defaults and its TUI singleton, not user config or a
-// fake matches implementation. These internal module paths are test-only seams.
-const hostEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
-const { KeybindingsManager } = (await import(
-  new URL("./core/keybindings.js", hostEntry).href
-)) as {
-  KeybindingsManager: new (
-    bindings?: Record<string, string | string[]>,
-  ) => PiKeybindingsManager;
-};
-const hostTui = (await import(
-  createRequire(hostEntry).resolve("@earendil-works/pi-tui")
-)) as typeof import("@earendil-works/pi-tui");
-const originalKeybindings = hostTui.getKeybindings();
-after(() => hostTui.setKeybindings(originalKeybindings));
+import { describe, it } from "node:test";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { APP_KEYS, assertNoPending, fixture } from "./control-key-fixtures.js";
+import { sendKeys, setInternalCursor } from "./harness.js";
 
 const ESC = "\x1b";
-const APP_KEYS = [
-  {
-    name: "Ctrl-P",
-    raw: "\x10",
-    kitty: "\x1b[112;5u",
-    action: "app.model.cycleForward",
-  },
-  {
-    name: "Ctrl-G",
-    raw: "\x07",
-    kitty: "\x1b[103;5u",
-    action: "app.editor.external",
-  },
-  {
-    name: "Ctrl-T",
-    raw: "\x14",
-    kitty: "\x1b[116;5u",
-    action: "app.thinking.toggle",
-  },
-  { name: "Ctrl-C", raw: "\x03", kitty: "\x1b[99;5u", action: "app.clear" },
-  {
-    name: "Ctrl-L",
-    raw: "\x0c",
-    kitty: "\x1b[108;5u",
-    action: "app.model.select",
-  },
-  {
-    name: "Shift-Tab",
-    raw: "\x1b[Z",
-    kitty: "\x1b[9;2u",
-    action: "app.thinking.cycle",
-  },
-] as const;
 const EDITOR_KEYS = [
   { name: "Ctrl-K", raw: "\x0b", kitty: "\x1b[107;5u" },
   { name: "Ctrl-U", raw: "\x15", kitty: "\x1b[117;5u" },
@@ -65,8 +12,6 @@ const EDITOR_KEYS = [
   { name: "Ctrl-E", raw: "\x05", kitty: "\x1b[101;5u" },
   { name: "Ctrl-W", raw: "\x17", kitty: "\x1b[119;5u" },
   { name: "Enter", raw: "\r", kitty: "\x1b[13u" },
-  { name: "Up", raw: "\x1b[A", kitty: "\x1b[1;1A" },
-  { name: "Down", raw: "\x1b[B", kitty: "\x1b[1;1B" },
   { name: "Ctrl-N", raw: "\x0e", kitty: "\x1b[110;5u" },
 ] as const;
 const STATES = [
@@ -99,85 +44,96 @@ const STATES = [
   ),
 ];
 
-function internals(editor: ModalEditor) {
-  return editor as unknown as {
-    historyIndex: number;
-    undoStack: { stack: unknown[] };
-    redoStack: unknown[];
-    lastRepeatableCommand: unknown;
-    visualAnchor: unknown;
-    pendingExCommand: string | null;
-    pendingMotion: unknown;
-    pendingTextObject: unknown;
-    pendingOperator: unknown;
-    pendingReplace: boolean;
-    pendingG: boolean;
-    pendingZ: boolean;
-    prefixCount: string;
-    operatorCount: string;
-    pendingGCount: string;
-  };
-}
+const CURSOR_KEYS = [
+  { name: "Up", raw: "\x1b[A", kitty: "\x1b[1;1A", motion: "k" },
+  { name: "Down", raw: "\x1b[B", kitty: "\x1b[1;1B", motion: "j" },
+  { name: "Left", raw: "\x1b[D", kitty: "\x1b[1;1D", motion: "h" },
+  { name: "Right", raw: "\x1b[C", kitty: "\x1b[1;1C", motion: "l" },
+  { name: "Ctrl-B", raw: "\x02", kitty: "\x1b[98;5u", motion: "h" },
+  { name: "Ctrl-F", raw: "\x06", kitty: "\x1b[102;5u", motion: "l" },
+] as const;
+const CUSTOM_CURSOR_KEYS = [
+  { name: "Ctrl-P", raw: "\x10", kitty: "\x1b[112;5u", motion: "k" },
+  { name: "Ctrl-N", raw: "\x0e", kitty: "\x1b[110;5u", motion: "j" },
+] as const;
+const CUSTOM_CURSOR_BINDINGS = {
+  "tui.editor.cursorUp": "ctrl+p",
+  "tui.editor.cursorDown": "ctrl+n",
+  // Pi does not remove another action's default when a key is reassigned.
+  "app.model.cycleForward": [],
+};
 
-function fixture(setup: readonly string[], bindings = {}) {
-  const kb = new KeybindingsManager(bindings);
-  hostTui.setKeybindings(kb);
-  const editor = new ModalEditor(stubTui, stubTheme, kb);
-  const writes: string[] = [];
-  const fired: string[] = [];
-  const forwarded: string[] = [];
-  const submitted: string[] = [];
-  editor.setClipboardFn((text) => writes.push(text));
-  editor.setClipboardReadFn(() => null);
-  editor.setText("alpha\nbravo\ncider\ndelta\neagle");
-  // Seed redo and dot: harmless chords must not invalidate either history.
-  sendKeys(editor, [ESC, "i", "X", ESC, "u"]);
-  setInternalCursor(editor, 2, 2);
-  editor.setRegister("keep\n");
-  editor.addToHistory("older prompt");
-  editor.addToHistory("newer prompt");
-  for (const { action } of APP_KEYS)
-    editor.onAction(action, () => fired.push(action));
-  editor.onAction("app.interrupt", () => fired.push("app.interrupt"));
-  editor.onAction("app.exit", () => fired.push("app.exit"));
-  editor.onAction("app.suspend", () => fired.push("app.suspend"));
-  editor.onSubmit = (text) => submitted.push(text);
-  editor.onExtensionShortcut = (key) => {
-    forwarded.push(key);
-    return false;
-  };
-  if (setup[0] === ":") {
-    sendKeys(editor, [":", "ex-a", "\r", ":", "ex-b", "\r"]);
-  }
-  sendKeys(editor, [...setup]);
-  const state = internals(editor);
-  const snapshot = () =>
-    structuredClone({
-      text: editor.getText(),
-      cursor: editor.getCursor(),
-      mode: editor.getMode(),
-      register: editor.getRegister(),
-      writes,
-      historyIndex: state.historyIndex,
-      undo: state.undoStack.stack,
-      redo: state.redoStack,
-      repeat: state.lastRepeatableCommand,
-      anchor: state.visualAnchor,
-      ex: state.pendingExCommand,
-    });
-  return { editor, kb, state, snapshot, fired, forwarded, submitted };
-}
-
-function assertNoPending(state: ReturnType<typeof internals>) {
-  assert.equal(state.pendingMotion, null);
-  assert.equal(state.pendingTextObject, null);
-  assert.equal(state.pendingOperator, null);
-  assert.equal(state.pendingReplace, false);
-  assert.equal(state.pendingG, false);
-  assert.equal(state.pendingZ, false);
-  assert.equal(state.prefixCount, "");
-  assert.equal(state.operatorCount, "");
-  assert.equal(state.pendingGCount, "");
+for (const custom of [false, true]) {
+  describe(`host cursor aliases (${custom ? "custom" : "default"} bindings)`, () => {
+    const bindings = custom ? CUSTOM_CURSOR_BINDINGS : {};
+    for (const key of custom ? CUSTOM_CURSOR_KEYS : CURSOR_KEYS) {
+      for (const encoding of ["raw", "kitty"] as const) {
+        for (const setup of [
+          [],
+          ["2"],
+          ["d"],
+          ["y"],
+          ["c"],
+          ["v"],
+          ["V"],
+          ["2", "d", "2"],
+          ["g"],
+        ]) {
+          it(`${key.name} ${encoding} after ${setup.join("") || "Normal"} equals ${key.motion}`, () => {
+            const actual = fixture(setup, bindings);
+            const expected = fixture(setup, bindings);
+            actual.editor.render(8);
+            expected.editor.render(8);
+            actual.editor.handleInput(key[encoding]);
+            expected.editor.handleInput(key.motion);
+            assert.deepEqual(actual.snapshot(), expected.snapshot());
+            assert.deepEqual(actual.fired, []);
+            assert.deepEqual(actual.forwarded, []);
+            assertNoPending(actual.state);
+            sendKeys(actual.editor, [ESC, "l"]);
+            sendKeys(expected.editor, [ESC, "l"]);
+            assert.deepEqual(actual.snapshot(), expected.snapshot());
+          });
+        }
+        it(`${key.name} ${encoding} in Insert keeps the stock binding`, () => {
+          const actual = fixture(["i"], bindings);
+          const expected = fixture(["i"], bindings);
+          actual.editor.handleInput(key[encoding]);
+          CustomEditor.prototype.handleInput.call(
+            expected.editor,
+            key[encoding],
+          );
+          assert.deepEqual(actual.snapshot(), expected.snapshot());
+          assert.deepEqual(actual.fired, expected.fired);
+          assert.deepEqual(actual.forwarded, expected.forwarded);
+          assert.notDeepEqual(actual.editor.getCursor(), { line: 2, col: 2 });
+        });
+      }
+    }
+    for (const encoding of ["raw", "kitty"] as const) {
+      it(`${encoding} edge history recall, exhaustion, draft, undo and redo equal k/j`, () => {
+        const actual = fixture([], bindings);
+        const expected = fixture([], bindings);
+        setInternalCursor(actual.editor, 2, 0);
+        setInternalCursor(expected.editor, 2, 0);
+        const up = (custom ? CUSTOM_CURSOR_KEYS : CURSOR_KEYS)[0][encoding];
+        const down = (custom ? CUSTOM_CURSOR_KEYS : CURSOR_KEYS)[1][encoding];
+        for (const [input, vim] of [
+          [up, "k"],
+          [up, "k"],
+          [up, "k"],
+          [down, "j"],
+          [down, "j"],
+          ["u", "u"],
+          ["\x12", "\x12"],
+        ]) {
+          actual.editor.handleInput(input);
+          expected.editor.handleInput(vim);
+          assert.deepEqual(actual.snapshot(), expected.snapshot());
+        }
+      });
+    }
+  });
 }
 
 // Intentional divergence from nvim: application shortcuts are Pi-owned; unknown

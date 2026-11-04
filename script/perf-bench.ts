@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
+import { getKeybindings, type Keybinding } from "@earendil-works/pi-tui";
 
 import { ModalEditor } from "../index.js";
 
@@ -35,6 +36,7 @@ const stubTheme = {
 
 const stubKeybindings = {
   matches: () => false,
+  getKeys: (action: Keybinding) => getKeybindings().getKeys(action),
 } as unknown as ModalEditorConstructorArgs[2];
 
 function percentile(sorted: number[], p: number): number {
