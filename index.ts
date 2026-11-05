@@ -80,6 +80,7 @@ import {
   resolveExCommandSettings,
   resolveHistoryNavigation,
   resolveLabelPosition,
+  resolveScrollKeys,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "./settings.js";
@@ -287,6 +288,9 @@ export class ModalEditor extends CustomEditor {
   private pendingGCount: string = "";
   private displayLineWidth: number | null = null;
   private displayWantedColumn: number | null = null;
+  private scrollKeys = false;
+  private displayPageRows: number | null = null;
+  private halfPageRows: number | null = null;
   private pendingReplace: boolean = false;
   private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
@@ -446,6 +450,12 @@ export class ModalEditor extends CustomEditor {
   }
   setHistoryNavigation(enabled: boolean): void {
     this.historyNavigation = enabled;
+  }
+
+  setScrollKeys(enabled: boolean): void {
+    this.scrollKeys = enabled;
+    this.halfPageRows = null;
+    this.displayPageRows = null;
   }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
@@ -1439,7 +1449,16 @@ export class ModalEditor extends CustomEditor {
     // default on that key. Literal arguments and EX are not motion contexts.
     // Record canonical hjkl so dot neither re-reads bindings nor re-translates
     // a printable alias. Insert, paste, Escape and Vim undo/redo stay untouched.
+    const scrollKey =
+      this.scrollKeys &&
+      this.mode !== "insert" &&
+      this.pendingExCommand === null
+        ? (["d", "u", "f", "b"] as const).find((key) =>
+            matchesKey(data, `ctrl+${key}`),
+          )
+        : undefined;
     const cursorMotion =
+      !scrollKey &&
       this.mode !== "insert" &&
       this.pendingExCommand === null &&
       !vimHistoryControl &&
@@ -1461,6 +1480,7 @@ export class ModalEditor extends CustomEditor {
 
     if (
       this.displayWantedColumn !== null &&
+      !scrollKey &&
       data !== "g" &&
       !["v", "V", "d", "c", "y"].includes(data) &&
       !(
@@ -1517,8 +1537,29 @@ export class ModalEditor extends CustomEditor {
         !cursorMotion &&
         !exPaste &&
         !vimHistoryControl &&
-        this.handleAppAction(data)
+        this.handleAppAction(data, scrollKey !== undefined)
       ) {
+        return;
+      }
+
+      if (scrollKey) {
+        // Scrolling is a cursor command, not an operator/literal/g suffix.
+        if (
+          this.pendingOperator ||
+          this.pendingMotion ||
+          this.pendingReplace ||
+          this.pendingTextObject ||
+          this.pendingG ||
+          this.pendingZ
+        ) {
+          this.clearPendingState();
+          this.cancelRepeatableCommand();
+        } else {
+          this.executeDisplayLineMotion(
+            scrollKey === "d" || scrollKey === "f" ? "j" : "k",
+            scrollKey === "d" || scrollKey === "u" ? "half" : "full",
+          );
+        }
         return;
       }
 
@@ -1634,8 +1675,11 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private handleAppAction(data: string): boolean {
+  private handleAppAction(data: string, scrolling = false): boolean {
     const kb = this.appKeybindings;
+    // app.exit owns Ctrl-D only on an empty prompt. Let nonempty scrolling
+    // through, but still check other app bindings sharing that chord.
+    const skipExit = scrolling && this.getText().length > 0;
     let action: Parameters<CustomEditor["onAction"]>[0] | undefined;
     for (const special of [
       "app.clipboard.pasteImage",
@@ -1643,6 +1687,7 @@ export class ModalEditor extends CustomEditor {
       "app.exit",
       "app.suspend",
     ] as const) {
+      if (special === "app.exit" && skipExit) continue;
       if (kb.matches(data, special)) {
         action = special;
         break;
@@ -1650,6 +1695,7 @@ export class ModalEditor extends CustomEditor {
     }
     if (!action) {
       for (const registered of this.actionHandlers.keys()) {
+        if (registered === "app.exit" && skipExit) continue;
         if (registered.startsWith("app.") && kb.matches(data, registered)) {
           action = registered;
           break;
@@ -1658,6 +1704,7 @@ export class ModalEditor extends CustomEditor {
     }
     if (!action) return false;
 
+    this.displayWantedColumn = null;
     this.clearPendingState(
       action === "app.interrupt" || action === "app.clear",
     );
@@ -3126,8 +3173,11 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private executeDisplayLineMotion(direction: "j" | "k"): void {
-    const count = this.takeTotalCount(1);
+  private executeDisplayLineMotion(
+    direction: "j" | "k",
+    scrolling?: "half" | "full",
+  ): void {
+    let count = this.takeTotalCount(scrolling === "half" ? 0 : 1);
     const operator = this.pendingOperator;
     this.pendingOperator = null;
     const editor = this as unknown as ModalEditorInternals;
@@ -3151,6 +3201,15 @@ export class ModalEditor extends CustomEditor {
         this.notifyFn("Pi display-line layout unavailable; motion cancelled.");
         this.cancelRepeatableCommand();
         return;
+      }
+    }
+    if (scrolling && Array.isArray(rows)) {
+      const page = this.displayPageRows ?? rows.length;
+      if (scrolling === "half") {
+        if (count > 0) this.halfPageRows = count;
+        count = this.halfPageRows ?? Math.max(1, Math.ceil(page / 2));
+      } else {
+        count *= Math.max(1, page - 2);
       }
     }
     const target = Array.isArray(rows)
@@ -4644,6 +4703,30 @@ export class ModalEditor extends CustomEditor {
       this.displayLineWidth = layoutWidth;
     }
     if (!vim) return lines;
+    if (this.scrollKeys) {
+      // Host output is top border + text rows + bottom border, then optional
+      // completions. Use the same viewport cap/offset as Visual paint, not a
+      // new private seam. Only completions need a map to exclude their rows.
+      let visible = Math.min(
+        lines.length - 2,
+        Math.max(5, Math.floor(this.tui.terminal.rows * 0.3)),
+      );
+      if (this.isShowingAutocomplete()) {
+        const editor = this as unknown as ModalEditorInternals;
+        try {
+          const rows = editor.buildVisualLineMap?.(layoutWidth ?? 1);
+          if (Array.isArray(rows))
+            visible = Math.min(
+              visible,
+              rows.length - (editor.scrollOffset ?? 0),
+            );
+        } catch {
+          // Motion validates the optional map and reports incompatibility.
+          visible = 1;
+        }
+      }
+      this.displayPageRows = Math.max(1, visible);
+    }
     this.syncCursorShapeForRender(lines);
     if (this.visualPaintAvailable && isVisualMode(this.mode)) {
       this.renderVisualSelection(lines, width, this.mode);
@@ -4761,6 +4844,10 @@ export default function (pi: ExtensionAPI) {
     const historyNavigation = resolveHistoryNavigation(
       piVimSettings.historyNavigation,
     );
+    const scrollKeys = resolveScrollKeys(piVimSettings.scrollKeys);
+    if (scrollKeys.warning && ctx.hasUI) {
+      ctx.ui.notify(scrollKeys.warning, "warning");
+    }
     if (historyNavigation.warning && ctx.hasUI) {
       ctx.ui.notify(historyNavigation.warning, "warning");
     }
@@ -4827,6 +4914,7 @@ export default function (pi: ExtensionAPI) {
       editor.setModeChangeFn(modeChangeHandler);
       editor.setCursorShapeSettings(cursorShape.settings);
       editor.setHistoryNavigation(historyNavigation.enabled);
+      editor.setScrollKeys(scrollKeys.enabled);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.

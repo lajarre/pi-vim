@@ -267,3 +267,88 @@ layout cache or invalidation protocol. `npm run scoreboard -- --write`
 re-measures these fixtures. Reproduce the comparisons with the commands
 above using `e9cfe97` and this feature commit as archive refs; run the motion
 fixtures with `node --import tsx/esm script/perf-bench.ts --json`.
+
+## control-key motions — 2026-11-04
+
+Base `500929e` (0.15.1), head: `6344ac5` plus the runtime in
+`feat(motion): add opt-in vim scroll keys`. The alias commit is preserved;
+these measurements include both features. Node v24.15.0, darwin-arm64,
+coding-agent/pi-tui 1.4.0. Three serial rounds, base/head/enabled,
+enabled/head/base, base/head/enabled, with no concurrent gates.
+`head` uses the default `scrollKeys: false`; `enabled` sets it true once
+at construction. No render optimization, cache or new private seam is added.
+
+The existing render harness runs all eleven fixtures at 100 warmups,
+30 batches of 20 renders. Values are medians of per-run medians and batch
+p95s, in µs/render; not single-frame latency tails.
+
+| fixture | base median | base p95 | head median | head p95 | enabled median | enabled p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| insert_80_long | 355.271 | 367.610 | 351.169 | 369.392 | 347.056 | 372.377 |
+| visual_5_lines | 14.102 | 16.594 | 14.337 | 16.681 | 14.177 | 16.879 |
+| visual_line_400_words | 722.546 | 733.569 | 712.662 | 731.352 | 712.677 | 730.444 |
+| normal_80_long | 350.767 | 370.873 | 350.273 | 361.496 | 352.750 | 362.762 |
+| ex_80_long | 353.127 | 362.846 | 348.700 | 362.217 | 346.960 | 362.152 |
+| insert_resize_79_80 | 372.777 | 391.031 | 367.198 | 378.023 | 369.540 | 385.694 |
+| visual_unicode_20 | 139.521 | 153.194 | 137.754 | 153.560 | 136.604 | 148.696 |
+| visual_one_4096 | 1176.642 | 1259.956 | 1160.108 | 1247.321 | 1157.810 | 1254.448 |
+| normal_4096 | 475.850 | 494.727 | 478.915 | 502.950 | 473.210 | 489.188 |
+| visual_one_16384 | 4730.167 | 4816.573 | 4709.931 | 4764.138 | 4699.825 | 4787.467 |
+| normal_16384 | 1948.952 | 2014.010 | 1933.417 | 1994.877 | 1926.771 | 1959.133 |
+
+The existing input harness uses eight samples per fixture in each round,
+aggregated the same way, in µs/operation:
+
+| fixture | base median | base p95 | head median | head p95 | enabled median | enabled p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| noop_key | 2.510 | 2.623 | 2.859 | 3.024 | 3.877 | 4.070 |
+| motion_h_4k | 556.345 | 559.452 | 558.008 | 564.195 | 558.077 | 559.517 |
+| motion_w_50 | 3.296 | 4.021 | 3.673 | 4.012 | 4.833 | 5.012 |
+| insert_type | 11.972 | 12.363 | 11.873 | 12.267 | 11.941 | 12.078 |
+| insert_edit | 19.076 | 19.790 | 19.830 | 20.584 | 20.640 | 21.232 |
+
+The no-op median rises 0.349 µs with defaults and 1.367 µs with scrolling;
+short-word motion rises 0.377 / 1.537 µs. Retain this input-decoding cost for
+the requested ownership semantics rather than add a second key decoder.
+The default 4K render p95 rises 8.223 µs; report rather than attribute these
+small control deltas. These runs do not prove zero regression, bound memory
+use, or measure terminal transport/compositor latency.
+
+A post-change scroll probe uses the same 40-row terminal (12 text rows),
+unbroken ASCII, 20/80 text columns, and whole commands. One 30-command warmup
+batch precedes four timed batches of 30; render and `0` reset are outside
+timing. Each destination is asserted. Median µs/command:
+
+| chars | width | C-d | 9999C-d | C-f | 9999C-f |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4096 | 20 | 493.853 | 493.191 | 475.489 | 486.838 |
+| 4096 | 80 | 474.103 | 472.946 | 476.106 | 466.518 |
+| 16384 | 20 | 2034.174 | 1952.818 | 1912.479 | 1947.931 |
+| 16384 | 80 | 1868.751 | 1891.064 | 1880.814 | 1888.668 |
+
+There is no equivalent pre-feature scroll command. Like `gj`/`gk`, the new
+motions build and validate one map, then jump by row index; a large count
+never loops over intermediate movements. The O(buffer-size) host layout cost
+remains (about 2 ms at 16K here). No idle short-circuit is justified.
+
+Reproduce the before/after tables with the archive commands above, using
+`500929e` as base and this feature commit as head. For the enabled variant,
+point `PIVIM_ENTRY` at this scratch wrapper instead of the ordinary entry:
+
+```ts
+import { ModalEditor as Base } from "../index.js";
+export class ModalEditor extends Base {
+  constructor(...args: ConstructorParameters<typeof Base>) {
+    super(...args);
+    this.setScrollKeys(true);
+  }
+}
+```
+
+Use `script/render-compare.ts` with the counts above and
+`script/hotpath-compare.ts` with its defaults; alternate the three variants
+in the stated order. For scroll timing, use the existing harness stubs,
+set the buffer to `"x".repeat(size)`, enable scrolling, enter Normal, render
+at `width + 1`, reset with `0` before each timed command, and assert the
+cursor column is `min(distance, ceil(size / width) - 1) * width`.
+Half/full-page distances are 6/10; counted distances are 9999/99990.
