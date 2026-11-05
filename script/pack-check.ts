@@ -390,9 +390,17 @@ const THRESHOLDS = {
   // +3325 B from gj/gk). Limits become 77700 / 294100 / 20, leaving
   // 512 B / 656 B headroom. No runtime dependency or packed file added;
   // tests, benchmark evidence and maintainer QA remain outside the package.
+  //
+  // 2026-11-04: Always-on Ctrl-H/Backspace left aliases and opt-in scroll
+  // keys reuse cursor translation and display-row geometry, with boolean
+  // settings and README ownership/count/viewport contracts. Measured
+  // 79253 B packed / 301675 B unpacked / 20 files (+2066 B / +8231 B
+  // from the 0.15.1 release baseline). Limits become 79800 / 302400 / 20,
+  // leaving 547 B / 725 B headroom. No dependency or packed file added;
+  // parity, ownership tests, perf evidence and manual QA remain excluded.
   maxFiles: 20,
-  maxSize: 77700,
-  maxUnpackedSize: 294100,
+  maxSize: 79800,
+  maxUnpackedSize: 302400,
 } as const;
 
 function compareStrings(a: string, b: string): number {
