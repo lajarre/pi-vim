@@ -398,9 +398,16 @@ const THRESHOLDS = {
   // from the 0.15.1 release baseline). Limits become 79800 / 302400 / 20,
   // leaving 547 B / 725 B headroom. No dependency or packed file added;
   // parity, ownership tests, perf evidence and manual QA remain excluded.
+  //
+  // 2026-11-05: EX Up/Down prefix recall reuses the history store and typed
+  // EX routing; README documents matching, mixed keys and ownership.
+  // Measured 79637 B packed / 303086 B unpacked / 20 files (+384 B /
+  // +1411 B from scroll keys). Limits become 80200 / 303800 / 20, leaving
+  // 563 B / 714 B headroom. No dependency or packed file added; tests,
+  // benchmark evidence, ownership docs and manual QA remain excluded.
   maxFiles: 20,
-  maxSize: 79800,
-  maxUnpackedSize: 302400,
+  maxSize: 80200,
+  maxUnpackedSize: 303800,
 } as const;
 
 function compareStrings(a: string, b: string): number {
