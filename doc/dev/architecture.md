@@ -176,8 +176,8 @@ translation and app interception for `hjkl`, so printable remaps cannot
 change the recorded motion. See the cursor-binding decision in
 [editor action dispatch](editor-action-dispatch.md#cursor-binding-aliases--2026-11-04). The branch order is a
 strict precedence: after modal Escape and Insert routing, EX's typed `<C-p>` /
-`<C-n>` browse its own history before any app callback (pasted controls never
-browse); other registered Pi app bindings cancel pending arguments/counts and
+`<C-n>` / `<Up>` / `<Down>` browse its own history before any app callback (pasted
+controls never browse); other registered Pi app bindings cancel pending arguments/counts and
 reach their host callbacks. EX is
 retained unless the app action is interrupt/clear. Paste payload and Vim undo/redo
 controls do not take this route. Pending state then precedes normal-mode keys,
@@ -204,7 +204,7 @@ flowchart TD
     esc -- yes --> doEsc["handleEscape()"]
     esc -- no --> ins{"mode == insert?"}
     ins -- yes --> doIns["alt-key shims, else super.handleInput"]
-    ins -- no --> exhist{"typed EX Ctrl-P / Ctrl-N?"}
+    ins -- no --> exhist{"typed EX Ctrl-P / Ctrl-N / Up / Down?"}
     exhist -- yes --> browse["recall EX history / restore draft"]
     exhist -- no --> app{"registered app chord?"}
     app -- yes --> doApp["cancel pending state<br/>invoke host app callback, no editor fallback"]
@@ -235,9 +235,12 @@ normal mode. It also declines to consume anything while `pendingG` or
 `:` in normal mode calls `startPendingExCommand()`, seeding the buffer with
 `":"` and resetting the history draft. `ExHistory` is owned by that editor
 instance, never shared across sessions or persisted. Typed `<C-p>` / `<C-n>`
-recall whole lines, with the existing end-of-line underscore cursor; app
-bindings cannot steal them. Appending or backspacing resets the browse position
-and makes the edited line the draft. Esc resets browsing without recording
+recall whole lines; `<Up>` / `<Down>` share the browse position but only match
+entries beginning with the saved draft (literal and case-sensitive). Both use
+the end-of-line underscore cursor, clamp at the oldest match and restore the
+draft past the newest. These fixed EX keys bypass cursor-motion aliases and app
+bindings. Appending or backspacing resets the browse position and makes the
+edited line the draft and prefix. Esc resets browsing without recording
 (both policies intentionally differ from nvim).
 Subsequent keys append through `handlePendingExCommand` (with the
 paste/newline wait policy applied in the pre-pass, so a pasted newline is

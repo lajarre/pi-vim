@@ -1766,6 +1766,10 @@ export class ModalEditor extends CustomEditor {
       this.pendingExCommand = `:${this.exHistory.older()}`;
     } else if (matchesKey(data, "ctrl+n")) {
       this.pendingExCommand = `:${this.exHistory.newer()}`;
+    } else if (matchesKey(data, "up")) {
+      this.pendingExCommand = `:${this.exHistory.older(true)}`;
+    } else if (matchesKey(data, "down")) {
+      this.pendingExCommand = `:${this.exHistory.newer(true)}`;
     } else {
       return false;
     }

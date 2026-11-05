@@ -78,6 +78,97 @@ describe("EX history store", () => {
     assert.equal(history.older(), "c");
   });
 
+  it("filters by the saved draft, clamps oldest and restores past newest match", () => {
+    const history = new ExHistory();
+    for (const line of ["ab", "xy", "ac", "yz"]) history.push(line);
+    history.reset("a");
+    assert.equal(history.newer(true), "a");
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.older(true), "ab");
+    assert.equal(history.older(true), "ab");
+    assert.equal(history.newer(true), "ac");
+    assert.equal(history.newer(true), "a");
+    assert.equal(history.newer(true), "a");
+    assert.equal(history.older(true), "ac");
+  });
+
+  it("leaves an unmatched prefix or empty history unchanged", () => {
+    const history = new ExHistory();
+    history.reset("a");
+    assert.equal(history.older(true), "a");
+    history.push("ab");
+    history.push("xy");
+    history.reset("z");
+    assert.equal(history.older(true), "z");
+    assert.equal(history.older(true), "z");
+    assert.equal(history.newer(true), "z");
+    assert.equal(history.older(), "xy");
+    assert.equal(history.newer(), "z");
+  });
+
+  it("matches literal case-sensitive prefixes without trimming or normalizing", () => {
+    const history = new ExHistory();
+    for (const line of ["Name", "name", " name ", "é👩‍💻", "[a"])
+      history.push(line);
+    for (const [prefix, expected] of [
+      ["N", "Name"],
+      ["n", "name"],
+      [" ", " name "],
+      ["é", "é👩‍💻"],
+      ["é", "é"],
+      ["[", "[a"],
+    ]) {
+      history.reset(prefix);
+      assert.equal(history.older(true), expected);
+      assert.equal(history.newer(true), prefix);
+    }
+  });
+
+  it("shares position and draft with unfiltered navigation when keys are mixed", () => {
+    const history = new ExHistory();
+    for (const line of ["ab", "xy", "ac", "yz"]) history.push(line);
+    history.reset("a");
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.newer(), "yz");
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.older(), "xy");
+    assert.equal(history.older(true), "ab");
+    assert.equal(history.newer(true), "ac");
+    assert.equal(history.newer(true), "a");
+    assert.equal(history.older(), "yz");
+    assert.equal(history.newer(true), "a");
+  });
+
+  it("empty-prefix navigation uses the same duplicate rule and cap", () => {
+    const history = new ExHistory();
+    for (let i = 0; i < 101; i++) history.push(String(i));
+    history.push("50");
+    assert.equal(history.older(true), "50");
+    for (let i = 100; i >= 1; i--)
+      if (i !== 50) assert.equal(history.older(true), String(i));
+    assert.equal(history.older(true), "1");
+    for (let i = 2; i <= 100; i++)
+      if (i !== 50) assert.equal(history.newer(true), String(i));
+    assert.equal(history.newer(true), "50");
+    assert.equal(history.newer(true), "");
+  });
+
+  it("reset replaces the filter and position without mutating the stored entries", () => {
+    const history = new ExHistory();
+    for (const line of ["ab", "xy", "ac"]) history.push(line);
+    history.reset("a");
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.older(true), "ab");
+    history.reset("ac");
+    assert.equal(history.newer(true), "ac");
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.older(true), "ac");
+    history.reset();
+    assert.equal(history.older(true), "ac");
+    assert.equal(history.older(true), "xy");
+    assert.equal(history.older(true), "ab");
+  });
+
   it("isolates sessions", () => {
     const first = new ExHistory();
     first.push("private command");

@@ -20,13 +20,25 @@ export class ExHistory {
     this.draft = draft;
   }
 
-  older(): string {
-    if (this.position + 1 < this.entries.length) this.position++;
+  /** Both key pairs share a position; only Up/Down filter by the saved draft. */
+  older(matchingPrefix = false): string {
+    for (let i = this.position + 1; i < this.entries.length; i++) {
+      if (!matchingPrefix || this.entries[i].startsWith(this.draft)) {
+        this.position = i;
+        break;
+      }
+    }
     return this.entries[this.position] ?? this.draft;
   }
 
-  newer(): string {
-    if (this.position >= 0) this.position--;
-    return this.entries[this.position] ?? this.draft;
+  newer(matchingPrefix = false): string {
+    for (let i = this.position - 1; i >= 0; i--) {
+      if (!matchingPrefix || this.entries[i].startsWith(this.draft)) {
+        this.position = i;
+        return this.entries[i];
+      }
+    }
+    this.position = -1;
+    return this.draft;
   }
 }

@@ -23,6 +23,8 @@ const { KeybindingsManager } = (await import(
 const ESC = "\x1b";
 const PREV = "\x10";
 const NEXT = "\x0e";
+const UP = "\x1b[A";
+const DOWN = "\x1b[B";
 
 function assertLine(editor: ModalEditor, line: string): void {
   assert.equal(editor.getMode(), "normal");
@@ -197,25 +199,27 @@ describe("EX line history", () => {
     assertLine(editor, "name disabled");
   });
 
-  it("Enter submits the recalled line and promotes duplicates", () => {
-    const { editor } = createEditorWithSpy("prompt");
-    const dispatched: string[] = [];
-    editor.setRunCommandFn((line) => {
-      dispatched.push(line);
+  for (const recall of [PREV, UP]) {
+    it(`Enter submits the ${JSON.stringify(recall)} recall and promotes duplicates`, () => {
+      const { editor } = createEditorWithSpy("prompt");
+      const dispatched: string[] = [];
+      editor.setRunCommandFn((line) => {
+        dispatched.push(line);
+      });
+      submit(editor, "name first");
+      submit(editor, "name second");
+      sendKeys(editor, [":", "name", recall, recall, "\r"]);
+      assert.deepEqual(dispatched, [
+        "/name first",
+        "/name second",
+        "/name first",
+      ]);
+      sendKeys(editor, [":", recall]);
+      assertLine(editor, "name first");
+      sendKeys(editor, [recall, recall]);
+      assertLine(editor, "name second");
     });
-    submit(editor, "name first");
-    submit(editor, "name second");
-    sendKeys(editor, [":", PREV, PREV, "\r"]);
-    assert.deepEqual(dispatched, [
-      "/name first",
-      "/name second",
-      "/name first",
-    ]);
-    sendKeys(editor, [":", PREV]);
-    assertLine(editor, "name first");
-    sendKeys(editor, [PREV, PREV]);
-    assertLine(editor, "name second");
-  });
+  }
 
   it("Esc does not record canceled text (intentional nvim divergence)", () => {
     const { editor } = createEditorWithSpy("prompt");
@@ -261,20 +265,105 @@ describe("EX line history", () => {
     assertLine(editor, "name 中");
   });
 
-  it("does not give Up/Down prefix history or reset browsing on harmless input", () => {
+  for (const [encoding, up, down] of [
+    ["CSI", UP, DOWN],
+    ["SS3", "\x1bOA", "\x1bOB"],
+    ["Kitty", "\x1b[1;1A", "\x1b[1;1B"],
+  ]) {
+    it(`${encoding}: Up/Down filter the saved draft, not the recalled line`, () => {
+      const { editor } = createEditorWithSpy("prompt");
+      for (const line of ["ab", "xy", "ac", "yz"]) submit(editor, line);
+      for (const [draft, older, oldest] of [
+        ["a", "ac", "ab"],
+        ["", "yz", "ac"],
+        ["none", "none", "none"],
+      ]) {
+        sendKeys(editor, [":", draft, down]);
+        assertLine(editor, draft);
+        editor.handleInput(up);
+        assertLine(editor, older);
+        editor.handleInput(up);
+        assertLine(editor, oldest);
+        if (draft) {
+          editor.handleInput(up);
+          assertLine(editor, oldest);
+        }
+        editor.handleInput(down);
+        assertLine(editor, older);
+        editor.handleInput(down);
+        assertLine(editor, draft);
+        editor.handleInput(down);
+        assertLine(editor, draft);
+        editor.handleInput(ESC);
+      }
+    });
+  }
+
+  it("mixes Up/Down with C-p/C-n using one position and the original prefix", () => {
     const { editor } = createEditorWithSpy("prompt");
-    submit(editor, "a");
-    submit(editor, "b");
-    sendKeys(editor, [":", "draft", PREV, "\x1b[A", "\x1b[B", "\x0b"]);
-    assertLine(editor, "b");
-    editor.handleInput(NEXT);
-    assertLine(editor, "draft");
+    for (const line of ["ab", "xy", "ac", "yz"]) submit(editor, line);
+    sendKeys(editor, [":", "a", UP, NEXT]);
+    assertLine(editor, "yz");
+    editor.handleInput(UP);
+    assertLine(editor, "ac");
+    editor.handleInput(PREV);
+    assertLine(editor, "xy");
+    editor.handleInput(UP);
+    assertLine(editor, "ab");
+    editor.handleInput(DOWN);
+    assertLine(editor, "ac");
+    editor.handleInput(DOWN);
+    assertLine(editor, "a");
+  });
+
+  for (const [edit, edited] of [
+    [["z"], "abz"],
+    [["\x7f"], "a"],
+    [["\x08"], "a"],
+    [["\x1b[200~", "z\nignored", "\x1b[201~"], "abz"],
+  ] as const) {
+    it(`editing a prefix recall resets the filter: ${JSON.stringify(edit)}`, () => {
+      const { editor } = createEditorWithSpy("prompt");
+      for (const line of ["ab", "xy", "abz newest"]) submit(editor, line);
+      sendKeys(editor, [":", "a", UP, UP, ...edit, DOWN]);
+      assertLine(editor, edited);
+      editor.handleInput(UP);
+      assertLine(editor, "abz newest");
+      editor.handleInput(DOWN);
+      assertLine(editor, edited);
+      sendKeys(editor, [ESC, ":", DOWN]);
+      assertLine(editor, "");
+      editor.handleInput(UP);
+      assertLine(editor, "abz newest");
+    });
+  }
+
+  it("unsupported controls and out-of-scope variants preserve the browse draft", () => {
+    const { editor } = createEditorWithSpy("prompt");
+    for (const line of ["ab", "xy", "ac"]) submit(editor, line);
+    sendKeys(editor, [
+      ":",
+      "a",
+      UP,
+      "\x1b[1;2A",
+      "\x1b[1;2B",
+      "\x1b[5~",
+      "\x1b[6~",
+      "\x0b",
+    ]);
+    assertLine(editor, "ac");
+    editor.handleInput(UP);
+    assertLine(editor, "ab");
+    sendKeys(editor, [DOWN, DOWN]);
+    assertLine(editor, "a");
   });
 
   it("never interprets bracketed paste controls as history or submission", () => {
     for (const chunks of [
       ["\x1b[200~\x10\x0e\x1b[201~"],
       ["\x1b[200~", PREV, NEXT, "\x1b[201~"],
+      [`\x1b[200~${UP}${DOWN}\x1b[201~`],
+      ["\x1b[200~", UP, DOWN, "\x1b[201~"],
     ]) {
       const { editor } = createEditorWithSpy("");
       submit(editor, "a");
@@ -326,7 +415,14 @@ describe("EX line history", () => {
       PREV,
       NEXT,
       NEXT,
+      "a",
+      UP,
+      UP,
+      DOWN,
+      DOWN,
       "draft",
+      UP,
+      DOWN,
       PREV,
       "!",
       NEXT,

@@ -180,6 +180,34 @@ without installing, switching branches or creating worktrees. EX browse
 correctness, paste safety and app-key precedence are tested separately; no
 successful-recall or terminal-transport performance claim is made.
 
+### EX prefix recall — 2026-11-05
+
+Base `d62f202` vs the runtime in `feat(ex): add Up/Down prefix history recall`.
+Same installed coding-agent/pi-tui 1.4.0, Node v24.15.0, darwin-arm64. Three
+serial base/head, head/base, base/head rounds of `script/hotpath-compare.ts`,
+eight samples per run. Median of the three per-run medians/p95s, µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 2.863 | 3.041 | 2.902 | 3.058 |
+| `motion_h_4k` | 562.314 | 563.765 | 561.569 | 563.015 |
+| `motion_w_50` | 3.749 | 4.027 | 3.691 | 4.148 |
+| `insert_type` | 12.055 | 12.332 | 11.916 | 12.453 |
+| `insert_edit` | 19.503 | 20.224 | 19.541 | 20.196 |
+
+The largest positive median delta is 0.039 µs for ignored input (+1.4%);
+short-word p95 rises 0.121 µs (+3.0%). The extra arrow decoding runs only
+inside the existing typed-EX guard; Normal/Visual/Insert dispatch is unchanged.
+Prefix recall scans at most the existing 100 entries without allocating a
+filtered list or maintaining a second position. These input-path controls do
+not measure successful EX recall, rendering, startup, terminal transport or
+real app callbacks. No speedup or statistical non-regression claim is made.
+
+Reproduce without installing or changing worktrees: extract
+`git archive d62f202 '*.ts'` under `.tmp/exupdown-base`, then alternate
+`PIVIM_ENTRY=.tmp/exupdown-base/index.ts node --import tsx/esm script/hotpath-compare.ts`
+with the command without `PIVIM_ENTRY`. Both builds reuse the same installed peers.
+
 ## app/editor ownership split — 2026-11-04
 
 Base `932978f` vs the round4 runtime (alias removal plus app-only dispatch).

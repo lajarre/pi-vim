@@ -141,7 +141,7 @@ for (const custom of [false, true]) {
 
 // Intentional divergence from nvim: application shortcuts are Pi-owned; unknown
 // editor controls cannot edit in modal states. Explicit submit/EX Enter and Vim
-// Escape/undo/redo remain exceptions, as do EX's C-p/C-n history keys. Spies
+// Escape/undo/redo remain exceptions, as do EX's C-p/C-n and Up/Down keys. Spies
 // isolate routing from app side effects; EX history wins even over app bindings.
 describe("control-key ownership with real Pi defaults (host-only policy)", () => {
   for (const encoding of ["raw", "kitty"] as const) {
@@ -218,6 +218,43 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
       });
     }
   }
+
+  it("EX Up/Down own prefix history, not host cursor aliases or app shortcuts", () => {
+    for (const bindings of [
+      {},
+      { "tui.editor.cursorUp": "k", "tui.editor.cursorDown": "j" },
+      { "tui.editor.cursorUp": [], "tui.editor.cursorDown": [] },
+      { "app.clear": "up", "app.interrupt": "down" },
+    ]) {
+      for (const encoding of ["raw", "kitty"] as const) {
+        const f = fixture([":", "ex-"], bindings);
+        f.editor.onExtensionShortcut = (key) => {
+          f.forwarded.push(key);
+          return true;
+        };
+        const before = f.snapshot();
+        const up = CURSOR_KEYS[0][encoding];
+        const down = CURSOR_KEYS[1][encoding];
+        for (const [key, ex] of [
+          [up, ":ex-b"],
+          [up, ":ex-a"],
+          [up, ":ex-a"],
+          [down, ":ex-b"],
+          [down, ":ex-"],
+          [down, ":ex-"],
+          ["k", ":ex-k"],
+          [up, ":ex-k"],
+        ]) {
+          f.editor.handleInput(key);
+          assert.deepEqual(f.snapshot(), { ...before, ex });
+          assert.deepEqual(f.fired, []);
+          assert.deepEqual(f.forwarded, []);
+          assert.deepEqual(f.submitted, []);
+          assertNoPending(f.state);
+        }
+      }
+    }
+  });
 
   it("regresses 0.14.2 Ctrl-K deletion from Normal and pending find", () => {
     for (const setup of [[], ["f"]]) {
