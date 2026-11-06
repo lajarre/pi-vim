@@ -272,6 +272,7 @@ function createRecordingTheme(rejectedTokens: readonly string[] = []): Theme & {
       }
       return `<${token}>${text}</${token}>`;
     },
+    bg: (token: string, text: string) => `<${token}>${text}</${token}>`,
     bold: (s: string) => s,
     fgCalls,
   } as unknown as Theme & {
@@ -2547,7 +2548,7 @@ describe("clipboard mirror policy settings", () => {
 describe("mode color settings", () => {
   const reverseInsertLabel = "\x1b[7m INSERT \x1b[27m";
 
-  it("mode label uses default insert, normal, and EX mode color tokens", async () => {
+  it("mode label uses a neutral insert panel and default normal/EX colors", async () => {
     const theme = createRecordingTheme();
     const restore = setPiVimSettingsReaderForTests(() => ({}));
 
@@ -2567,7 +2568,7 @@ describe("mode color settings", () => {
 
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
-        ["borderMuted", "borderAccent", "warning"],
+        ["text", "borderAccent", "warning"],
       );
     } finally {
       restore();
@@ -2683,27 +2684,38 @@ describe("mode color settings", () => {
     }
   });
 
-  it("mode label passes reverse-video text to theme.fg", async () => {
-    const theme = createRecordingTheme();
-    const restore = setPiVimSettingsReaderForTests(() => ({}));
+  for (const insert of [undefined, "borderMuted"]) {
+    it(`default INSERT uses theme panel/text colors without inversion (${insert ?? "absent"})`, async () => {
+      const theme = createRecordingTheme();
+      const restore = setPiVimSettingsReaderForTests(() => ({
+        modeColors: insert ? { insert } : undefined,
+      }));
 
-    try {
-      const extension = await installExtensionWithEditorFactory(theme);
-      const editor = extension.editorFactory(
-        stubTui,
-        stubTheme,
-        stubKeybindings,
-      );
-
-      editor.render(80);
-
-      assert.deepEqual(theme.fgCalls, [
-        { token: "borderMuted", text: reverseInsertLabel },
-      ]);
-    } finally {
-      restore();
-    }
-  });
+      try {
+        const extension = await installExtensionWithEditorFactory(theme);
+        const editor = extension.editorFactory(
+          stubTui,
+          stubTheme,
+          stubKeybindings,
+        );
+        for (const width of [8, 40, 80]) {
+          theme.fgCalls.length = 0;
+          const footer = editor.render(width).at(-1) ?? "";
+          assert.deepEqual(theme.fgCalls, [
+            { token: "text", text: " INSERT " },
+          ]);
+          assert.ok(
+            footer.endsWith(
+              "<userMessageBg><text> INSERT </text></userMessageBg>",
+            ),
+          );
+          assert.ok(!footer.includes("\x1b[7m"));
+        }
+      } finally {
+        restore();
+      }
+    });
+  }
 
   for (const [name, settings] of [
     ["absent", {}],

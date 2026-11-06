@@ -4542,6 +4542,9 @@ export default function (pi: ExtensionAPI) {
     const labelColorizers = t
       ? buildModeColorizers(t, modeColors, reverseVideo)
       : null;
+    if (t && labelColorizers && modeColors.insert === "borderMuted") {
+      labelColorizers.insert = (s) => t.bg("userMessageBg", t.fg("text", s));
+    }
     // Both surfaces get their colorizers unconditionally; the editor installs
     // the border trap only when a surface actually needs it (see
     // borderTrapNeeded), so the all-default case stays byte-identical to the
