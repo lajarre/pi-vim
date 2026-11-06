@@ -14,4 +14,4 @@ Perf and hot-path changes — pull requests included — must clear the evidence
 
 When reviewing changes — including agent self-review before opening or merging a PR — follow `doc/review-guidelines.md`; its project-specific MUST-flag rules take precedence over general review heuristics.
 
-npm publishing is automated in CI (`.github/workflows/publish.yml`): every push to `main` publishes the `package.json` version if it is not already on npm. Do not run `npm publish` or ask for publish access — to release, bump the version in `package.json`.
+npm publishing is automated in CI (`.github/workflows/publish.yml`): every push to `main` publishes the `package.json` version if it is not already on npm. Do not run `npm publish` or ask for publish access — to release, bump the version in `package.json`. The full release sequence (preconditions, bump, fast-forward, tag, push, GitHub release, issue and PR replies) is in `doc/dev/releasing.md`.
