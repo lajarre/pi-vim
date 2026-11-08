@@ -10,12 +10,12 @@ themselves.
 
 | | |
 | --- | --- |
-| measured | 2026-11-04 |
-| node | v24.15.0 |
+| measured | 2026-11-08 |
+| node | v24.19.0 |
 | pi host | coding-agent 1.4.0 / pi-tui 1.4.0 |
-| nvim | NVIM v0.12.6 |
-| platform | darwin-arm64 |
-| cpu | Apple M2 Pro |
+| nvim | NVIM v0.12.5 |
+| platform | linux-x64 |
+| cpu | AMD Ryzen 7 5800X 8-Core Processor |
 
 Timings are machine-dependent, and the startup figure is fragile enough that
 the performance section spells out how to read it. Parity counts and the
@@ -99,7 +99,7 @@ knowingly differs from nvim; `README.md` explains the user-visible ones.
 ## unit tests
 
 `npm test` covers the pure modules and `ModalEditor`'s observable behavior:
-**2,383 pass, 0 fail, 0 skip**.
+**2,391 pass, 0 fail, 0 skip**.
 
 The EX-to-Pi command bridge has no parity suite by design — it is a Pi
 integration surface, not a vim motion, so nvim has nothing to say about it.
@@ -118,15 +118,14 @@ so the last two rows share almost all of their work.
 
 | stage | median | min–max |
 | --- | ---: | ---: |
-| node runtime only | 81.3 ms | 78.7–83.0 ms |
-| Pi host import | 690.1 ms | 682.7–701.2 ms |
-| + pi-vim import | 705.9 ms | 693.9–718.9 ms |
+| node runtime only | 119.5 ms | 117.6–123.8 ms |
+| Pi host import | 1355.5 ms | 1349.3–1387.3 ms |
+| + pi-vim import | 1410.1 ms | 1387.7–1444.2 ms |
 
-Subtracting those two medians gives **15.8 ms** for pi-vim's own share, but
-the host import's own run-to-run spread is **18.5 ms** — wider than the gap
-itself — and the extension import is measured second, on caches the host
-import warmed. Treat it as an upper bound rather than a measurement; on a
-loaded machine the same subtraction comes out negative.
+Subtracting those two medians gives **54.6 ms** for pi-vim's own share, above
+the host import's 38.0 ms run-to-run spread. The extension import is still
+measured second, on caches the host import warmed, so read it as a lower
+bound; on a loaded machine the same subtraction has come out negative.
 
 ### memory
 
@@ -134,12 +133,12 @@ Median `heapUsed` right after import, over 5 runs with gc forced.
 
 | stage | median heap | min–max |
 | --- | ---: | ---: |
-| Pi host import | 45485.7 KiB | 45485.2–45487.2 KiB |
-| + pi-vim import | 46305.4 KiB | 46297.0–46306.9 KiB |
-| **pi-vim's own heap** | **819.7 KiB** | — |
+| Pi host import | 46088.5 KiB | 46073.0–46096.2 KiB |
+| + pi-vim import | 46788.2 KiB | 46776.6–46918.3 KiB |
+| **pi-vim's own heap** | **699.7 KiB** | — |
 
-Unlike startup, this difference is resolvable: it is 83× the widest run-to-run
-spread of either row (9.8 KiB).
+Unlike startup, this difference is resolvable: it is 5× the widest run-to-run
+spread of either row (141.7 KiB).
 
 ### responsiveness
 
@@ -148,39 +147,39 @@ row times every key of the command, count digits included.
 
 | operation | per | median | p95 |
 | --- | --- | ---: | ---: |
-| `h` one column left, on a 4k-column line | keystroke | 566.38 µs | 568.18 µs |
-| an unbound printable key in normal mode (no-op) | keystroke | 2.58 µs | 2.60 µs |
-| `10w` across a 400-word line | command | 41.74 µs | 42.31 µs |
-| `3fX` across a 600-column line | command | 44.10 µs | 44.29 µs |
-| `200j` down a 320-line buffer | command | 9.50 µs | 9.53 µs |
-| `gj` on 4,096 ASCII characters, 20 text columns | command | 467.99 µs | 485.87 µs |
-| `9999gj` on 4,096 ASCII characters, 20 text columns | command | 473.95 µs | 493.01 µs |
-| `gj` on 4,096 ASCII characters, 80 text columns | command | 459.70 µs | 459.71 µs |
-| `9999gj` on 4,096 ASCII characters, 80 text columns | command | 466.17 µs | 472.76 µs |
-| `gj` on 16,384 ASCII characters, 20 text columns | command | 1855.14 µs | 1869.30 µs |
-| `9999gj` on 16,384 ASCII characters, 20 text columns | command | 1874.13 µs | 1884.44 µs |
-| `gj` on 16,384 ASCII characters, 80 text columns | command | 1837.37 µs | 1845.21 µs |
-| `9999gj` on 16,384 ASCII characters, 80 text columns | command | 1876.99 µs | 1899.08 µs |
-| `50p` char-wise put of a yanked word | command | 90.80 µs | 100.85 µs |
-| `p` char-wise put of 1,000 ASCII characters | command | 21.48 µs | 23.15 µs |
-| `p` char-wise put of 4,000 ASCII characters | command | 53.95 µs | 54.92 µs |
-| `p` char-wise put of 16,000 ASCII characters | command | 189.06 µs | 193.14 µs |
-| `w` on a 20-word line | keystroke | 2.91 µs | 3.07 µs |
-| `b` on a 20-word line | keystroke | 3.09 µs | 3.14 µs |
-| `w` on a 50-word line | keystroke | 3.01 µs | 3.03 µs |
-| `b` on a 50-word line | keystroke | 3.32 µs | 3.33 µs |
-| `w` on a 100-word line | keystroke | 3.47 µs | 3.48 µs |
-| `b` on a 100-word line | keystroke | 3.68 µs | 3.75 µs |
-| `w` on a 200-word line | keystroke | 4.34 µs | 4.34 µs |
-| `b` on a 200-word line | keystroke | 4.84 µs | 4.84 µs |
-| `w` on a 400-word line | keystroke | 6.22 µs | 6.26 µs |
-| `b` on a 400-word line | keystroke | 6.93 µs | 6.95 µs |
-| `dw` on a 400-word line | command | 11.97 µs | 12.52 µs |
-| `yw` on a 400-word line | command | 7.54 µs | 8.34 µs |
+| `h` one column left, on a 4k-column line | keystroke | 795.79 µs | 796.07 µs |
+| an unbound printable key in normal mode (no-op) | keystroke | 3.92 µs | 3.95 µs |
+| `10w` across a 400-word line | command | 44.13 µs | 45.32 µs |
+| `3fX` across a 600-column line | command | 65.91 µs | 66.74 µs |
+| `200j` down a 320-line buffer | command | 14.98 µs | 15.08 µs |
+| `gj` on 4,096 ASCII characters, 20 text columns | command | 642.91 µs | 687.20 µs |
+| `9999gj` on 4,096 ASCII characters, 20 text columns | command | 660.10 µs | 686.58 µs |
+| `gj` on 4,096 ASCII characters, 80 text columns | command | 638.78 µs | 667.22 µs |
+| `9999gj` on 4,096 ASCII characters, 80 text columns | command | 655.72 µs | 680.25 µs |
+| `gj` on 16,384 ASCII characters, 20 text columns | command | 2757.39 µs | 2789.15 µs |
+| `9999gj` on 16,384 ASCII characters, 20 text columns | command | 2756.64 µs | 2809.87 µs |
+| `gj` on 16,384 ASCII characters, 80 text columns | command | 2734.42 µs | 2824.88 µs |
+| `9999gj` on 16,384 ASCII characters, 80 text columns | command | 2708.94 µs | 2773.80 µs |
+| `50p` char-wise put of a yanked word | command | 183.74 µs | 193.76 µs |
+| `p` char-wise put of 1,000 ASCII characters | command | 35.29 µs | 38.33 µs |
+| `p` char-wise put of 4,000 ASCII characters | command | 71.12 µs | 71.19 µs |
+| `p` char-wise put of 16,000 ASCII characters | command | 228.52 µs | 230.32 µs |
+| `w` on a 20-word line | keystroke | 4.52 µs | 4.61 µs |
+| `b` on a 20-word line | keystroke | 4.87 µs | 4.98 µs |
+| `w` on a 50-word line | keystroke | 4.52 µs | 4.54 µs |
+| `b` on a 50-word line | keystroke | 4.85 µs | 4.88 µs |
+| `w` on a 100-word line | keystroke | 4.87 µs | 4.88 µs |
+| `b` on a 100-word line | keystroke | 5.27 µs | 13.57 µs |
+| `w` on a 200-word line | keystroke | 5.73 µs | 5.74 µs |
+| `b` on a 200-word line | keystroke | 6.23 µs | 6.25 µs |
+| `w` on a 400-word line | keystroke | 7.67 µs | 7.74 µs |
+| `b` on a 400-word line | keystroke | 8.70 µs | 8.72 µs |
+| `dw` on a 400-word line | command | 19.53 µs | 24.06 µs |
+| `yw` on a 400-word line | command | 9.64 µs | 10.03 µs |
 
 The costliest single keystroke is `h` one column left, on a 4k-column line, at
-566 µs; the costliest whole command is `9999gj` on 16,384 ASCII characters, 80
-text columns, at 1877 µs. Both scale with the text they walk — the `w` and `b`
+796 µs; the costliest whole command is `gj` on 16,384 ASCII characters, 20
+text columns, at 2757 µs. Both scale with the text they walk — the `w` and `b`
 ladders from 20 to 400 words isolate that scaling.
 
 ## published footprint
@@ -192,8 +191,8 @@ code and `README.md` count.
 | measure | actual | budget | headroom |
 | --- | ---: | ---: | ---: |
 | files | 20 | 20 | 0 |
-| packed size | 77,188 B | 77,700 B | 512 B |
-| unpacked size | 293,444 B | 294,100 B | 656 B |
+| packed size | 78,556 B | 79,100 B | 544 B |
+| unpacked size | 298,834 B | 299,500 B | 666 B |
 
 ## reproducing this
 

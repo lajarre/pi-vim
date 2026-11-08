@@ -1,5 +1,8 @@
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 
+export type ModeLabelStyle = "full" | "compact";
+export type ModeLabelPlacement = "editor" | "status";
+
 export type ModeColorSettings = {
   insert?: string;
   normal?: string;
@@ -47,6 +50,8 @@ export type SurfaceSyncMap = {
 };
 
 export type PiVimSettings = {
+  modeLabelStyle?: ModeLabelStyle;
+  modeLabelPlacement?: ModeLabelPlacement;
   clipboardMirror?: unknown;
   exCommand?: unknown;
   globalExCommand?: unknown;
@@ -204,6 +209,34 @@ export function resolveExCommandSettings(
     settings,
     warning: `Invalid piVim.exCommand ${invalid.join(", ")}; expected a boolean.`,
   };
+}
+
+export function readPiVimModeLabelStyle(
+  g: unknown,
+  p: unknown,
+): ModeLabelStyle {
+  const v = get(p, "modeLabelStyle");
+  const source = v === M ? g : p;
+  // A malformed piVim container is not a style value, even if it is "compact".
+  // A present but invalid project value resets to the default, not global.
+  return rec(source) &&
+    rec(source.piVim) &&
+    (v === M ? get(g, "modeLabelStyle") : v) === "compact"
+    ? "compact"
+    : "full";
+}
+
+export function readPiVimModeLabelPlacement(
+  g: unknown,
+  p: unknown,
+): ModeLabelPlacement {
+  const v = get(p, "modeLabelPlacement");
+  const source = v === M ? g : p;
+  return rec(source) &&
+    rec(source.piVim) &&
+    (v === M ? get(g, "modeLabelPlacement") : v) === "status"
+    ? "status"
+    : "editor";
 }
 
 export function readPiVimLabelPositionSetting(g: unknown, p: unknown) {
@@ -381,6 +414,8 @@ function disk(cwd: string): PiVimSettings {
     clipboardMirror: readPiVimClipboardMirrorSetting(g, p),
     exCommand: readPiVimExCommandSetting(g, p),
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
+    modeLabelStyle: readPiVimModeLabelStyle(g, p),
+    modeLabelPlacement: readPiVimModeLabelPlacement(g, p),
     modeColors: readPiVimModeColors(g, p),
     historyNavigation: readPiVimHistoryNavigation(g, p),
     labelPosition: readPiVimLabelPositionSetting(g, p),

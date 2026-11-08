@@ -390,9 +390,13 @@ const THRESHOLDS = {
   // +3325 B from gj/gk). Limits become 77700 / 294100 / 20, leaving
   // 512 B / 656 B headroom. No runtime dependency or packed file added;
   // tests, benchmark evidence and maintainer QA remain outside the package.
+  // Compact/status labels merged onto 0.15.1 retain top-left positioning,
+  // Visual paint and editor lifecycle fixes. Measured 78556 B packed /
+  // 298834 B unpacked / 20 files; limits leave 544 B / 666 B headroom.
+  // No dependency or packed file added; tests and QA remain excluded.
   maxFiles: 20,
-  maxSize: 77700,
-  maxUnpackedSize: 294100,
+  maxSize: 79100,
+  maxUnpackedSize: 299500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
