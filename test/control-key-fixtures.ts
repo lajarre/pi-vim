@@ -99,7 +99,24 @@ export function fixture(setup: readonly string[], bindings = {}) {
   editor.onAction("app.suspend", () => fired.push("app.suspend"));
   editor.onSubmit = (text) => submitted.push(text);
   editor.onExtensionShortcut = (key) => {
-    forwarded.push(key);
+    // Track host/app forwarding, not the new Normal-mode extension-only probes.
+    // Extension-only dispatch is asserted separately in extension-shortcuts.test.
+    if (
+      editor.getMode() === "insert" ||
+      kb.matches(key, "tui.input.submit") ||
+      [
+        ...APP_KEYS.map(({ action }) => action),
+        "app.interrupt",
+        "app.exit",
+        "app.suspend",
+      ].some(
+        (action) =>
+          editor.actionHandlers.has(
+            action as Parameters<typeof editor.onAction>[0],
+          ) && kb.matches(key, action as Parameters<typeof kb.matches>[1]),
+      )
+    )
+      forwarded.push(key);
     return false;
   };
   if (setup[0] === ":") {

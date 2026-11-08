@@ -1542,6 +1542,21 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (
+        data.charCodeAt(0) < 32 &&
+        this.mode === "normal" &&
+        this.pendingExCommand === null &&
+        !cursorMotion &&
+        !exPaste &&
+        !vimHistoryControl &&
+        !this.appKeybindings.matches(data, "tui.input.submit") &&
+        this.onExtensionShortcut?.(data)
+      ) {
+        this.clearPendingState();
+        this.cancelRepeatableCommand();
+        return;
+      }
+
       if (scrollKey) {
         // Scrolling is a cursor command, not an operator/literal/g suffix.
         if (
