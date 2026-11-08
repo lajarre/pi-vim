@@ -376,9 +376,10 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
     assertNoPending(f.state);
   });
 
-  it("retains extension precedence only for admitted app chords", () => {
+  it("clears pending state before extension precedence on app chords", () => {
     const f = fixture(["3", "d", "2"]);
     f.editor.onExtensionShortcut = (data) => {
+      if (data !== "\x10") return false;
       f.forwarded.push(data);
       assertNoPending(f.state);
       return true;

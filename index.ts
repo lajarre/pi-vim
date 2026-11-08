@@ -1522,6 +1522,21 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (
+        data.charCodeAt(0) < 32 &&
+        this.mode === "normal" &&
+        this.pendingExCommand === null &&
+        !cursorMotion &&
+        !exPaste &&
+        !vimHistoryControl &&
+        !this.appKeybindings.matches(data, "tui.input.submit") &&
+        this.onExtensionShortcut?.(data)
+      ) {
+        this.clearPendingState();
+        this.cancelRepeatableCommand();
+        return;
+      }
+
       if (this.pendingReplace) {
         this.pendingReplace = false;
         if (!isPrintableInput(data)) {
