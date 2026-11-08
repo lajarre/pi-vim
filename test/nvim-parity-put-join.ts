@@ -2,6 +2,27 @@ import { describe, it } from "node:test";
 import { assertMatchesNvim, type NvimParityCase } from "./nvim-oracle.js";
 
 const PUT_PARITY_CASES: NvimParityCase[] = [
+  ...["p", "P"].flatMap((key) => [
+    {
+      name: `${key} counted public insertion keeps graphemes and supports dot`,
+      initial: {
+        text: "ab",
+        cursor: { line: 0, col: 0 },
+        register: "👩‍💻e\u0301",
+      },
+      keys: ["3", key, "."],
+    },
+    {
+      name: `${key} counted multiline public insertion has one undo unit`,
+      initial: {
+        text: "ab\ncd",
+        cursor: { line: 0, col: 0 },
+        register: "qx\nyz\n",
+      },
+      keys: ["3", key, ".", "u", "0"],
+      typedInput: true,
+    },
+  ]),
   {
     name: "p puts a character-wise register after the cursor",
     initial: { text: "ab", cursor: { line: 0, col: 0 }, register: "X" },
@@ -46,6 +67,15 @@ const PUT_PARITY_CASES: NvimParityCase[] = [
     name: "multi-line line-wise register p lands on the first pasted line",
     initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "X\nY\n" },
     keys: ["p"],
+  },
+  {
+    name: "2P keeps multiline register copies intact with default bindings",
+    initial: {
+      text: "ab\ncd",
+      cursor: { line: 0, col: 0 },
+      register: "qx\nyz\n",
+    },
+    keys: ["2", "P"],
   },
   {
     name: "line-wise p with a leading-whitespace first line lands on its first non-blank",

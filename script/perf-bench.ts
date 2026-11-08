@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
+import { getKeybindings, type Keybinding } from "@earendil-works/pi-tui";
 
 import { ModalEditor } from "../index.js";
 
@@ -35,6 +36,7 @@ const stubTheme = {
 
 const stubKeybindings = {
   matches: () => false,
+  getKeys: (action: Keybinding) => getKeybindings().getKeys(action),
 } as unknown as ModalEditorConstructorArgs[2];
 
 function percentile(sorted: number[], p: number): number {
@@ -296,6 +298,28 @@ function runResponsivenessBenchmarks(): Record<string, SampledMetric> {
     samplesCount,
   );
 
+  // Display-row map construction scales with the buffer, not the count.
+  // Setup/render/reset stay outside the timed operation; width is text cells.
+  for (const size of [4_096, 16_384]) {
+    for (const width of [20, 80]) {
+      for (const command of ["gj", "9999gj"]) {
+        metrics[`${command}_chars_${size}_width_${width}`] =
+          benchmarkSingleOpWithReset(
+            () => createEditor("x".repeat(size)),
+            (editor) => {
+              editor.render(width + 1);
+            },
+            (editor) => {
+              for (const key of command) editor.handleInput(key);
+            },
+            (editor) => editor.handleInput("0"),
+            30,
+            samplesCount,
+          );
+      }
+    }
+  }
+
   metrics["50p"] = benchmarkSingleOpFresh(
     () => createEditor("seed next"),
     (editor) => {
@@ -311,6 +335,19 @@ function runResponsivenessBenchmarks(): Record<string, SampledMetric> {
     120,
     samplesCount,
   );
+
+  for (const size of [1_000, 4_000, 16_000]) {
+    metrics[`p_chars_${size}`] = benchmarkSingleOpFresh(
+      () => createEditor("ab"),
+      (editor) => {
+        editor.setClipboardReadFn(() => null);
+        editor.setRegister("x".repeat(size));
+      },
+      (editor) => editor.handleInput("p"),
+      24,
+      samplesCount,
+    );
+  }
 
   const wordCases = [20, 50, 100, 200, 400] as const;
   const iterationsByWords: Record<number, number> = {

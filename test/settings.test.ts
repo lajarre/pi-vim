@@ -2,19 +2,76 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   readPiVimBorderSync,
   readPiVimBorderSyncSetting,
   readPiVimClipboardMirrorSetting,
+  readPiVimCursorShapeSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
+  readPiVimHistoryNavigation,
   readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
+  resolveCursorShapeSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "../settings.js";
+
+describe("piVim history navigation settings reader", () => {
+  it("uses defaults when absent and reads explicit global booleans", () => {
+    assert.equal(readPiVimHistoryNavigation(undefined, undefined), undefined);
+    assert.equal(
+      readPiVimHistoryNavigation({ piVim: {} }, { piVim: {} }),
+      undefined,
+    );
+    for (const value of [true, false]) {
+      assert.equal(
+        readPiVimHistoryNavigation({ piVim: { historyNavigation: value } }, {}),
+        value,
+      );
+    }
+  });
+
+  it("lets project booleans override global in either direction", () => {
+    for (const value of [true, false]) {
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: !value } },
+          { piVim: { historyNavigation: value } },
+        ),
+        value,
+      );
+    }
+  });
+
+  it("preserves invalid values for warnings without falling back to global", () => {
+    for (const value of [null, "false", 0, [], {}]) {
+      assert.equal(
+        readPiVimHistoryNavigation({ piVim: { historyNavigation: value } }, {}),
+        value,
+      );
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: false } },
+          { piVim: { historyNavigation: value } },
+        ),
+        value,
+      );
+    }
+    for (const value of [null, "false", 0, []]) {
+      assert.equal(
+        readPiVimHistoryNavigation(
+          { piVim: { historyNavigation: false } },
+          { piVim: value },
+        ),
+        value,
+      );
+    }
+  });
+});
 
 describe("piVim mode color settings reader", () => {
   it("returns undefined when mode colors are missing", () => {
@@ -147,6 +204,124 @@ describe("piVim mode color settings reader", () => {
         { piVim: { modeColors: null } },
       ),
       undefined,
+    );
+  });
+});
+
+describe("piVim cursorShape settings", () => {
+  it("defaults to bar/block without sharing the defaults object", () => {
+    const result = resolveCursorShapeSettings(
+      readPiVimCursorShapeSetting(undefined, undefined),
+    );
+    assert.deepEqual(result, { settings: { insert: "bar", normal: "block" } });
+    assert.notEqual(result.settings, DEFAULT_CURSOR_SHAPE_SETTINGS);
+    assert.deepEqual(resolveCursorShapeSettings({}).settings, result.settings);
+  });
+
+  it("reads global values and accepts all six shapes for either mode", () => {
+    for (const shape of [
+      "block",
+      "underline",
+      "bar",
+      "steady-block",
+      "steady-underline",
+      "steady-bar",
+    ]) {
+      assert.deepEqual(
+        resolveCursorShapeSettings(
+          readPiVimCursorShapeSetting(
+            { piVim: { cursorShape: { insert: shape, normal: shape } } },
+            { piVim: {} },
+          ),
+        ),
+        { settings: { insert: shape, normal: shape } },
+      );
+    }
+  });
+
+  it("overrides the whole global map, defaulting missing project keys", () => {
+    assert.deepEqual(
+      resolveCursorShapeSettings(
+        readPiVimCursorShapeSetting(
+          { piVim: { cursorShape: { insert: "underline", normal: "bar" } } },
+          { piVim: { cursorShape: { insert: "block" } } },
+        ),
+      ),
+      { settings: { insert: "block", normal: "block" } },
+    );
+  });
+
+  it("does not fall back to globals for malformed project overrides", () => {
+    for (const value of [null, [], "block", 5, false]) {
+      const result = resolveCursorShapeSettings(
+        readPiVimCursorShapeSetting(
+          { piVim: { cursorShape: { insert: "underline", normal: "bar" } } },
+          { piVim: { cursorShape: value } },
+        ),
+      );
+      assert.deepEqual(result, {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+        warning: "Invalid piVim.cursorShape; expected an object.",
+      });
+    }
+    assert.equal(
+      readPiVimCursorShapeSetting(
+        { piVim: { cursorShape: {} } },
+        { piVim: null },
+      ),
+      null,
+    );
+  });
+
+  it("warns once for invalid keys and defaults only those keys", () => {
+    for (const invalid of [
+      "beam",
+      "BLOCK",
+      " bar ",
+      "",
+      null,
+      1,
+      true,
+      [],
+      {},
+    ]) {
+      assert.deepEqual(
+        resolveCursorShapeSettings({ insert: invalid, normal: "bar" }),
+        {
+          settings: { insert: "bar", normal: "bar" },
+          warning:
+            "Invalid piVim.cursorShape insert; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
+        },
+      );
+      assert.deepEqual(
+        resolveCursorShapeSettings({ insert: "block", normal: invalid }),
+        {
+          settings: { insert: "block", normal: "block" },
+          warning:
+            "Invalid piVim.cursorShape normal; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
+        },
+      );
+    }
+    assert.deepEqual(
+      resolveCursorShapeSettings({ insert: "invalid", normal: "invalid" }),
+      {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+        warning:
+          "Invalid piVim.cursorShape insert, normal; expected block, underline, bar, steady-block, steady-underline, or steady-bar.",
+      },
+    );
+  });
+
+  it("ignores unknown mode keys instead of emitting terminal data", () => {
+    assert.deepEqual(
+      resolveCursorShapeSettings({ visual: "bar", ex: "underline" }),
+      {
+        settings: DEFAULT_CURSOR_SHAPE_SETTINGS,
+      },
+    );
+    assert.equal(
+      resolveCursorShapeSettings({ insert: "\x1b[0 q" }).settings.insert,
+      "bar",
     );
   });
 });

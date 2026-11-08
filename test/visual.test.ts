@@ -5,6 +5,8 @@ import {
   compareVisualPositions,
   getInclusiveEndColumn,
   getVisualLineRange,
+  getVisualRenderSpan,
+  highlightRenderedTextRange,
   isVisualMode,
   orderVisualEndpoints,
 } from "../visual.js";
@@ -117,5 +119,84 @@ describe("clampVisualPosition", () => {
       line: 0,
       col: 0,
     });
+  });
+});
+
+describe("getVisualRenderSpan", () => {
+  it("returns the inclusive character-wise grapheme span", () => {
+    assert.deepEqual(
+      getVisualRenderSpan(
+        "visual",
+        { line: 0, col: 1 },
+        { line: 0, col: 3 },
+        ["a😀bc"],
+        { logicalLine: 0, startCol: 0, length: 5 },
+      ),
+      { start: 1, end: 4 },
+    );
+  });
+
+  it("clips selection spans to host-wrapped layout lines", () => {
+    const lines = ["alpha beta"];
+    assert.deepEqual(
+      getVisualRenderSpan(
+        "visual",
+        { line: 0, col: 2 },
+        { line: 0, col: 8 },
+        lines,
+        { logicalLine: 0, startCol: 0, length: 6 },
+      ),
+      { start: 2, end: 6 },
+    );
+    assert.deepEqual(
+      getVisualRenderSpan(
+        "visual",
+        { line: 0, col: 2 },
+        { line: 0, col: 8 },
+        lines,
+        { logicalLine: 0, startCol: 6, length: 4 },
+      ),
+      { start: 0, end: 3 },
+    );
+  });
+
+  it("paints the final EOL cell for whole-line selections", () => {
+    assert.deepEqual(
+      getVisualRenderSpan(
+        "visual-line",
+        { line: 0, col: 2 },
+        { line: 0, col: 2 },
+        ["abc"],
+        { logicalLine: 0, startCol: 0, length: 3 },
+      ),
+      { start: 0, end: 4 },
+    );
+  });
+});
+
+describe("highlightRenderedTextRange", () => {
+  it("ignores the hardware cursor marker when locating the selected text", () => {
+    const marker = "\x1b_pi:c\x07";
+    assert.equal(
+      highlightRenderedTextRange(
+        `ab${marker}cdef`,
+        1,
+        4,
+        (text) => `<selected>${text}</selected>`,
+      ),
+      `a<selected>b</selected>${marker}<selected>cd</selected>ef`,
+    );
+  });
+
+  it("restarts the highlight after a software-cursor reset", () => {
+    assert.equal(
+      highlightRenderedTextRange(
+        "a\x1b[7mb\x1b[0mc",
+        0,
+        3,
+        (text) => `[${text}]`,
+      ),
+      "[a\x1b[7mb]\x1b[0m[c]",
+    );
   });
 });

@@ -21,17 +21,18 @@ import {
   resolveClipboardMirrorPolicy,
 } from "./clipboard-policy.js";
 import {
-  BLOCK_CURSOR_SHAPE,
+  CURSOR_SHAPE_SEQUENCES,
   type CursorShapeCleanup,
   type CursorShapeRuntime,
   type CursorShapeSequence,
   enableCursorShapeSupport,
   getCursorShapeRuntime,
   hasPromptCursorMarker,
-  INSERT_CURSOR_SHAPE,
   stripSoftwareCursorWhenHardwareCursorIsUsed,
 } from "./cursor-shape.js";
+import { ExHistory } from "./ex-history.js";
 import {
+  createCursorBindingResolver,
   isBackspaceLikeInput,
   isCountStarter,
   isDigit,
@@ -53,22 +54,34 @@ import {
   type ModeColorKey,
   resolveModeColors,
 } from "./mode-colors.js";
-import { fitModeLabel } from "./mode-label.js";
+import { fitModeLabel, layoutTopModeLabel } from "./mode-label.js";
 import {
   findCharMotionTarget,
   findFirstNonWhitespaceColumn,
   findParagraphMotionTarget,
+  getGraphemeStartAtOffset,
   getLineGraphemes,
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
 import {
+  getPiEditorCompatibilityError,
+  probePiEditorCursor,
+  runPiEditorAction,
+} from "./pi-editor-actions.js";
+import {
+  type CursorShapeSettings,
+  DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
+  type LabelPosition,
   type ModeLabelPlacement,
   type ModeLabelStyle,
   readPiVimSettings,
+  resolveCursorShapeSettings,
   resolveExCommandSettings,
+  resolveHistoryNavigation,
+  resolveLabelPosition,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "./settings.js";
@@ -89,24 +102,21 @@ import type {
 } from "./types.js";
 import {
   CHAR_MOTION_KEYS,
-  CTRL_A,
-  CTRL_E,
-  CTRL_K,
   CTRL_R,
   CTRL_UNDERSCORE,
-  ESC_DOWN,
-  ESC_LEFT,
-  ESC_RIGHT,
-  ESC_UP,
-  NEWLINE,
   NORMAL_KEYS,
 } from "./types.js";
 import {
   clampVisualPosition,
+  findDisplayLineTarget,
   getInclusiveEndColumn,
   getVisualLineRange,
+  getVisualRenderSpan,
+  highlightRenderedTextRange,
   isVisualMode,
   orderVisualEndpoints,
+  prepareVisualRenderRange,
+  type VisualLayoutLine,
   type VisualMode,
   type VisualPosition,
 } from "./visual.js";
@@ -239,6 +249,9 @@ type ModalEditorInternals = {
   pushUndoSnapshot?: () => void;
   setCursorCol?: (col: number) => void;
   undoStack?: { readonly length: number; pop(): unknown; stack: unknown[] };
+  lastWidth?: number;
+  scrollOffset?: number;
+  buildVisualLineMap?: (width: number) => VisualLayoutLine[];
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
@@ -247,6 +260,7 @@ type ModalEditorOptions = {
   modeLabelStyle?: ModeLabelStyle;
   modeLabelPlacement?: ModeLabelPlacement;
   onModeLabel?: (label: string) => void;
+  labelPosition?: LabelPosition;
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
   // Per-mode paint policy for each surface. "mode" paints the mode color;
@@ -263,6 +277,7 @@ type ModalEditorOptions = {
   // Reverse-video transform applied to the label. When the label defers to the
   // host color it is wrapped with this so it keeps its block styling.
   labelTransform?: ((s: string) => string) | null;
+  selectionColorizer?: ((s: string) => string) | null;
 };
 
 export class ModalEditor extends CustomEditor {
@@ -272,17 +287,22 @@ export class ModalEditor extends CustomEditor {
   private pendingOperator: PendingOperator = null;
   private prefixCount: string = "";
   private operatorCount: string = "";
+  private pendingZ: boolean = false;
   private pendingG: boolean = false;
   private pendingGCount: string = "";
+  private displayLineWidth: number | null = null;
+  private displayWantedColumn: number | null = null;
   private pendingReplace: boolean = false;
   private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
+  private readonly exHistory = new ExHistory();
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private discardingPasteAfterNewlineInExCommand: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
+  private historyNavigation = true;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
   private lastRepeatableCommand: RepeatableCommand | null = null;
@@ -305,6 +325,10 @@ export class ModalEditor extends CustomEditor {
   private readonly onModeLabel?: (label: string) => void;
   private statusWidth = 32;
   private lastStatusLabel: string | undefined;
+  private editorActionsAvailable: boolean | null = null;
+  private cursorMarkerProbe: (() => boolean) | null;
+  private visualPaintAvailable = true;
+  private readonly labelPosition: LabelPosition;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
   private readonly offBorderColor: ((s: string) => string) | null;
@@ -320,9 +344,20 @@ export class ModalEditor extends CustomEditor {
   // Reverse-video transform used by the label, so its defer-to-host branch
   // matches the label's usual background-block styling.
   private labelTransform: ((s: string) => string) | null = null;
+  private readonly selectionColorizer: (s: string) => string;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
-  private lastLineCache = { l: "", w: 0, label: "", result: "" };
+  private cursorShapeSettings: CursorShapeSettings =
+    DEFAULT_CURSOR_SHAPE_SETTINGS;
+  private lastLineCache = {
+    l: "",
+    w: 0,
+    raw: "",
+    label: "",
+    result: "",
+    top: { label: "", before: "", after: "" },
+    tail: { l: "", w: 0, result: "" },
+  };
 
   private unnamedRegister: string = "";
   private preferRegisterForPut = false;
@@ -355,24 +390,34 @@ export class ModalEditor extends CustomEditor {
   private pendingAsyncDispatches: number = 0;
   private restoreLatestDispatchStateFn: (() => void) | null = null;
 
+  private readonly cursorMotionForInput: ReturnType<
+    typeof createCursorBindingResolver
+  >;
+
   constructor(
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
-    kb: CustomEditorConstructorArgs[2],
+    private readonly appKeybindings: CustomEditorConstructorArgs[2],
     opts?: ModalEditorOptions,
   ) {
-    super(tui, theme, kb);
+    super(tui, theme, appKeybindings);
+    this.cursorMotionForInput = createCursorBindingResolver(appKeybindings);
+    const kb = appKeybindings;
+    this.cursorMarkerProbe = () => probePiEditorCursor(tui, theme, kb);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.modeLabelStyle = opts?.modeLabelStyle ?? "full";
     this.modeLabelPlacement = opts?.modeLabelPlacement ?? "editor";
     this.onModeLabel = opts?.onModeLabel;
     this.statusWidth = Math.min(32, tui.terminal.columns ?? 32);
+    this.labelPosition = opts?.labelPosition ?? "bottom-right";
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
     this.offBorderColor = opts?.offBorderColor ?? null;
     this.borderSync = opts?.borderSync ?? null;
     this.labelSync = opts?.labelSync ?? null;
     this.labelTransform = opts?.labelTransform ?? null;
+    this.selectionColorizer =
+      opts?.selectionColorizer ?? ((s) => `\x1b[7m${s}\x1b[27m`);
     this.installModeBorderColorizer();
     this.publishModeLabel();
   }
@@ -410,6 +455,12 @@ export class ModalEditor extends CustomEditor {
   }
   setCommandNamesFn(fn: () => ReadonlySet<string>): void {
     this.commandNamesFn = fn;
+  }
+  setCursorShapeSettings(settings: CursorShapeSettings): void {
+    this.cursorShapeSettings = { ...settings };
+  }
+  setHistoryNavigation(enabled: boolean): void {
+    this.historyNavigation = enabled;
   }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
@@ -508,7 +559,10 @@ export class ModalEditor extends CustomEditor {
     // sessions even though direct editor tests pass. Reclassify on every host
     // assignment so a thinking-level cycle off -> on -> off is honored.
     Object.defineProperty(this, "borderColor", {
-      get: () => resolvedBorderColor,
+      get: () =>
+        this.editorActionsAvailable === false && this.borderBase
+          ? this.borderBase
+          : resolvedBorderColor,
       set: (next: unknown) => {
         if (typeof next === "function") {
           this.borderBase = next as (s: string) => string;
@@ -539,6 +593,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override setText(text: string): void {
+    this.displayWantedColumn = null;
     this.discardUndoWindow();
     this.clearRedoStack();
     this.clearRepeatState();
@@ -658,7 +713,7 @@ export class ModalEditor extends CustomEditor {
       let changed = false;
       this.withTransition("undo", () => {
         const beforeUndo = this.captureSnapshot();
-        super.handleInput(CTRL_UNDERSCORE);
+        runPiEditorAction(this, "undo");
         const afterUndo = this.captureSnapshot();
 
         if (this.snapshotChanged(beforeUndo, afterUndo)) {
@@ -710,6 +765,7 @@ export class ModalEditor extends CustomEditor {
     editor.onChange = (text: string) => {
       originalOnChange?.(text);
       this.bufferChangeVersion++;
+      this.displayWantedColumn = null;
       this.centralInvalidationCheck();
     };
 
@@ -727,6 +783,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingMotion !== null ||
       this.pendingTextObject !== null ||
       this.pendingOperator !== null ||
+      this.pendingZ ||
       this.pendingG ||
       this.pendingReplace
     );
@@ -1131,12 +1188,16 @@ export class ModalEditor extends CustomEditor {
     editor.state.cursorLine = postCursorLine;
     editor.state.cursorCol = postCursorCol;
     editor.preferredVisualCol = postPreferredCol;
+    // Match Pi's edits and replaceTextInBuffer: only a real mutation ends recall.
+    editor.historyIndex = -1;
+    editor.lastAction = null;
 
     editor.onChange?.(this.getText());
     editor.tui?.requestRender?.();
   }
 
   private startPendingExCommand(): void {
+    this.exHistory.reset();
     this.pendingExCommand = ":";
     this.endBracketedPasteInExCommand();
   }
@@ -1147,6 +1208,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingEscWhileAcceptingBracketedPasteInExCommand;
 
     this.pendingExCommand = null;
+    this.exHistory.reset();
     this.endBracketedPasteInExCommand();
 
     if (shouldDiscardBracketedPasteTail) {
@@ -1155,16 +1217,17 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private clearPendingState(): void {
+  private clearPendingState(clearEx = true): void {
     this.pendingMotion = null;
     this.pendingTextObject = null;
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
+    this.pendingZ = false;
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
-    this.clearPendingExCommand();
+    if (clearEx) this.clearPendingExCommand();
   }
 
   private endBracketedPasteInExCommand(): void {
@@ -1298,7 +1361,31 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  preflightHost(): boolean {
+    // Validate before input or paint without touching editing state. A changed
+    // private action contract need not break the host's public input path.
+    if (this.editorActionsAvailable === null) {
+      const error = getPiEditorCompatibilityError(this);
+      this.editorActionsAvailable = error === null;
+      const probe = this.cursorMarkerProbe;
+      this.cursorMarkerProbe = null;
+      if (error) {
+        this.notifyFn(`${error}; using the stock Pi editor without Vim mode.`);
+      } else if (probe && !probe()) {
+        this.visualPaintAvailable = false;
+        this.notifyFn(
+          "Pi cursor marker compatibility error; Visual highlighting disabled. Vim editing remains enabled.",
+        );
+      }
+    }
+    return this.editorActionsAvailable;
+  }
+
   handleInput(data: string): void {
+    if (!this.preflightHost()) {
+      super.handleInput(data);
+      return;
+    }
     try {
       this.handleInputCore(data);
     } finally {
@@ -1309,13 +1396,17 @@ export class ModalEditor extends CustomEditor {
 
   private handleInputCore(data: string): void {
     this.ensureOnChangeHook();
-
+    const exPaste =
+      this.pendingExCommand !== null &&
+      (this.acceptingBracketedPasteInExCommand ||
+        data.includes(BRACKETED_PASTE_START));
     if (this.pendingExCommand !== null) {
       const normalized = this.normalizePendingExCommandInput(data);
       if (normalized === null) return;
       data = normalized;
     } else if (this.mode !== "insert") {
       if (this.discardingBracketedPasteInNormalMode) {
+        this.displayWantedColumn = null;
         if (isEscapeLikeInput(data)) {
           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
@@ -1347,11 +1438,54 @@ export class ModalEditor extends CustomEditor {
 
       const { filtered, stripped } = this.stripBracketedPasteInNormalMode(data);
       if (stripped) {
+        this.displayWantedColumn = null;
         this.clearPendingState();
         this.cancelRepeatableCommand();
       }
       if (filtered === null) return;
       data = filtered;
+    }
+
+    const vimHistoryControl =
+      data === CTRL_R ||
+      data === CTRL_UNDERSCORE ||
+      (data.startsWith("\x1b[") &&
+        (matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_")));
+    // Cursor bindings own motion input, even when Pi also retains an app's
+    // default on that key. Literal arguments and EX are not motion contexts.
+    // Record canonical hjkl so dot neither re-reads bindings nor re-translates
+    // a printable alias. Insert, paste, Escape and Vim undo/redo stay untouched.
+    const cursorMotion =
+      this.mode !== "insert" &&
+      this.pendingExCommand === null &&
+      !vimHistoryControl &&
+      !isEscapeLikeInput(data)
+        ? this.replayingRepeat
+          ? ["h", "j", "k", "l"].includes(data)
+            ? data
+            : undefined
+          : this.cursorMotionForInput(data)
+        : undefined;
+    if (
+      cursorMotion &&
+      !this.pendingMotion &&
+      !this.pendingReplace &&
+      !this.pendingTextObject &&
+      !this.pendingZ
+    )
+      data = cursorMotion;
+
+    if (
+      this.displayWantedColumn !== null &&
+      data !== "g" &&
+      !["v", "V", "d", "c", "y"].includes(data) &&
+      !(
+        isDigit(data) &&
+        (data !== "0" || this.hasPendingCount() || this.pendingG)
+      ) &&
+      !(this.pendingG && (data === "j" || data === "k"))
+    ) {
+      this.displayWantedColumn = null;
     }
 
     this.prepareRepeatRecordingForInput(data);
@@ -1363,11 +1497,11 @@ export class ModalEditor extends CustomEditor {
 
       if ("insert" === this.mode) {
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
-          super.handleInput(CTRL_E);
+          runPiEditorAction(this, "moveToLineEnd");
           return;
         }
         if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
-          super.handleInput(CTRL_A);
+          runPiEditorAction(this, "moveToLineStart");
           return;
         }
         if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
@@ -1379,6 +1513,28 @@ export class ModalEditor extends CustomEditor {
           return;
         }
         super.handleInput(data);
+        return;
+      }
+
+      // EX is a modal text field: its history keys beat even app bindings.
+      // Pasted controls are data, not history navigation.
+      if (
+        this.pendingExCommand !== null &&
+        !exPaste &&
+        this.handlePendingExHistoryControl(data)
+      ) {
+        return;
+      }
+
+      // Other app callbacks keep their bindings in every mode. Never hand their
+      // key to the host's editor fallback (exit/history bindings can edit).
+      // Paste payload is data, and Vim's undo/redo controls retain ownership.
+      if (
+        !cursorMotion &&
+        !exPaste &&
+        !vimHistoryControl &&
+        this.handleAppAction(data)
+      ) {
         return;
       }
 
@@ -1433,6 +1589,20 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (this.pendingOperator && (this.pendingG || data === "g")) {
+        if (!this.pendingG) {
+          this.pendingG = true;
+        } else {
+          this.pendingG = false;
+          if (data === "j" || data === "k") {
+            this.executeDisplayLineMotion(data);
+          } else {
+            this.cancelPendingOperator();
+          }
+        }
+        return;
+      }
+
       if (this.pendingOperator === "d") {
         this.handlePendingDelete(data);
         return;
@@ -1475,9 +1645,55 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private handleAppAction(data: string): boolean {
+    const kb = this.appKeybindings;
+    let action: Parameters<CustomEditor["onAction"]>[0] | undefined;
+    for (const special of [
+      "app.clipboard.pasteImage",
+      "app.interrupt",
+      "app.exit",
+      "app.suspend",
+    ] as const) {
+      if (kb.matches(data, special)) {
+        action = special;
+        break;
+      }
+    }
+    if (!action) {
+      for (const registered of this.actionHandlers.keys()) {
+        if (registered.startsWith("app.") && kb.matches(data, registered)) {
+          action = registered;
+          break;
+        }
+      }
+    }
+    if (!action) return false;
+
+    this.clearPendingState(
+      action === "app.interrupt" || action === "app.clear",
+    );
+    this.cancelRepeatableCommand();
+    // Keep CustomEditor's extension precedence and dynamic special callbacks,
+    // but do not fall through to readline editing or explicit history bindings.
+    if (this.onExtensionShortcut?.(data)) return true;
+    if (action === "app.interrupt") {
+      if (!this.isShowingAutocomplete())
+        (this.onEscape ?? this.actionHandlers.get(action))?.();
+    } else if (action === "app.exit") {
+      if (this.getText().length === 0)
+        (this.onCtrlD ?? this.actionHandlers.get(action))?.();
+    } else if (action === "app.clipboard.pasteImage") {
+      this.onPasteImage?.();
+    } else {
+      this.actionHandlers.get(action)?.();
+    }
+    return true;
+  }
+
   private handleEscape(): void {
     if (this.pendingExCommand !== null) {
       this.clearPendingExCommand();
+      this.handleAppAction("\x1b");
       return;
     }
 
@@ -1487,6 +1703,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingOperator ||
       this.prefixCount ||
       this.operatorCount ||
+      this.pendingZ ||
       this.pendingG ||
       this.pendingGCount ||
       this.pendingReplace
@@ -1508,6 +1725,22 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private handlePendingExHistoryControl(data: string): boolean {
+    if (matchesKey(data, "ctrl+p")) {
+      this.pendingExCommand = `:${this.exHistory.older()}`;
+    } else if (matchesKey(data, "ctrl+n")) {
+      this.pendingExCommand = `:${this.exHistory.newer()}`;
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  private appendPendingExCommand(text: string): void {
+    this.pendingExCommand = (this.pendingExCommand ?? ":") + text;
+    this.exHistory.reset(this.pendingExCommand.slice(1));
+  }
+
   private deleteLastPendingExCommandGrapheme(): void {
     const current = this.pendingExCommand ?? "";
     const graphemes = getLineGraphemes(current);
@@ -1524,6 +1757,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     this.pendingExCommand = current.slice(0, previousGrapheme.end);
+    this.exHistory.reset(this.pendingExCommand.slice(1));
   }
 
   private handlePendingExCommandControlChunk(data: string): boolean {
@@ -1539,7 +1773,7 @@ export class ModalEditor extends CustomEditor {
     let printable = "";
     const flushPrintable = () => {
       if (!printable) return;
-      this.pendingExCommand += printable;
+      this.appendPendingExCommand(printable);
       printable = "";
     };
 
@@ -1588,12 +1822,11 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (!isPrintableChunk(data)) {
-      this.clearPendingExCommand();
-      this.handleInput(data);
+      // EX owns unsupported controls: do not close or redispatch as Normal input.
       return;
     }
 
-    this.pendingExCommand += data;
+    this.appendPendingExCommand(data);
   }
 
   private hasNonEmptyPrompt(): boolean {
@@ -1621,6 +1854,7 @@ export class ModalEditor extends CustomEditor {
     "co",
     "j",
     "w",
+    "x",
     "r",
     "normal",
     "sort",
@@ -1629,21 +1863,29 @@ export class ModalEditor extends CustomEditor {
     "<",
   ]);
 
+  private quitPrompt(force: boolean, warning: string): void {
+    if (!force && this.hasNonEmptyPrompt()) {
+      this.notifyFn(warning);
+      return;
+    }
+    this.quitFn();
+  }
+
   private submitPendingExCommand(): void {
-    const command = this.pendingExCommand?.slice(1).trim() ?? "";
+    const line = this.pendingExCommand?.slice(1) ?? "";
+    this.exHistory.push(line);
     this.clearPendingExCommand();
+    const command = line.trim();
     if (!command) return;
 
     const force = command.endsWith("!");
     const quitName = force ? command.slice(0, -1) : command;
 
     if (ModalEditor.EX_QUIT_NAMES.has(quitName)) {
-      if (!force && this.hasNonEmptyPrompt()) {
-        this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
-        return;
-      }
-
-      this.quitFn();
+      this.quitPrompt(
+        force,
+        `Prompt is not empty; use :${command}! to quit anyway`,
+      );
       return;
     }
 
@@ -1793,20 +2035,18 @@ export class ModalEditor extends CustomEditor {
     return true;
   }
 
-  private cancelPendingOperator(data: string): void {
+  private cancelPendingOperator(): void {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
     this.cancelRepeatableCommand();
-    if (!isPrintableChunk(data)) {
-      super.handleInput(data);
-    }
+    // Cancelling a Vim prefix consumes its argument, never a host app action.
   }
 
   private handlePendingMotion(data: string): void {
     if (!isPrintableInput(data)) {
       this.pendingMotion = null;
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1848,7 +2088,7 @@ export class ModalEditor extends CustomEditor {
     const hasCount = this.hasPendingCount();
 
     if (this.pendingOperator === "y" && hasCount) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1879,7 +2119,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (hasCount) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1890,7 +2130,7 @@ export class ModalEditor extends CustomEditor {
       data,
     );
     if (!range) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -1972,7 +2212,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "G") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -2012,7 +2252,7 @@ export class ModalEditor extends CustomEditor {
       !supportsCountedLineEnd &&
       !supportsIgnoredCountMotion
     ) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2027,7 +2267,7 @@ export class ModalEditor extends CustomEditor {
         this.pendingOperator = null;
         return;
       }
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2038,7 +2278,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    this.cancelPendingOperator(data);
+    this.cancelPendingOperator();
   }
 
   private handlePendingChange(data: string): void {
@@ -2051,7 +2291,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "c") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -2106,7 +2346,7 @@ export class ModalEditor extends CustomEditor {
       !supportsCountedLineEnd &&
       !supportsIgnoredCountMotion
     ) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2122,7 +2362,7 @@ export class ModalEditor extends CustomEditor {
         this.setMode();
         return;
       }
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
@@ -2136,7 +2376,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    this.cancelPendingOperator(data);
+    this.cancelPendingOperator();
   }
 
   private enterVisualMode(mode: VisualMode): void {
@@ -2324,6 +2564,19 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handleNormalMode(data: string): void {
+    const hadCount = this.prefixCount.length > 0;
+    if (this.pendingZ) {
+      this.clearPendingState();
+      if (data === "Z" || data === "Q") {
+        this.quitPrompt(
+          data === "Q",
+          "Prompt is not empty; use ZQ or :q! to quit anyway",
+        );
+      }
+      // Like Vim's invalid Z suffix, consume the key without executing it.
+      return;
+    }
+
     if (this.pendingG) {
       if (isDigit(data)) {
         this.pendingGCount += data;
@@ -2335,7 +2588,13 @@ export class ModalEditor extends CustomEditor {
       this.pendingGCount = "";
 
       if (!hadGCount) {
+        if (data === "j" || data === "k") {
+          this.executeDisplayLineMotion(data);
+          return;
+        }
+
         if (data === "g") {
+          this.displayWantedColumn = null;
           const count = this.takeTotalCount(1);
           this.moveCursorToLineStart(count - 1);
           return;
@@ -2367,6 +2626,12 @@ export class ModalEditor extends CustomEditor {
       }
 
       this.clearPendingState();
+      return;
+    }
+
+    if (data === "Z" && this.mode === "normal") {
+      this.clearPendingState(); // Quit aliases never carry a count.
+      this.pendingZ = true;
       return;
     }
 
@@ -2638,22 +2903,25 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (isPrintableChunk(data)) return;
-    super.handleInput(data);
+    // App actions were resolved above; never forward unsupported editor keys.
+    // Idle Normal submission remains an explicit exception, not a count suffix.
+    if (!hadCount && this.mode === "normal" && this.isSubmitEnterInput(data)) {
+      super.handleInput(data);
+    }
   }
 
   private openLineBelow(): void {
-    super.handleInput(CTRL_E);
-    super.handleInput(NEWLINE);
+    runPiEditorAction(this, "moveToLineEnd");
+    runPiEditorAction(this, "addNewLine");
   }
 
   private openLineAbove(): void {
-    super.handleInput(CTRL_A);
-    super.handleInput(NEWLINE);
-    super.handleInput(ESC_UP);
+    runPiEditorAction(this, "moveToLineStart");
+    runPiEditorAction(this, "addNewLine");
+    runPiEditorAction(this, "moveCursor", -1, 0);
   }
 
   private handleMappedKey(key: string): void {
-    const seq = NORMAL_KEYS[key];
     switch (key) {
       case "i":
         this.setMode();
@@ -2661,18 +2929,19 @@ export class ModalEditor extends CustomEditor {
       case "a":
         this.setMode();
         if (!this.isCursorAtOrPastEol()) {
-          super.handleInput(ESC_RIGHT);
+          runPiEditorAction(this, "moveCursor", 0, 1);
         }
         break;
       case "A":
         this.setMode();
-        super.handleInput(CTRL_E);
+        runPiEditorAction(this, "moveToLineEnd");
         break;
       case "I":
         this.setMode();
         this.moveCursorToFirstNonWhitespace();
         break;
       case "$": {
+        this.displayWantedColumn = Number.POSITIVE_INFINITY;
         const { line } = this.getCurrentLineAndCol();
         if (isVisualMode(this.mode)) {
           this.moveCursorToCol(line.length);
@@ -2715,14 +2984,51 @@ export class ModalEditor extends CustomEditor {
         this.cutCharsBeforeCursor();
         break;
       case "j":
-        this.moveCursorVertically(1);
+      case "k": {
+        const direction = key === "j" ? 1 : -1;
+        if (!this.tryNavigatePromptHistory(direction)) {
+          this.moveCursorVertically(direction);
+        }
         break;
-      case "k":
-        this.moveCursorVertically(-1);
-        break;
-      default:
-        if (seq) super.handleInput(seq);
+      }
+      default: {
+        const action = NORMAL_KEYS[key];
+        if (action) runPiEditorAction(this, ...action);
+      }
     }
+  }
+
+  /** Mapped j/k only; operators/counts use their buffer-local dispatch. */
+  private tryNavigatePromptHistory(direction: -1 | 1): boolean {
+    if (
+      !this.historyNavigation ||
+      this.mode !== "normal" ||
+      this.replayingRepeat ||
+      this.hasPendingCount()
+    ) {
+      return false;
+    }
+
+    const editor = this as unknown as ModalEditorInternals;
+    const index = editor.historyIndex ?? -1;
+    const lines = this.getLines();
+    const atEdge =
+      this.getCursor().line === (direction === -1 ? 0 : lines.length - 1);
+    // Pi >=1.0 saves any draft on entry. Only newer navigation needs an
+    // active browse; edges are logical lines, not wrapped visual rows.
+    if (!atEdge || (index < 0 && direction === 1)) return false;
+
+    // Pi owns the initial undo snapshot. No Vim change/window or dot recording:
+    // u restores the pre-browse draft; onChange invalidates stale redo.
+    runPiEditorAction(this, "navigateHistory", direction);
+    if (editor.historyIndex !== index && editor.historyIndex !== -1) {
+      // Normalize recalled entries only. Returning past newest restores the
+      // host's saved draft cursor; exhausted-history no-ops also leave it alone.
+      this.moveCursorToBufferEnd();
+      runPiEditorAction(this, "moveToLineEnd");
+      this.clampCursorToLastGrapheme();
+    }
+    return true;
   }
 
   private executeCharMotion(
@@ -2801,9 +3107,104 @@ export class ModalEditor extends CustomEditor {
 
     if (this.tryMoveCursorByState(delta)) return;
 
-    const seq = delta > 0 ? ESC_RIGHT : ESC_LEFT;
+    const direction = delta > 0 ? 1 : -1;
     for (let i = 0; i < Math.abs(delta); i++) {
-      super.handleInput(seq);
+      runPiEditorAction(this, "moveCursor", 0, direction);
+    }
+  }
+
+  private executeDisplayLineMotion(direction: "j" | "k"): void {
+    const count = this.takeTotalCount(1);
+    const operator = this.pendingOperator;
+    this.pendingOperator = null;
+    const editor = this as unknown as ModalEditorInternals;
+    const lines = this.getLines();
+    const cursor = this.getCursor();
+    let rows: VisualLayoutLine[];
+    if (this.displayLineWidth === null) {
+      // No render yet: one row per logical line, never host prompt history.
+      rows = lines.map((line, logicalLine) => ({
+        logicalLine,
+        startCol: 0,
+        length: line.length,
+      }));
+    } else {
+      try {
+        if (typeof editor.buildVisualLineMap !== "function") {
+          throw new Error("Wrapped-line map unavailable");
+        }
+        rows = editor.buildVisualLineMap(this.displayLineWidth);
+      } catch {
+        this.notifyFn("Pi display-line layout unavailable; motion cancelled.");
+        this.cancelRepeatableCommand();
+        return;
+      }
+    }
+    const target = Array.isArray(rows)
+      ? findDisplayLineTarget(
+          lines,
+          rows,
+          cursor,
+          direction === "j" ? count : -count,
+          this.displayWantedColumn,
+          isVisualMode(this.mode),
+          editor.preferredVisualCol ?? cursor.col,
+        )
+      : null;
+    if (!target) {
+      this.notifyFn("Pi display-line layout invalid; motion cancelled.");
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (target.line === cursor.line && target.col === cursor.col) {
+      this.cancelRepeatableCommand();
+      return;
+    }
+    if (!operator) {
+      this.moveCursorToAbsoluteIndex(
+        this.getAbsoluteIndex(target.line, target.col),
+      );
+      this.displayWantedColumn = target.wantedColumn;
+      return;
+    }
+
+    this.displayWantedColumn = null;
+    const { start, end } = orderVisualEndpoints(cursor, target);
+    const startAbs = this.getAbsoluteIndex(start.line, start.col);
+    let endAbs = this.getAbsoluteIndex(end.line, end.col);
+    // Vim's exclusive-motion exception: at column zero of a later logical
+    // line, exclude its preceding newline, or use whole lines when starting
+    // at/before the first nonblank. A wrapped row start is not a logical BOL.
+    if (end.line > start.line && end.col === 0) {
+      if (start.col <= findFirstNonWhitespaceColumn(lines[start.line] ?? "")) {
+        if (operator === "d") {
+          this.deleteLineRange(start.line, end.line - 1);
+        } else if (operator === "c") {
+          this.writeToRegister(
+            this.getLinewisePayload(start.line, end.line - 1),
+          );
+          this.replaceTextInBuffer(
+            [...lines.slice(0, start.line), "", ...lines.slice(end.line)].join(
+              "\n",
+            ),
+            this.getAbsoluteIndex(start.line, 0),
+          );
+          this.setMode();
+        } else {
+          this.yankLineRange(start.line, end.line - 1);
+          this.moveCursorToAbsoluteIndex(startAbs);
+        }
+        return;
+      }
+      endAbs--;
+    }
+    if (operator === "y") {
+      this.yankRangeByAbsolute(startAbs, endAbs);
+      this.moveCursorToAbsoluteIndex(startAbs);
+    } else {
+      this.deleteRangeByAbsolute(startAbs, endAbs);
+      if (operator === "c") this.setMode();
+      else this.clampCursorAfterTextObjectDeletion();
     }
   }
 
@@ -2819,9 +3220,9 @@ export class ModalEditor extends CustomEditor {
 
     const state = editor.state;
     if (!state || !Array.isArray(state.lines) || state.lines.length === 0) {
-      const seq = delta > 0 ? ESC_DOWN : ESC_UP;
+      const direction = delta > 0 ? 1 : -1;
       for (let i = 0; i < Math.abs(delta); i++) {
-        super.handleInput(seq);
+        runPiEditorAction(this, "moveCursor", direction, 0);
       }
       return;
     }
@@ -2888,7 +3289,7 @@ export class ModalEditor extends CustomEditor {
 
     const state = editor.state;
     if (!state || !Array.isArray(state.lines) || state.lines.length === 0) {
-      super.handleInput(CTRL_A);
+      runPiEditorAction(this, "moveToLineStart");
       return;
     }
 
@@ -3412,7 +3813,7 @@ export class ModalEditor extends CustomEditor {
       col < line.length ? line.slice(col) : hasNextLine ? "\n" : "";
 
     if (deleted !== "") this.writeToRegister(deleted);
-    super.handleInput(CTRL_K);
+    runPiEditorAction(this, "deleteToEndOfLine");
   }
 
   private cutCurrentLineContent(): void {
@@ -3424,8 +3825,8 @@ export class ModalEditor extends CustomEditor {
     const deleted = line.length > 0 ? line : hasNextLine ? "\n" : "";
 
     this.writeToRegister(deleted);
-    super.handleInput(CTRL_A);
-    super.handleInput(CTRL_K);
+    runPiEditorAction(this, "moveToLineStart");
+    runPiEditorAction(this, "deleteToEndOfLine");
   }
 
   private cutLine(): void {
@@ -3494,7 +3895,7 @@ export class ModalEditor extends CustomEditor {
       const newText = text.slice(0, startAbs) + text.slice(endAbs);
       this.replaceTextInBuffer(newText, startAbs);
 
-      super.handleInput(CTRL_A);
+      runPiEditorAction(this, "moveToLineStart");
     }
   }
 
@@ -3716,7 +4117,7 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "G") {
       if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
-        this.cancelPendingOperator(data);
+        this.cancelPendingOperator();
         return;
       }
 
@@ -3743,14 +4144,14 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (this.hasPendingCount()) {
-      this.cancelPendingOperator(data);
+      this.cancelPendingOperator();
       return;
     }
 
     if (this.yankWithMotion(data)) {
       this.pendingOperator = null;
     } else {
-      this.cancelPendingOperator(data); // cancel on unrecognised motion
+      this.cancelPendingOperator(); // cancel on unrecognised motion
     }
   }
 
@@ -3965,14 +4366,31 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private getSafePutText(): string {
+    // Programmatic insertion bypasses Pi's input/paste filtering. Never let
+    // clipboard or register controls reach terminal rendering. Match Pi's
+    // newline/tab normalization, but also exclude DEL and C1 controls.
+    const text = this.getPasteRegisterText()
+      .replace(/\r\n?/g, "\n")
+      .replace(/\t/g, "    ");
+    let safe = "";
+    for (const char of text) {
+      const code = char.charCodeAt(0);
+      if (code === 10 || (code >= 32 && (code < 127 || code > 159))) {
+        safe += char;
+      }
+    }
+    return safe;
+  }
+
   private moveCursorToPreviousGraphemeStart(): void {
     const cursor = this.getCursor();
     const line = this.getLines()[cursor.line] ?? "";
     const col = Math.max(0, Math.min(cursor.col, line.length));
     if (col <= 0) return;
 
-    const range = this.getGraphemeRangeAtCol(line, col - 1, 1);
-    if (range) this.moveCursorToCol(range.start);
+    const start = getGraphemeStartAtOffset(line, col - 1);
+    if (start !== null) this.moveCursorToCol(start);
   }
 
   private moveCursorToLastGraphemeOnLine(): void {
@@ -3983,7 +4401,7 @@ export class ModalEditor extends CustomEditor {
 
   private putAfter(): void {
     const count = this.takeTotalCount(1);
-    const text = this.getPasteRegisterText();
+    const text = this.getSafePutText();
     if (!text) return;
     const safeCount = Math.min(
       count,
@@ -3994,11 +4412,9 @@ export class ModalEditor extends CustomEditor {
       const content = text.slice(0, -1);
       const targetLine = this.getCursor().line + 1;
       for (let i = 0; i < safeCount; i++) {
-        super.handleInput(CTRL_E);
-        super.handleInput(NEWLINE);
-        for (const char of content) {
-          super.handleInput(char === "\n" ? NEWLINE : char);
-        }
+        runPiEditorAction(this, "moveToLineEnd");
+        runPiEditorAction(this, "addNewLine");
+        this.insertRegisterText(content);
       }
       // Vim: line-wise `p` leaves the cursor on the first non-blank of the
       // first inserted line (one line below the original cursor). An
@@ -4009,19 +4425,17 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (!this.isCursorAtOrPastEol()) {
-      super.handleInput(ESC_RIGHT);
+      runPiEditorAction(this, "moveCursor", 0, 1);
     }
     for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
+      this.insertRegisterText(text);
     }
     this.moveCursorToPreviousGraphemeStart();
   }
 
   private putBefore(): void {
     const count = this.takeTotalCount(1);
-    const text = this.getPasteRegisterText();
+    const text = this.getSafePutText();
     if (!text) return;
     const safeCount = Math.min(
       count,
@@ -4032,12 +4446,10 @@ export class ModalEditor extends CustomEditor {
       const content = text.slice(0, -1);
       const targetLine = this.getCursor().line;
       for (let i = 0; i < safeCount; i++) {
-        super.handleInput(CTRL_A);
-        super.handleInput(NEWLINE);
-        super.handleInput(ESC_UP);
-        for (const char of content) {
-          super.handleInput(char === "\n" ? NEWLINE : char);
-        }
+        this.moveCursorToLineStart(targetLine);
+        runPiEditorAction(this, "addNewLine");
+        runPiEditorAction(this, "moveCursor", -1, 0);
+        this.insertRegisterText(content);
       }
       // Vim: line-wise `P` leaves the cursor on the first non-blank of the
       // first inserted line (the cursor's original line, since `P` inserts
@@ -4048,11 +4460,16 @@ export class ModalEditor extends CustomEditor {
     }
 
     for (let i = 0; i < safeCount; i++) {
-      for (const char of text) {
-        super.handleInput(char === "\n" ? NEWLINE : char);
-      }
+      this.insertRegisterText(text);
     }
     this.moveCursorToPreviousGraphemeStart();
+  }
+
+  private insertRegisterText(text: string): void {
+    // This is a Vim change, not an external injection: bypass our public
+    // override, which cancels recording and discards the active undo window.
+    // The host snapshots once; that window collapses counted puts as before.
+    super.insertTextAtCursor(text);
   }
 
   private deleteRange(
@@ -4080,9 +4497,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private getDesiredCursorShapeSequence(): CursorShapeSequence {
-    return "insert" === this.mode && this.pendingExCommand === null
-      ? INSERT_CURSOR_SHAPE
-      : BLOCK_CURSOR_SHAPE;
+    const mode =
+      this.mode === "insert" && this.pendingExCommand === null
+        ? "insert"
+        : "normal";
+    return CURSOR_SHAPE_SEQUENCES[this.cursorShapeSettings[mode]];
   }
 
   private syncCursorShapeForRender(lines: string[]): void {
@@ -4127,9 +4546,111 @@ export class ModalEditor extends CustomEditor {
     this.onModeLabel(label);
   }
 
+  private renderVisualSelection(
+    lines: string[],
+    width: number,
+    mode: VisualMode,
+  ): void {
+    if (lines.length < 3) return;
+
+    const editor = this as unknown as ModalEditorInternals;
+    if (
+      typeof editor.lastWidth !== "number" ||
+      !Number.isInteger(editor.lastWidth) ||
+      editor.lastWidth < 1 ||
+      typeof editor.scrollOffset !== "number" ||
+      !Number.isInteger(editor.scrollOffset) ||
+      editor.scrollOffset < 0 ||
+      typeof editor.buildVisualLineMap !== "function"
+    ) {
+      return;
+    }
+
+    let layoutLines: VisualLayoutLine[];
+    try {
+      layoutLines = editor.buildVisualLineMap(editor.lastWidth);
+    } catch {
+      // Optional paint must not break editing if the private host API changes.
+      return;
+    }
+    if (!Array.isArray(layoutLines)) return;
+    // Mirror of the host editor's own render heuristic (30% of terminal rows,
+    // minimum 5); pi-tui recomputes it per render, so we must too.
+    const maxVisibleLines = Math.max(
+      5,
+      Math.floor(this.tui.terminal.rows * 0.3),
+    );
+    const visibleLines = layoutLines.slice(
+      editor.scrollOffset,
+      editor.scrollOffset + maxVisibleLines,
+    );
+    const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
+    const leftPadding = Math.min(this.getPaddingX(), maxPadding);
+    const anchor = this.getVisualAnchor();
+    const cursor = this.getCursor();
+    const bufferLines = this.getLines();
+    // Validate before painting any row, including the reserved border rows.
+    if (
+      visibleLines.length > lines.length - 2 ||
+      visibleLines.some(
+        (line) =>
+          !line ||
+          !Number.isInteger(line.logicalLine) ||
+          line.logicalLine < 0 ||
+          line.logicalLine >= bufferLines.length ||
+          !Number.isInteger(line.startCol) ||
+          line.startCol < 0 ||
+          !Number.isInteger(line.length) ||
+          line.length < 0 ||
+          line.startCol + line.length >
+            (bufferLines[line.logicalLine]?.length ?? 0),
+      )
+    ) {
+      return;
+    }
+
+    const range = prepareVisualRenderRange(mode, anchor, cursor, bufferLines);
+    for (let index = 0; index < visibleLines.length; index++) {
+      const layoutLine = visibleLines[index];
+      // Host render output row 0 is the top border; visible text rows start
+      // at index 1.
+      const renderedIndex = index + 1;
+      const renderedLine = lines[renderedIndex];
+      if (!layoutLine || renderedLine === undefined) continue;
+      const span = getVisualRenderSpan(
+        mode,
+        anchor,
+        cursor,
+        bufferLines,
+        layoutLine,
+        range,
+      );
+      if (!span) continue;
+      lines[renderedIndex] = highlightRenderedTextRange(
+        renderedLine,
+        leftPadding + span.start,
+        leftPadding + span.end,
+        this.selectionColorizer,
+      );
+    }
+  }
+
   render(width: number): string[] {
+    const vim = this.preflightHost();
     const lines = super.render(width);
+    // The host subtracts padding / the reserved cursor cell. Reuse its exact
+    // layout width, not the outer terminal width or its pre-render default.
+    const layoutWidth = (this as unknown as ModalEditorInternals).lastWidth;
+    if (typeof layoutWidth === "number" && layoutWidth > 0) {
+      if (this.displayLineWidth !== layoutWidth)
+        this.displayWantedColumn = null;
+      this.displayLineWidth = layoutWidth;
+    }
+    if (!vim) return lines;
     this.syncCursorShapeForRender(lines);
+    if (this.visualPaintAvailable && isVisualMode(this.mode)) {
+      this.renderVisualSelection(lines, width, this.mode);
+    }
     if (this.modeLabelPlacement === "status") {
       this.statusWidth = Math.min(32, width);
       // Re-evaluate paint on each render, including theme/host invalidation.
@@ -4138,24 +4659,48 @@ export class ModalEditor extends CustomEditor {
     }
     if (lines.length === 0) return lines;
 
-    const rawLabel = fitModeLabel(this.getModeLabel(), width);
+    const topLeft = this.labelPosition === "top-left";
+    const row = topLeft ? 0 : lines.length - 1;
+    const line = lines[row] ?? "";
+    const raw = this.getModeLabel();
+    const c = this.lastLineCache;
+    const changed = line !== c.l || width !== c.w || raw !== c.raw;
+    if (topLeft) {
+      // Moving the label must not remove its old last-row width cap: pi-tui
+      // 0.78 can return an oversized lower scroll indicator in narrow panes.
+      const last = lines.length - 1;
+      const tail = lines[last] ?? "";
+      if (tail !== c.tail.l || width !== c.tail.w) {
+        c.tail = {
+          l: tail,
+          w: width,
+          result: truncateToWidth(tail, width, ""),
+        };
+      }
+      lines[last] = c.tail.result;
+      if (changed) c.top = layoutTopModeLabel(line, width, raw);
+    }
+    const rawLabel = topLeft ? c.top.label : fitModeLabel(raw, width);
     const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;
-    const last = lines.length - 1;
-    const lastLine = lines[last];
-    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
-      const contentWidth = width - visibleWidth(rawLabel);
-      const c = this.lastLineCache;
-      if (lastLine !== c.l || contentWidth !== c.w || label !== c.label) {
-        c.l = lastLine;
-        c.w = contentWidth;
-        c.label = label;
-        c.result = truncateToWidth(lastLine, contentWidth, "") + label;
+    if (changed || label !== c.label) {
+      c.l = line;
+      c.w = width;
+      c.raw = raw;
+      c.label = label;
+      if (topLeft) {
+        c.result = c.top.label
+          ? c.top.before + label + c.top.after
+          : c.top.before;
+      } else {
+        // Keep the released last-row fallback/truncation byte-for-byte.
+        c.result =
+          line && visibleWidth(line) >= visibleWidth(rawLabel)
+            ? truncateToWidth(line, width - visibleWidth(rawLabel), "") + label
+            : label;
       }
-      lines[last] = c.result;
-    } else {
-      lines[last] = label;
     }
+    lines[row] = c.result;
     return lines;
   }
 
@@ -4191,6 +4736,7 @@ export class ModalEditor extends CustomEditor {
       return pending ? ` ${name} ${pending}_ ` : ` ${name} `;
     }
 
+    if (this.pendingZ) return ` ${normal} Z_ `;
     if (this.pendingReplace) {
       return ` ${normal} ${prefixCount}r_ `;
     }
@@ -4236,6 +4782,23 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
 
+    const historyNavigation = resolveHistoryNavigation(
+      piVimSettings.historyNavigation,
+    );
+    if (historyNavigation.warning && ctx.hasUI) {
+      ctx.ui.notify(historyNavigation.warning, "warning");
+    }
+
+    const cursorShape = resolveCursorShapeSettings(piVimSettings.cursorShape);
+    if (cursorShape.warning && ctx.hasUI) {
+      ctx.ui.notify(cursorShape.warning, "warning");
+    }
+
+    const labelPosition = resolveLabelPosition(piVimSettings.labelPosition);
+    if (labelPosition.warning && ctx.hasUI) {
+      ctx.ui.notify(labelPosition.warning, "warning");
+    }
+
     // Status strings live outside the editor's render cache. Resolve the active
     // theme lazily so a theme replacement repaints them on the next render.
     const t =
@@ -4243,6 +4806,8 @@ export default function (pi: ExtensionAPI) {
         ? {
             fg: (token: Parameters<typeof ctx.ui.theme.fg>[0], text: string) =>
               ctx.ui.theme.fg(token, text),
+            bg: (token: Parameters<typeof ctx.ui.theme.bg>[0], text: string) =>
+              ctx.ui.theme.bg(token, text),
           }
         : ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
@@ -4268,7 +4833,6 @@ export default function (pi: ExtensionAPI) {
     }
     ctx.ui.setEditorComponent((tui, theme, kb) => {
       const generation = ++editorGeneration;
-      cursorShapeCleanup = enableCursorShapeSupport(tui);
       const editor = new ModalEditor(tui, theme, kb, {
         modeLabelStyle: piVimSettings.modeLabelStyle,
         modeLabelPlacement: piVimSettings.modeLabelPlacement,
@@ -4282,17 +4846,38 @@ export default function (pi: ExtensionAPI) {
               }
             }
           : undefined,
+        labelPosition: labelPosition.position,
         labelColorizers,
         borderColorizers,
         borderSync,
         labelSync,
         offBorderColor,
         labelTransform: reverseVideo,
+        selectionColorizer: (s) => {
+          try {
+            if (typeof t?.bg === "function") {
+              const painted = t.bg("selectedBg", s);
+              // Pi 1.4's system theme has no panel color without a terminal
+              // background hint. Reset-only styling cannot show a selection.
+              if (painted !== s && painted !== `\x1b[49m${s}\x1b[49m`)
+                return painted;
+            }
+          } catch {
+            // Custom themes may omit selectedBg. Retry on the next render so
+            // switching back to a complete theme restores its highlight.
+          }
+          return reverseVideo(s);
+        },
       });
+      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
+      const compatible = editor.preflightHost();
+      cursorShapeCleanup?.();
+      cursorShapeCleanup = compatible ? enableCursorShapeSupport(tui) : null;
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
-      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
+      editor.setCursorShapeSettings(cursorShape.settings);
+      editor.setHistoryNavigation(historyNavigation.enabled);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.

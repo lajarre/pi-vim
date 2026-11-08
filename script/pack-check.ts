@@ -33,6 +33,7 @@ const REQUIRED_FILES = [
   "README.md",
   "package.json",
   "index.ts",
+  "ex-history.ts",
   "motions.ts",
   "settings.ts",
   "types.ts",
@@ -245,12 +246,157 @@ const THRESHOLDS = {
   // runtime. Measured packed 58644 B, unpacked 231210 B. Budgets bumped 58500 ->
   // 59000 and 229600 -> 231400, leaving ~356 B / ~190 B headroom. Files stay at
   // 17.
-  // Optional compact/status labels: 60004 B packed / 236372 B unpacked,
-  // versus baseline 58576 / 231210; still 17 files, no new dependencies.
-  // Budgets leave 496 B / 628 B headroom; QA/evidence: compact-label-qa.md.
-  maxFiles: 17,
-  maxSize: 60500,
-  maxUnpackedSize: 237000,
+  //
+  // Standalone-runtime clipboard backends: clipboard-mirror.ts uses Pi's
+  // injected copy API when the current executable is not a reusable JS runtime
+  // and reads through platform clipboard commands in that mode; README documents
+  // the standalone backends. Measured packed 59080 B, unpacked 233455 B. Budgets
+  // bumped 59000 -> 59500 and 231400 -> 234000, leaving ~420 B / ~545 B
+  // headroom. Files stay at 17.
+  //
+  // One overall clipboard read deadline: extract platform read transport to
+  // clipboard-platform.ts to keep the mirror under ~500 LOC, and document the
+  // bound/fallback contract. Stacked contributor import measured 59360 B packed,
+  // 234119 B unpacked (119 B over its original budget), 17 files. This fix
+  // measures 59878 B / 235379 B / 18 files. Budgets become 60300 / 236000 / 18,
+  // leaving 422 B / 621 B headroom. No dependency or Vim semantic changes.
+  //
+  // Isolated standalone writes: shared abortable child lifecycle and fixed
+  // platform command vectors replace Pi's in-process blocking copy API; lazy
+  // node:sea.isSea detection handles compiled Node. Normal Node retains Pi's
+  // helper backend. README documents timeout, circuit and OSC52 boundaries.
+  // Measured 60736 B packed / 238258 B unpacked / 18 files; budgets become
+  // 61200 / 239000, leaving 464 B / 742 B headroom. No new dependency.
+  //
+  // 2026-10-10 — Configurable cursor shape (#55): whole-map setting validation,
+  // session-start wiring and DECSCUSR lookup plus the README reference. Measured
+  // 63882 B packed / 250632 B unpacked / 18 files. Budgets become 64300 /
+  // 251300, leaving 418 B / 668 B headroom; no new dependency or packed file.
+  //
+  // 2026-10-10 — Normal-mode ZZ/ZQ (#49): shared guarded quit helper, pending-Z
+  // dispatch/clearing/footer and README semantics. Measured 64484 B packed /
+  // 252519 B unpacked / 18 files. Budgets become 64900 / 253200, leaving
+  // 416 B / 681 B headroom; tests/parity are not packed, no new dependency.
+  //
+  // 2026-10-10: Visual selection rendering, stacked on the clipboard,
+  // cursor shape and ZZ/ZQ changes: visual.ts gains host-layout span
+  // geometry and ANSI-safe selected-range painting; index.ts uses the host wrapped/scrolled line map,
+  // and README documents the paint. Measured 66077 B packed / 258250 B unpacked
+  // / 18 files. Budgets become 66600 / 258900, leaving 523 B / 650 B headroom.
+  // Helpers stay in visual.ts; no runtime dependency or new packed file.
+  //
+  // 2026-10-10: Selection review fixes validate the optional host layout, guard
+  // missing theme backgrounds, and paint a selected final empty row. README
+  // documents fallback and linewise paint boundaries. Measured 66525 B packed /
+  // 259754 B unpacked / 18 files. Budgets become 67100 / 260400, leaving 575 B /
+  // 646 B headroom. Regression/parity tests are not shipped; no new dependency.
+  //
+  // 2026-10-10: Document software-cursor contrast under reverse-video fallback.
+  // Measured 66555 B packed / 259850 B unpacked / 18 files. Limits remain
+  // 67100 / 260400, leaving 545 B / 550 B headroom.
+  //
+  // Direct editor dispatch: a runtime-checked adapter adds one shipped module
+  // and README binding guarantees, without new dependencies. Measured packed
+  // 58644 -> 59181 B, unpacked 231210 -> 232872 B, files 17 -> 18. Evidence and
+  // rationale: doc/dev/editor-action-dispatch.md. Keep ~419 B / ~628 B headroom.
+  // Stacked on the 2026-10-10 intake branch the import measures 67124 B packed /
+  // 261512 B unpacked / 19 files; budgets become 67700 / 262200 (576 B / 688 B headroom).
+  //
+  // 2026-10-10 PR #54 intake integration: direct actions stacked on clipboard
+  // work, whole-contract compatibility preflight, safe put
+  // text filtering and README contracts; remove 8 unused escape constants.
+  // Measured 67740 B packed / 263415 B unpacked / 19 files. Budgets become
+  // 68300 / 264100 / 19, leaving 560 B / 685 B headroom. No new dependency;
+  // host comparison and hot-path evidence: doc/dev/editor-action-dispatch.md.
+  //
+  // 2026-10-10 — Normal-mode prompt history (#51): guarded j/k dispatch through
+  // navigateHistory, default-on project-overridable setting and README contract.
+  // Measured 69241 B packed / 268090 B unpacked / 19 files. Budgets become
+  // 69700 / 268800 / 19, leaving 459 B / 710 B headroom. No new dependency or
+  // shipped file; focused/parity tests and host/perf evidence are not packed.
+  //
+  // 2026-10-10: Configurable mode label position (#53), stacked on #51: setting validation,
+  // session wiring and a cached top-border overlay preserving scroll indicators
+  // and ANSI runs, plus the README reference. Measured 70835 B packed /
+  // 273357 B unpacked / 19 files. Budgets become 71400 / 274000, leaving
+  // 565 B / 643 B headroom. No runtime dependency or new packed file; render
+  // and settings tests plus benchmark scratch remain outside the package.
+  //
+  // 2026-10-10: Label-position review retains the last-row width cap when the
+  // label moves to the top, preventing an old-host lower scroll indicator from
+  // overflowing. The cap is cached with the overlay. Measured 71011 B packed /
+  // 273919 B unpacked / 19 files. Limits become 71600 / 274600, leaving
+  // 589 B / 681 B headroom. No new packed file or dependency.
+  //
+  // 2026-10-31: Rebuilt intake retains history validation, prepared selection
+  // ranges, runtime-probe caching, cursor lifecycle fixes and display gating.
+  // The baseline input-key module and settings type retain their structure.
+  // Measured 69318 B packed / 267365 B unpacked / 19 files, down 2676 B /
+  // 10141 B from the previous 71994 B / 277506 B / 19-file tip.
+  // Limits become 69800 / 267900 / 19, leaving 482 B / 535 B headroom.
+  // Earlier blocks retain historical measurements; these limits supersede
+  // them. No new dependency; render/input evidence and tests are not packed.
+  //
+  // 2026-11: Maintainer adjustments add steady DEC shapes, reserve :x,
+  // preserve host APC cursor markers during Visual paint, use public put
+  // insertion with targeted grapheme lookup, and normalize Ctrl-P/Ctrl-N.
+  // README contracts ship; tests and benchmark evidence do not.
+  // Measured 70632 B packed / 270978 B unpacked / 19 files, up 1314 B /
+  // 3613 B from the rebuilt intake. Limits become 71100 / 271500 / 19,
+  // leaving 468 B / 522 B headroom. No dependency or packed file added.
+  //
+  // 2026-11-02: Pi 1.4 dev-host validation adds a one-render startup cursor
+  // probe, a paint-only compatibility fallback, and reset-only theme handling.
+  // README contracts and two devDependency declarations ship; tests/evidence
+  // do not. Measured 71511 B packed / 273599 B unpacked / 19 files (+879 B /
+  // +2621 B from the adjusted intake). Limits become 72000 / 274100 / 19,
+  // leaving 489 B / 501 B headroom. No runtime dependency or packed file added.
+  //
+  // 2026-11-03: Any-draft history and modal control-key ownership update
+  // dispatch and shipped README contracts; pi-tui's peer floor becomes 1.0.
+  // Measured 71887 B packed / 274518 B unpacked / 19 files (+376 B / +919 B
+  // from the 1.4 compatibility round). Limits become 72400 / 275100 / 19,
+  // leaving 513 B / 582 B headroom. No runtime dependency or packed file
+  // added; the default-binding matrix and benchmark evidence are not packed.
+  //
+  // 2026-11-04: Remove control-line aliases and split app callbacks from
+  // editor bindings outside Insert. Runtime routing and README contracts
+  // measure 72415 B packed / 276481 B unpacked / 19 files (+528 B / +1963 B).
+  // Limits become 72900 / 277100 / 19, leaving 485 B / 619 B headroom.
+  // No dependency or packed file added; tests and evidence remain excluded.
+  //
+  // 2026-11-04: Detect the legacy clipboard module once per process and use
+  // platform-command reads on Node hosts without it; README states both
+  // routes. Measured 72782 B packed / 277678 B unpacked / 19 files.
+  // Limits become 73300 / 278300 / 19, leaving 518 B / 622 B headroom.
+  // No dependency or packed file added; tests and probe evidence stay excluded.
+  //
+  // 2026-11-04: EX C-p/C-n history adds ex-history.ts, typed-key routing and
+  // README contracts. Measured 73772 B packed / 280893 B unpacked / 20 files
+  // (+990 B / +3215 B / +1 file from the clipboard-host fix). Limits become
+  // 74300 / 281600 / 20, leaving 528 B / 707 B headroom. No dependency added;
+  // parity tests, benchmark evidence and maintainer QA stay out of the package.
+  //
+  // 2026-11-04: gj/gk display-row motions add validated host-map geometry,
+  // sticky screen columns, exclusive operators and README contracts.
+  // Measured 76099 B packed / 290119 B unpacked / 20 files (+2327 B /
+  // +9226 B from EX history). Limits become 76600 / 290800 / 20, leaving
+  // 501 B / 681 B headroom. No dependency or packed file added; parity,
+  // motion/render benchmarks and maintainer QA remain outside the package.
+  //
+  // 2026-11-04: Alias public host cursor bindings to existing hjkl dispatch,
+  // with construction-time snapshots and README ownership/gap contracts.
+  // Measured 77188 B packed / 293444 B unpacked / 20 files (+1089 B /
+  // +3325 B from gj/gk). Limits become 77700 / 294100 / 20, leaving
+  // 512 B / 656 B headroom. No runtime dependency or packed file added;
+  // tests, benchmark evidence and maintainer QA remain outside the package.
+  // Compact/status labels merged onto 0.15.1 retain top-left positioning,
+  // Visual paint and editor lifecycle fixes. Measured 78556 B packed /
+  // 298834 B unpacked / 20 files; limits leave 544 B / 666 B headroom.
+  // No dependency or packed file added; tests and QA remain excluded.
+  maxFiles: 20,
+  maxSize: 79100,
+  maxUnpackedSize: 299500,
 } as const;
 
 function compareStrings(a: string, b: string): number {

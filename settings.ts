@@ -10,6 +10,20 @@ export type ModeColorSettings = {
   ex?: string;
 };
 
+export type LabelPosition = "bottom-right" | "top-left";
+
+export type CursorShape =
+  | "block"
+  | "underline"
+  | "bar"
+  | "steady-block"
+  | "steady-underline"
+  | "steady-bar";
+export type CursorShapeSettings = {
+  insert: CursorShape;
+  normal: CursorShape;
+};
+
 export type ModeChangeSettings = {
   insert?: string;
   normal?: string;
@@ -42,16 +56,24 @@ export type PiVimSettings = {
   exCommand?: unknown;
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
+  historyNavigation?: unknown;
+  labelPosition?: unknown;
+  cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
   // Per-mode paint policy for Pi's input border. Default: every mode "host".
   borderSync?: SurfaceSyncMap;
-  // Per-mode paint policy for pi-vim's footer mode label. Default: "mode".
+  // Per-mode paint policy for pi-vim's mode label. Default: "mode".
   labelSync?: SurfaceSyncMap;
   // Deprecated, never-released alias superseded by borderSync/labelSync; still
   // accepted and translated in `resolveSurfaceSyncMaps`. `false`/absent → both
   // maps at their defaults; `true` → borderSync all "mode"; the never-released
   // `"inherit"` → both maps all "thinking".
   syncBorderColorWithMode?: BorderSyncMode;
+};
+
+export const DEFAULT_CURSOR_SHAPE_SETTINGS: CursorShapeSettings = {
+  insert: "bar",
+  normal: "block",
 };
 
 export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
@@ -217,6 +239,76 @@ export function readPiVimModeLabelPlacement(
     : "editor";
 }
 
+export function readPiVimLabelPositionSetting(g: unknown, p: unknown) {
+  // A present project value overrides global even when invalid, like modeColors.
+  const v = get(p, "labelPosition");
+  if (v !== M) return v;
+  const w = get(g, "labelPosition");
+  return w === M ? undefined : w;
+}
+
+export function resolveLabelPosition(value: unknown): {
+  position: LabelPosition;
+  warning?: string;
+} {
+  if (value === "bottom-right" || value === "top-left") {
+    return { position: value };
+  }
+  return {
+    position: "bottom-right",
+    ...(value !== undefined && {
+      warning:
+        "Invalid piVim.labelPosition; expected bottom-right or top-left.",
+    }),
+  };
+}
+
+export function readPiVimCursorShapeSetting(g: unknown, p: unknown) {
+  // Visual-only, whole-setting override: absent/invalid project keys use
+  // defaults, not the global map (the same policy as modeColors).
+  const v = get(p, "cursorShape");
+  if (v !== M) return v;
+  const w = get(g, "cursorShape");
+  return w === M ? undefined : w;
+}
+
+export function resolveCursorShapeSettings(value: unknown): {
+  settings: CursorShapeSettings;
+  warning?: string;
+} {
+  const settings = { ...DEFAULT_CURSOR_SHAPE_SETTINGS };
+  if (value === undefined) return { settings };
+  if (!rec(value)) {
+    return {
+      settings,
+      warning: "Invalid piVim.cursorShape; expected an object.",
+    };
+  }
+  const invalid: string[] = [];
+  for (const key of MC) {
+    if (!Object.hasOwn(value, key)) continue;
+    const shape = value[key];
+    if (
+      shape === "block" ||
+      shape === "underline" ||
+      shape === "bar" ||
+      shape === "steady-block" ||
+      shape === "steady-underline" ||
+      shape === "steady-bar"
+    ) {
+      settings[key] = shape;
+    } else {
+      invalid.push(key);
+    }
+  }
+  return {
+    settings,
+    ...(invalid.length > 0 && {
+      warning: `Invalid piVim.cursorShape ${invalid.join(", ")}; expected block, underline, bar, steady-block, steady-underline, or steady-bar.`,
+    }),
+  };
+}
+
 export function readPiVimModeColors(g: unknown, p: unknown) {
   const v = get(p, "modeColors");
   // Project settings are a whole-setting override. If a project checks in an
@@ -225,6 +317,26 @@ export function readPiVimModeColors(g: unknown, p: unknown) {
   if (v !== M) return colors(v);
   const w = get(g, "modeColors");
   return colors(w);
+}
+
+export function readPiVimHistoryNavigation(g: unknown, p: unknown) {
+  // No capability grant: project settings override global, even if invalid.
+  const v = get(p, "historyNavigation");
+  const value = v === M ? get(g, "historyNavigation") : v;
+  return value === M ? undefined : value;
+}
+
+export function resolveHistoryNavigation(value: unknown): {
+  enabled: boolean;
+  warning?: string;
+} {
+  if (typeof value === "boolean") return { enabled: value };
+  return {
+    enabled: true,
+    ...(value !== undefined && {
+      warning: "Invalid piVim.historyNavigation; expected a boolean.",
+    }),
+  };
 }
 
 export function readPiVimModeChange(g: unknown, p: unknown) {
@@ -305,6 +417,9 @@ function disk(cwd: string): PiVimSettings {
     modeLabelStyle: readPiVimModeLabelStyle(g, p),
     modeLabelPlacement: readPiVimModeLabelPlacement(g, p),
     modeColors: readPiVimModeColors(g, p),
+    historyNavigation: readPiVimHistoryNavigation(g, p),
+    labelPosition: readPiVimLabelPositionSetting(g, p),
+    cursorShape: readPiVimCursorShapeSetting(g, p),
     modeChange: readPiVimModeChange(g, p),
     borderSync: readPiVimBorderSync(g, p),
     labelSync: readPiVimLabelSync(g, p),

@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 
 import { visibleWidth } from "@earendil-works/pi-tui";
 
-import { fitModeLabel, takeModeLabelSuffix } from "../mode-label.js";
+import {
+  fitModeLabel,
+  layoutTopModeLabel,
+  takeModeLabelSuffix,
+} from "../mode-label.js";
 
 // truncateToWidth appends an ANSI reset; strip it to compare visible text.
 const ANSI_RESET = "\x1b[0m";
@@ -57,6 +61,37 @@ describe("fitModeLabel", () => {
     assert.ok(!result.includes("…"));
     assert.equal(visibleText(result), " NOR");
     assert.ok(visibleWidth(result) <= 4);
+  });
+});
+
+// Intentional non-Vim surface: fitting the host's top border, not a statusline.
+describe("layoutTopModeLabel", () => {
+  it("shrinks a label longer than a short host row", () => {
+    const layout = layoutTopModeLabel("───", 24, " INSERT ");
+    assert.equal(visibleText(layout.label), " IN");
+    assert.equal(visibleWidth(layout.before + layout.label + layout.after), 3);
+  });
+
+  it("bounds old-host scroll ellipses below three columns", () => {
+    for (const width of [1, 2]) {
+      const layout = layoutTopModeLabel(
+        "\x1b[34m...\x1b[39m",
+        width,
+        " INSERT ",
+      );
+      assert.equal(layout.label, "");
+      assert.equal(visibleWidth(layout.before + layout.after), width);
+    }
+  });
+
+  it("preserves an empty or fully annotated row without adding a label", () => {
+    for (const source of ["", " ↑ 123 more "]) {
+      assert.deepEqual(layoutTopModeLabel(source, 80, " NORMAL "), {
+        label: "",
+        before: source,
+        after: "",
+      });
+    }
   });
 });
 

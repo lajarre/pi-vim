@@ -6,7 +6,7 @@ Vim in Pi's prompt. Draft in INSERT, edit in NORMAL, select in VISUAL — and ru
 pi install npm:pi-vim
 ```
 
-Restart Pi after install; requires `@earendil-works/pi-tui >= 0.74.0`.
+Restart Pi after install; requires `@earendil-works/pi-tui >= 1.0.0` for saved-draft prompt history.
 
 [quickstart](#30-second-quickstart) · [key reference](#full-reference) · [settings](#settings-reference) · [limits](#limits-and-vim-differences)
 
@@ -28,7 +28,7 @@ Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. 
 
 ### and the comfort layer
 
-Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the footer always shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX`, and mode-colored borders and labels are one setting away — each mode choosing whether to paint its own color, show the host's border, or defer only while the host is thinking.
+Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the mode label shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX` (bottom-right by default, optionally top-left), and mode-colored borders and labels are one setting away — each mode choosing whether to paint its own color, show the host's border, or defer only while the host is thinking.
 
 ## 30-second quickstart
 
@@ -73,7 +73,11 @@ Common quick wins:
 |---|---|
 | `Esc` / `Ctrl+[` | Insert → Normal mode |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
+| `Enter` | Submit the prompt through Pi from idle Normal mode |
+| Unsupported editing keys / controls | Consumed in Normal/Visual; cancel pending arguments/counts without editing |
 | `:` | Normal → EX mini-mode |
+| `ZZ` | Normal → quit only if the prompt is empty or whitespace-only (same guard as `:q`; no write) |
+| `ZQ` | Normal → force quit, discarding the prompt (same as `:q!`) |
 | `i` | Normal → Insert at cursor |
 | `a` | Normal → Insert after cursor |
 | `I` | Normal → Insert at first non-whitespace |
@@ -83,6 +87,18 @@ Common quick wins:
 | `v` | Normal → character-wise Visual mode |
 | `V` | Normal → line-wise Visual mode |
 | `Esc` / `Ctrl+[` | Visual → Normal mode (never reaches Pi) |
+
+`Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, except a Pi app chord, which cancels the prefix and runs its app action. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
+
+Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert each filtered copy through Pi's public `insertTextAtCursor` API without triggering shortcuts; counted linewise puts keep each register copy intact and each put remains one Vim undo unit. Unlike nvim, puts normalize CRLF/CR to newlines, expand tabs to four spaces, and discard other C0, DEL, and C1 control characters so clipboard text cannot execute terminal escapes. The original register is unchanged. Actual Insert-mode input follows Pi's configured bindings.
+
+Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt, exit) work in every mode except EX's `<C-p>` / `<C-n>` history keys and cursor-binding conflicts below; other Pi text-editing shortcuts apply only in Insert.
+
+Cursor bindings follow your Pi keybindings in Normal mode and Visual/V-Line: `tui.editor.cursorUp` / `cursorDown` / `cursorLeft` / `cursorRight` alias `k` / `j` / `h` / `l`, including counts, supported operators, sticky columns, dot-repeat and Normal-mode edge history recall. Defaults include the arrows and `<C-b>` / `<C-f>` for left/right. Bindings are read when the editor is installed; use `/reload` after editing Pi's `keybindings.json`. Insert is unchanged; EX and literal arguments (`f`/`t`/`r`, text objects, `Z`) are not motion contexts, and Escape/undo/redo retain their modal meaning. Pi can retain multiple actions on one key: cursor aliases win outside Insert, but to use `<C-p>` for cursor-up in Insert too, also rebind or disable `app.model.cycleForward` (set it to `[]`). These are aliases of pi-vim's existing motions, including their known differences below, not a second motion implementation.
+
+App chords cancel pending arguments/counts without changing the Vim mode or selection; the app callback may itself change the prompt. Unsupported editing controls are consumed in Normal/Visual. Idle-Normal `Enter` still submits; `Esc` aborts from idle Normal, but cancels pending Vim commands or leaves Visual first. Exit only fires on an empty prompt; it never falls through to deletion outside Insert. Vim undo/redo controls keep their own meaning.
+
+This uses runtime-checked Pi internals. Before input or rendering, pi-vim checks all required operations; if one is missing, it warns once and uses Pi's stock input, keybindings and rendering for that instance, without Vim labels, border colors or cursor shaping. Preflight leaves the buffer, cursor, registers and history untouched. Typing, submission, `/reload` and `/quit` remain available through Pi; no synthetic fallback keys are sent.
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
@@ -103,10 +119,13 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 |---------------|--------|
 | `:` | Enter EX mini-mode |
 | `Enter` | Execute pending ex command |
-| `Esc` | Cancel EX mini-mode |
+| `Esc` | Cancel EX and pass the interrupt to Pi |
 | `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
-| `:q` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
-| `:q!` | Force quit the current Pi session even when the prompt has text |
+| `<C-p>` / `<C-n>` | Recall older / newer submitted ex lines; past newest restores the draft, oldest clamps |
+| Pi app shortcuts (except `<C-p>` / `<C-n>`) | Run the app action and retain the EX line; interrupt/clear (`Esc` / `Ctrl+c` by default) cancel it |
+| Unsupported editing controls | Ignored; keep the EX line, buffer and cursor unchanged |
+| `:q` / Normal-mode `ZZ` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
+| `:q!` / Normal-mode `ZQ` | Force quit the current Pi session even when the prompt has text |
 | `:qa` | Same safe quit policy as `:q` |
 | `:qa!` | Same force quit policy as `:q!` |
 | `:quit` / `:qall` / `:quitall` | Long aliases with the same safe quit policy as `:q` |
@@ -116,6 +135,12 @@ The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!
 | `:!{cmd}` | Run `{cmd}` in Pi's shell via `!{cmd}`, e.g. `:!ls` runs `!ls`; `:!!{cmd}` runs it excluded from context |
 | reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
 | unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
+
+`<C-p>` / `<C-n>` browse the last 100 distinct submitted lines in this session (no persistence or setting), moving exact duplicates to newest, placing the cursor at the end, and treating edits after recall as a new draft; Enter submits the recalled line, while Up/Down do not browse history.
+The EX line deliberately owns `<C-p>` / `<C-n>` even when Pi binds them to app actions such as model cycling: it is a modal text field, like Vim's command line.
+Unlike nvim, editing a recall resets browsing instead of retaining its history position, and canceled lines are not recorded: only Enter on a non-empty line adds history, verbatim before trimming and regardless of dispatch outcome (including quit, shell, unknown and whitespace-only lines).
+
+`ZZ` and `ZQ` are Normal-mode keys, not EX commands, and need no Enter. A refused `ZZ` stays in the session and warns `Prompt is not empty; use ZQ or :q! to quit anyway`, following Vim's own no-file rule (`ZZ` on a modified buffer with no file name refuses with E32 and stays). Neither alias submits the prompt or writes a file; both use Pi's shutdown lifecycle, which may wait for an active agent to become idle.
 
 Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. A paste never auto-submits: only a typed `Enter` submits an ex command. Pasting into the ex line keeps the paste up to its first newline, holds that first line, and discards the rest, so pasted content can never execute until you type Enter yourself.
 
@@ -127,7 +152,7 @@ An ex line resolves in a fixed order:
 
 1. **quit names win** — the `:q` family above, unchanged. `:q!` is a quit form, so a leading `!` here never dispatches to the shell.
 2. **`:!cmd` dispatches to the shell** — a bare leading `!` submits the line through the same seam, so `:!ls` is exactly typing `!ls` and pressing `Enter` in Pi's bash mode (`:!!cmd` excludes it from context). `:!` with no command is unsupported.
-3. **reserved names win next** — `s`, `g`, `v`, `d`, `m`, `t`, `co`, `j`, `w`, `r`, `normal`, `sort`, `&`, `>`, `<` are held for future vim ex semantics. They are never dispatched, even if a Pi command of the same name is installed; use `/w` for that. A trailing `!` is stripped for this check, so `:w!` is reserved too.
+3. **reserved names win next** — `s`, `g`, `v`, `d`, `m`, `t`, `co`, `j`, `w`, `x`, `r`, `normal`, `sort`, `&`, `>`, `<` are held for future vim ex semantics. They are never dispatched, even if a Pi command of the same name is installed; use `/w` or `/x` for Pi commands with those names. A trailing `!` is stripped for this check, so `:w!` and `:x!` are reserved too (like `:w` and `:x`).
 4. **known Pi commands dispatch** — the union of Pi's builtins and whatever `pi.getCommands()` reports at the moment you press `Enter`, so a command registered mid-session is reachable without a restart.
 5. **anything else is unsupported** — a warning notification. A typo never reaches the LLM as a message.
 
@@ -145,7 +170,10 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 
 | key | action |
 |---|---|
-| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; line moves clamp to the buffer |
+| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; counted line moves stay in the buffer |
+| `gj` / `{count}gj` | Move down by wrapped display rows, retaining the wanted screen column; never recall prompt history |
+| `gk` / `{count}gk` | Move up by wrapped display rows, retaining the wanted screen column; never recall prompt history |
+| Bare `k` on the first logical line; `j` on the last | Recall older Pi prompts from any draft; newer requires browsing and restores the saved draft past newest; [historyNavigation](#historynavigation) defaults on |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
 | `gM`; `{count}gM` | Halfway the text of the line; a count of `1`-`100` moves to that percentage of it (higher counts mean halfway, per nvim); text is measured in graphemes, not screen cells |
@@ -153,6 +181,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | `W` / `B` / `E`; `{count}W/B/E` | whitespace-delimited `WORD` motions |
 | `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |
 | `%` | Jump to the matching `()`, `[]`, or `{}` partner |
+
+`gj` / `gk` use Pi's wrapped-line map at the latest rendered editor width, including padding and the reserved cursor cell. Before the first render they treat each logical line as one row. Counts clamp at the top/bottom row, where the motion is a no-op; short rows clamp to their last grapheme (Visual can include the logical EOL), then longer rows restore the wanted column. They also extend `v` / `V` selections. Operators use exclusive characterwise ranges, with Vim's usual exception when ending at column zero of a later logical line: exclude the preceding newline, or operate linewise when starting at/before the first nonblank. `dgj`, `cgk`, and their counted forms support undo and dot-repeat; repeat uses the current width. An unavailable or invalid host map after rendering cancels the motion with a notice.
 
 `word` splits punctuation from keyword chars; `WORD` treats any non-whitespace run as one token (`foo-bar`, `path/to`). Paragraph starts are non-blank lines at BOF or after blank lines (`^\s*$`). `{` / `}` are navigation-only; brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
 
@@ -215,6 +245,7 @@ word, WORD, char-find, and linewise motions; the counts multiply and clamp at
 | `d$` / `d0` / `d^`; `{count}d$` | To EOL / BOL / first non-whitespace; a counted `$` spans down through that many line ends |
 | `d_` / `dd`; `d{count}_` / `{count}dd` | Current or counted whole lines |
 | `d{count}j` / `d{count}k` / `dG` | Linewise down/up/to EOF |
+| `dgj` / `dgk`; `d{count}gj` / `d{count}gk` | Delete through display-row motion (exclusive; operator and motion counts multiply) |
 | `df{c}` / `dt{c}` / `dF{c}` / `dT{c}`; `d{count}f{c}` | Char-find ranges |
 | `d%` | Inclusive range through the matching pair target |
 | `diw` / `daw`; `diW` / `daW` | Inner/around word or WORD |
@@ -232,6 +263,7 @@ ends like `d$`). `j`, `k`, `G`, and counted `cc` are unsupported and cancel.
 |---|---|
 | `cw` / `ce` / `cb`; `cW` / `cE` / `cB` | Change word/WORD motion ranges + Insert |
 | `c{count}w/e/b`; `c{count}W/E/B` | Change counted word/WORD motions + Insert |
+| `cgj` / `cgk`; `c{count}gj` / `c{count}gk` | Change through display-row motion + Insert (exclusive; operator and motion counts multiply) |
 | `ciw` / `caw`; `ciW` / `caW` | Change word/WORD text objects + Insert |
 | `c{count}iw` / `c{count}iW`; `c{count}aw` / `c{count}aW` | Change counted word/WORD text objects + Insert |
 | `ci"` / `ca"` (`'`, <code>`</code>) | Change inside/around quotes + Insert |
@@ -274,6 +306,7 @@ Same motion set as `d`. Writes to register, **no text mutation**.
 |---|---|
 | `yy` / `Y`; `{count}yy` / `{count}Y` | Whole line(s) + trailing `\n` |
 | `y{count}j` / `y{count}k` / `yG`; `y_` / `y{count}_` | Linewise ranges |
+| `ygj` / `ygk`; `y{count}gj` / `y{count}gk` | Yank through display-row motion (exclusive; operator and motion counts multiply) |
 | `yw` / `ye` / `yb`; `yW` / `yE` / `yB` | word/WORD motion ranges |
 | `y$` / `y0` / `y^`; `yf{c}` | EOL / BOL / first non-whitespace / char-find |
 | `y%` | Inclusive range through the matching pair target |
@@ -340,7 +373,7 @@ Typing done in an implicit insert session is repeatable too: the prompt opens in
 | `Y` | Yank every touched line |
 | `C` / `S` | Replace every touched line with one empty line and enter Insert mode |
 
-**The selection is not highlighted.** The footer reads ` VISUAL ` or ` V-LINE ` and the block cursor marks the moving end, but the span between the anchor and the cursor renders as ordinary text. Selection highlighting needs a render-layer change and is deferred.
+The selected span uses Pi's theme-aware `selectedBg` color, falling back to reverse video if the theme cannot supply it (including Pi's `system` theme without a terminal background hint). Character-wise and line-wise highlights stay aligned across wrapped rows and Unicode graphemes. The hardware cursor (the normal-mode shape, block by default) marks the moving end; with reverse-video fallback, a software-only cursor can blend into the selection. Unlike Vim's full-width line-wise background, `V` paints the text plus one end-of-line cell where space is available, not the rest of the row. Highlighting preserves both older SGR software cursors and pi-tui ≥1.3 fake-cursor markers. At startup, one detached host render checks that pi-vim can locate the cursor cell using the host's marker grammar. If that probe fails, pi-vim warns once and disables only Visual highlighting for that editor; editing, selection commands, labels and cursor shaping remain enabled. Paint is also omitted if the host's private layout API is unavailable or a row contains unterminated APC metadata.
 
 Line-wise selections put a trailing newline in the register, so a following `p` pastes whole lines. A count typed before `v` or `V` is discarded rather than sizing the selection (`2v` behaves as `v`).
 
@@ -350,7 +383,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeLabelStyle`, `modeLabelPlacement`, `modeColors`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeLabelStyle`, `modeLabelPlacement`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -360,10 +393,16 @@ Default-equivalent `settings.json`:
     "clipboardMirror": "all",
     "modeLabelStyle": "full",
     "modeLabelPlacement": "editor",
+    "historyNavigation": true,
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
     },
+    "cursorShape": {
+      "insert": "bar",
+      "normal": "block"
+    },
+    "labelPosition": "bottom-right",
     "modeColors": {
       "insert": "borderMuted",
       "normal": "borderAccent",
@@ -390,6 +429,14 @@ Default-equivalent `settings.json`:
 
 `all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`. See [register and clipboard policy](#register-and-clipboard-policy) for the full read/write contract.
 
+### historyNavigation
+
+`true` (default) exposes Pi's prompt history to bare normal-mode `k` / `j`. On the first logical line, `k` recalls an older prompt from any draft, empty or not. Pi saves the draft when browsing starts. On the last logical line, `j` recalls a newer prompt only while browsing; passing the newest restores the saved draft's text and cursor. `false` keeps both keys buffer-local. Project settings can override global in either direction; non-boolean values use the default rather than the global value and show a warning at session start when a UI is available.
+
+Edges are logical lines, not wrapped screen rows. Recalled history entries place the cursor on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Returning to the saved draft instead keeps Pi's restored cursor position. Insert-mode arrows retain Pi's own behavior.
+
+Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and buffer-local no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
+
 ### exCommand
 
 `exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [pi-command bridge](#pi-command-bridge)); `false` restores a quit-only ex line. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
@@ -398,13 +445,36 @@ Default-equivalent `settings.json`:
 
 ### Mode labels
 
-`modeLabelStyle` accepts `"full"` (default) or `"compact"` (`I` / `N` / `V` / `VL`; EX shows `:command_`). `modeLabelPlacement` accepts `"editor"` (default) or `"status"`, publishing the label under `pi-vim-mode` instead of duplicating it in the editor. Powerline can consume that key through `customItems`; it is not a dependency.
+`modeLabelStyle` accepts `"full"` (default) or `"compact"` (`I` / `N` / `V` / `VL`; EX shows `:command_`). `modeLabelPlacement` accepts `"editor"` (default) or `"status"`, publishing the label under `pi-vim-mode` instead of duplicating it in the editor. Powerline can consume that key through `customItems`; it is not a dependency. `labelPosition` controls the editor label only; status placement takes precedence when both are set.
 
 Status labels retain pending-command/count feedback, balanced inner spaces, existing color/`labelSync` policies, and grapheme-safe fitting to at most `min(width, 32)` cells. Both settings are read at session start; invalid project values override global values with the default. These are intentional Pi UI choices, not nvim editing changes.
 
+### labelPosition
+
+`piVim.labelPosition` places the existing mode label without changing input behavior:
+
+| value | placement |
+|---|---|
+| `bottom-right` (default) | right end of the editor's last rendered row, unchanged from previous releases |
+| `top-left` | left end of the editor's top border, not the application header |
+
+```json
+{ "piVim": { "labelPosition": "top-left" } }
+```
+
+```text
+ NORMAL ─────────────────────────────────────
+█
+─────────────────────────────────────────────
+```
+
+Both positions use the same mode colors, `labelSync`, and pending-command feedback (for example, ` NORMAL d_ `). Narrow widths shorten the label without splitting graphemes; moving it also preserves the trailing host row's width cap. On the top border, hidden-line indicators take priority: the label uses the left border cells if it fits, otherwise the larger free edge (after the indicator when that has more room), shrinking or disappearing if necessary. Text rows, cursor placement, and visual-selection highlighting stay in place.
+
+Project settings replace the global value as a whole. Invalid values warn once at session start and fall back to `bottom-right`, not the global value. An absent project setting inherits global; absence at both levels keeps the default. This is an intentional non-Vim presentation setting, not Vim statusline emulation.
+
 ### borderSync and labelSync
 
-`borderSync` and `labelSync` set a per-mode paint policy for two surfaces: `borderSync` for Pi's input border, `labelSync` for the footer mode label. Each maps the mode keys `insert`, `normal`, `visual`, `ex` to one of three values:
+`borderSync` and `labelSync` set a per-mode paint policy for two surfaces: `borderSync` for Pi's input border, `labelSync` for the mode label at either position. Each maps the mode keys `insert`, `normal`, `visual`, `ex` to one of three values:
 
 | value | effect |
 |---|---|
@@ -439,11 +509,34 @@ Give insert a solid mode color, let normal defer to thinking, and make both mode
 
 `syncBorderColorWithMode` is deprecated but still accepted: `false` (or absent) is the defaults; `true` sets `borderSync` to `mode` for every mode; the never-released `"inherit"` sets both `borderSync` and `labelSync` to `thinking` for every mode. A present `borderSync` or `labelSync` wins over it for that surface.
 
+### cursorShape
+
+`piVim.cursorShape` controls the hardware cursor on terminals supporting DECSCUSR. `insert` defaults to `bar`; `normal` defaults to `block` and also covers Visual, V-Line, and the EX mini-mode. The unprefixed shapes blink; the `steady-` variants do not:
+
+| value | terminal sequence |
+|---|---|
+| `block` | `ESC [ 1 SP q` (`\x1b[1 q`) |
+| `underline` | `ESC [ 3 SP q` (`\x1b[3 q`) |
+| `bar` | `ESC [ 5 SP q` (`\x1b[5 q`) |
+| `steady-block` | `ESC [ 2 SP q` (`\x1b[2 q`) |
+| `steady-underline` | `ESC [ 4 SP q` (`\x1b[4 q`) |
+| `steady-bar` | `ESC [ 6 SP q` (`\x1b[6 q`) |
+
+For a block cursor in Insert as well as Normal:
+
+```json
+{ "piVim": { "cursorShape": { "insert": "block" } } }
+```
+
+Project settings replace the whole map, not individual global keys. Missing keys use their defaults; invalid values warn once at session start and default only the affected key. A malformed map defaults both keys. This is an intentional non-Vim terminal setting, not a `guicursor` implementation: actual glyphs and blinking depend on the terminal, and unsupported hardware-cursor APIs keep the software-cursor fallback.
+
+Editor reconstruction releases the previous cursor ownership before taking it again. Reload or legacy shutdown restores the original hardware-cursor visibility when the host exposes it; quitting resets the shape and leaves the shell cursor visible.
+
 ### modeColors
 
 `piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
 
-`visual` colors both VISUAL and V-LINE (the footer label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
+`visual` colors both VISUAL and V-LINE (the mode label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
 
 Usual/safest tokens: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 
@@ -474,11 +567,14 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 - `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim's internal shadow.
 - `piVim.clipboardMirror = "never"` disables write mirroring while keeping internal register writes synchronous.
 - Rapid mirrored writes coalesce: only the latest pending value is guaranteed to be mirrored.
-- `p` / `P` read the OS clipboard first when no local write was skipped by policy, falling back to the shadow on read failure/timeout.
+- `p` / `P` read the OS clipboard first when no local write was skipped by policy, falling back to the shadow on read failure/timeout. Reads share one monotonic 750 ms timeout budget across fallback commands, with at most 1 MiB of output; an empty successful read stays empty rather than pasting stale shadow text.
 - If policy skipped the last local write, `p` / `P` use the shadow so delete/yank → put works without touching the OS clipboard.
 - While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
 - If the last mirror write failed or was skipped by the mirror circuit breaker, `p` / `P` use the non-empty shadow until a mirror write lands again, so put never trusts a stale OS clipboard.
-- Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
+- Node hosts read through Pi's clipboard module when present and platform commands otherwise; availability is checked once per process from Pi's module location.
+- Ordinary Node installs keep Pi's write backend in a helper process, including Pi's terminal OSC52 fallback. Standalone Bun/Node SEA binaries instead spawn platform commands asynchronously for writes: `pbcopy`, PowerShell, `termux-clipboard-set`, `wl-copy` on Wayland, or `xclip` / `xsel` on X11. Clipboard text goes through stdin, never shell interpolation; command stdout/stderr are discarded. Standalone writes do not emit OSC52; unavailable or failed commands fall back to the internal shadow. Platform-command Linux reads use the same display gating as writes: `wl-paste` only with `WAYLAND_DISPLAY`, `xclip` / `xsel` only with `DISPLAY`, and Termux first when available. With no candidates, reads return immediately without spawning and puts use the shadow.
+- Platform-command reads use `pbpaste`, PowerShell, `termux-clipboard-get`, `wl-paste`, `xclip`, or `xsel` as available. PowerShell reads and writes explicitly use UTF-8 to preserve non-ASCII clipboard text.
+- Write attempts share the existing 5500 ms timeout, kill the active child on abort, and wait for it to close before draining the latest pending write. Three consecutive environment failures disable mirroring; backend failures and timeouts do not. On Wayland external state may lag while the shadow stays authoritative for immediate puts.
 
 ---
 
@@ -486,19 +582,25 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 
 | area | this extension | full Vim |
 |---|---|---|
+| Prompt history | Bare normal `k` / `j` expose Pi history at logical edges from any draft; past newest restores the saved text and cursor; disable with `piVim.historyNavigation: false` | No host prompt history; `j` / `k` only move in the buffer |
 | Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
+| App shortcuts / unsupported controls | Pi app actions work in all modes except EX's `<C-p>` / `<C-n>` and cursor-binding conflicts; unsupported editing controls are Insert-only; EX retains its line except on interrupt/clear | Intentional divergence: Vim may assign commands to those controls; no Pi app actions |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
-| Visual selection rendering | No highlight; only the footer label and the block cursor mark the selection | Selection is highlighted |
+| Visual selection rendering | Character-wise and line-wise selections use Pi's theme-aware highlight; no rectangular `<C-v>` selection | Selection is highlighted |
 | Visual line-wise delete | Leaves the cursor at column 0, like `dd` does today | Preserves the cursor column |
 | Visual dot-repeat | A visual edit clears the repeatable command; `.` afterwards does nothing | `.` repeats the operator over an equally sized region |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
+| `ZZ` / `ZQ` | Normal-only: `ZZ` uses the `:q` prompt guard, following Vim's own no-file rule (a modified buffer with no file name refuses with E32 and stays), while `ZQ` forces quit | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both are Normal-mode commands |
+| Ex history | `<C-p>` / `<C-n>` recall up to 100 distinct submitted lines; edits reset browsing; no persistence or Up/Down history; canceled lines excluded | Vim retains the browse position after edits, records canceled lines and supports prefix-matching Up/Down |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
-| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+| Display rows | `gj` / `gk` follow Pi's word-aware wrapping and host-expanded tabs, not Vim's hard-wrap/tabstop layout; no wrapping before first render; resizing resets the wanted row column | Vim's configured window wrapping and tabstop rules |
+| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, `gj/gk`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+| Cursor aliases / inherited motion gaps | Host cursor bindings reuse `hjkl`: horizontal operator suffixes `h/l` remain unsupported; `dk` lands at column zero, `yk` keeps the starting cursor, and dual-count vertical deletes retain pi-vim's line-count rule. Horizontal/short-line motions can reach the EOL space. | Full operator matrix, last-character Normal clamp, Vim cursor placement and count multiplication |
 
 ---
 

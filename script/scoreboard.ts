@@ -19,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
+import { findPackageRoot } from "./consumer-workspace.js";
 import { extractPackResult } from "./pack-json.js";
 
 const REPO_ROOT = process.cwd();
@@ -107,6 +108,18 @@ const RESPONSIVENESS_LABELS: Record<string, MetricLabel> = {
   "3fX": { label: "`3fX` across a 600-column line", kind: "command" },
   "200j": { label: "`200j` down a 320-line buffer", kind: "command" },
   "50p": { label: "`50p` char-wise put of a yanked word", kind: "command" },
+  p_chars_1000: {
+    label: "`p` char-wise put of 1,000 ASCII characters",
+    kind: "command",
+  },
+  p_chars_4000: {
+    label: "`p` char-wise put of 4,000 ASCII characters",
+    kind: "command",
+  },
+  p_chars_16000: {
+    label: "`p` char-wise put of 16,000 ASCII characters",
+    kind: "command",
+  },
   w_words_20: { label: "`w` on a 20-word line", kind: "keystroke" },
   w_words_50: { label: "`w` on a 50-word line", kind: "keystroke" },
   w_words_100: { label: "`w` on a 100-word line", kind: "keystroke" },
@@ -120,6 +133,17 @@ const RESPONSIVENESS_LABELS: Record<string, MetricLabel> = {
   dw_words_400: { label: "`dw` on a 400-word line", kind: "command" },
   yw_words_400: { label: "`yw` on a 400-word line", kind: "command" },
 };
+
+for (const size of [4_096, 16_384]) {
+  for (const width of [20, 80]) {
+    for (const command of ["gj", "9999gj"]) {
+      RESPONSIVENESS_LABELS[`${command}_chars_${size}_width_${width}`] = {
+        label: `\`${command}\` on ${size.toLocaleString("en-US")} ASCII characters, ${width} text columns`,
+        kind: "command",
+      };
+    }
+  }
+}
 
 const WRAP_WIDTH = 78;
 
@@ -611,8 +635,19 @@ function renderPackSection(
   ];
 }
 
+function readHostVersion(name: string): string {
+  const manifest: unknown = JSON.parse(
+    readFileSync(path.join(findPackageRoot(name), "package.json"), "utf8"),
+  );
+  if (!isObject(manifest) || typeof manifest.version !== "string") {
+    fail(`missing installed host version for ${name}`);
+  }
+  return manifest.version;
+}
+
 function renderDocument(data: {
   date: string;
+  host: string;
   nvimVersion: string;
   cpu: string;
   platform: string;
@@ -640,6 +675,7 @@ function renderDocument(data: {
     "| --- | --- |",
     `| measured | ${data.date} |`,
     `| node | ${data.perf.nodeVersion} |`,
+    `| pi host | ${data.host} |`,
     `| nvim | ${data.nvimVersion} |`,
     `| platform | ${data.platform} |`,
     `| cpu | ${data.cpu} |`,
@@ -704,6 +740,7 @@ function main(): void {
 
   const document = renderDocument({
     date: new Date().toISOString().slice(0, 10),
+    host: `coding-agent ${readHostVersion("@earendil-works/pi-coding-agent")} / pi-tui ${readHostVersion("@earendil-works/pi-tui")}`,
     nvimVersion,
     cpu: cpus()[0]?.model ?? "unknown",
     platform: `${process.platform}-${process.arch}`,

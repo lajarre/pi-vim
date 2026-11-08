@@ -1,9 +1,28 @@
+import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { getLineGraphemes } from "./motions.js";
 
 // Keyboard-input classification predicates. Pure functions over the raw
 // input chunk a terminal delivers to the editor — no editor state. Shared
 // by the EX mini-mode, insert, and normal-mode dispatch paths.
+
+// Snapshot the public editor-factory manager, not the TUI singleton (which can
+// be a different package instance). /reload installs a new editor and snapshot.
+export function createCursorBindingResolver(
+  keybindings: Pick<KeybindingsManager, "getKeys">,
+): (data: string) => "h" | "j" | "k" | "l" | undefined {
+  const bindings = (
+    [
+      ["tui.editor.cursorUp", "k"],
+      ["tui.editor.cursorDown", "j"],
+      ["tui.editor.cursorRight", "l"],
+      ["tui.editor.cursorLeft", "h"],
+    ] as const
+  ).flatMap(([action, motion]) =>
+    keybindings.getKeys(action).map((key) => ({ key, motion })),
+  );
+  return (data) => bindings.find(({ key }) => matchesKey(data, key))?.motion;
+}
 
 export function isEscapeLikeInput(data: string): boolean {
   return matchesKey(data, "escape") || matchesKey(data, "ctrl+[");

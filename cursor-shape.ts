@@ -4,12 +4,19 @@ const SOFTWARE_CURSOR_START = "\x1b[7m";
 const SOFTWARE_CURSOR_RESETS = ["\x1b[0m", "\x1b[27m"] as const;
 export const INSERT_CURSOR_SHAPE = "\x1b[5 q";
 export const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
+export const CURSOR_SHAPE_SEQUENCES = {
+  block: BLOCK_CURSOR_SHAPE,
+  underline: "\x1b[3 q",
+  bar: INSERT_CURSOR_SHAPE,
+  "steady-block": "\x1b[2 q",
+  "steady-underline": "\x1b[4 q",
+  "steady-bar": "\x1b[6 q",
+} as const;
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
 const SHOW_HARDWARE_CURSOR = "\x1b[?25h";
 
 export type CursorShapeSequence =
-  | typeof INSERT_CURSOR_SHAPE
-  | typeof BLOCK_CURSOR_SHAPE
+  | (typeof CURSOR_SHAPE_SEQUENCES)[keyof typeof CURSOR_SHAPE_SEQUENCES]
   | typeof RESET_CURSOR_SHAPE
   | typeof SHOW_HARDWARE_CURSOR;
 
@@ -107,6 +114,10 @@ export function stripSoftwareCursorAfterMarker(line: string): string {
   if (markerIndex === -1) return line;
 
   const searchStart = markerIndex + CURSOR_MARKER.length;
+  // pi-tui 0.78/1.0 use SGR-7 after pi:c; >=1.3 wrap the cell in
+  // pi:fc / pi:/fc APCs instead. The compositor resolves those itself.
+  // Do not mistake selection reverse-video later in that row for the cursor.
+  if (line.startsWith("\x1b_pi:fc\x07", searchStart)) return line;
   const cursorStart = line.indexOf(SOFTWARE_CURSOR_START, searchStart);
   if (cursorStart === -1) return line;
 

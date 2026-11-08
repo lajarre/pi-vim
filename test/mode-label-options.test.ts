@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { stripVTControlCharacters } from "node:util";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import installPiVim, { ModalEditor } from "../index.js";
 import {
@@ -45,6 +46,7 @@ for (const style of ["full", "compact"] as const) {
         ["\x1bV", names[3], "visual-line"],
         ["\x1b:tree", names[4], "normal"],
         ["\x1b2d3f", `${names[1]} 2d3f_`, "normal"],
+        ["\x1bZ", `${names[1]} Z_`, "normal"],
       ] as const) {
         sendKeys(editor, [...keys]);
         const label = paint(` ${name} `);
@@ -96,7 +98,10 @@ it("publishes through the factory, cleans up and ignores stale editors", async (
       cwd: process.cwd(),
       hasUI: true,
       ui: {
-        theme: stubTheme,
+        theme: {
+          ...stubTheme,
+          bg: (_token: string, text: string) => `\x1b[44m${text}\x1b[49m`,
+        },
         notify() {},
         setEditorComponent(
           factory: (
@@ -127,6 +132,14 @@ it("publishes through the factory, cleans up and ignores stale editors", async (
     second.render(4);
     assert.equal(labels.length, count);
     const current = make();
+    current.setText("hello");
+    sendKeys(current, ["\x1b", "0", "v", "l"]);
+    assert.ok(current.render(80)[1]?.includes("\x1b[44m"));
+    ctx.ui.theme = {
+      ...ctx.ui.theme,
+      bg: (_token: string, text: string) => `\x1b[45m${text}\x1b[49m`,
+    };
+    assert.ok(current.render(80)[1]?.includes("\x1b[45m"));
     await pi.emit("session_shutdown", { reason: "reload" });
     assert.equal(labels.at(-1), undefined);
     count = labels.length;
@@ -171,5 +184,31 @@ for (const [key, read, fallback, enabled] of [
       assert.equal(read({ piVim }, {}), fallback);
       assert.equal(read(setting(enabled), { piVim }), fallback);
     }
+  });
+}
+
+for (const placement of ["editor", "status"] as const) {
+  it(`compact ${placement} labels preserve top-border placement and Visual paint`, () => {
+    const labels: string[] = [];
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      modeLabelStyle: "compact",
+      modeLabelPlacement: placement,
+      labelPosition: "top-left",
+      onModeLabel: (label) => labels.push(label),
+      selectionColorizer: (s) => `\x1b[44m${s}\x1b[49m`,
+    });
+    editor.setText("hello");
+    sendKeys(editor, ["\x1b", "0", "v", "l"]);
+    const rows = editor.render(80);
+    assert.ok(rows[1]?.includes("\x1b[44m"));
+    assert.equal(
+      stripVTControlCharacters(rows[0] ?? "").startsWith(" V "),
+      placement === "editor",
+    );
+    assert.equal(rows.at(-1)?.includes(" V "), false);
+    assert.equal(labels.at(-1), placement === "status" ? " V " : undefined);
+    assert.equal(editor.getMode(), "visual");
+    assert.equal(editor.getText(), "hello");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
   });
 }

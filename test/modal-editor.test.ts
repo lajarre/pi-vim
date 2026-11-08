@@ -16,6 +16,9 @@ import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import {
   buildClipboardReadHelperSource,
   buildClipboardWriteHelperSource,
+  canSpawnJavaScriptHelper,
+  getClipboardReadCommands,
+  writeClipboardInChildProcess,
 } from "../clipboard-mirror.js";
 import installPiVim, {
   ModalEditor,
@@ -38,8 +41,11 @@ import {
   createEditorWithSpy,
   createExtensionApiHarness,
   createMultiLineEditor,
+  hostFakeCursor,
+  hostUsesFakeCursor,
   sendKeys,
   setInternalCursor,
+  stripHostCursorMarkers,
   stubKeybindings,
   stubTheme,
   stubTui,
@@ -230,7 +236,7 @@ function findCursorMarkerLine(lines: string[]): string {
 }
 
 function removeCursorMarker(line: string): string {
-  return line.replace(CURSOR_MARKER, "");
+  return stripHostCursorMarkers(line);
 }
 
 function assertNoCursorShapeSequences(lines: string[]): void {
@@ -1679,7 +1685,7 @@ describe("ex mini-mode", () => {
     assert.equal(session.editor.getRegister(), "h");
   });
 
-  it("non-printable input cancels ex mode and is reprocessed", () => {
+  it("unsupported control input preserves EX and does not replay as Normal", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, ["x", "u", ":", "q", "\x12"]);
@@ -1687,8 +1693,12 @@ describe("ex mini-mode", () => {
     assert.equal(session.quitCalls, 0);
     assert.deepEqual(session.notifications, []);
     assert.equal(session.editor.getMode(), "normal");
-    assert.equal(session.editor.getText(), "ello");
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
     assert.equal(session.editor.getRegister(), "h");
+    assert.match(session.editor.render(80).at(-1) ?? "", / EX :q_ /);
+    sendKeys(session.editor, ["\x1b", "\x12"]);
+    assert.equal(session.editor.getText(), "ello");
   });
 
   it("unsupported ex commands do not quit", () => {
@@ -1803,7 +1813,20 @@ describe("ex pi-command bridge", () => {
   });
 
   it("reserves future vim ex names instead of dispatching them", () => {
-    for (const name of ["s", "g", "v", "d", "m", "t", "co", "j", "w", "r"]) {
+    // Intentional divergence: these names notify rather than execute Vim ex.
+    for (const name of [
+      "s",
+      "g",
+      "v",
+      "d",
+      "m",
+      "t",
+      "co",
+      "j",
+      "w",
+      "x",
+      "r",
+    ]) {
       const session = createBridgeSession("", [name]);
 
       runEx(session.editor, name);
@@ -1829,12 +1852,18 @@ describe("ex pi-command bridge", () => {
   });
 
   it("reserves a forced vim ex name", () => {
-    const session = createBridgeSession("", ["w"]);
-
-    runEx(session.editor, "w!");
-
-    assert.deepEqual(session.dispatched, []);
-    assert.deepEqual(session.notifications, ["Reserved ex command: :w!"]);
+    for (const name of ["w", "x"]) {
+      const session = createBridgeSession("draft", [name]);
+      const cursor = session.editor.getCursor();
+      runEx(session.editor, `${name}!`);
+      assert.deepEqual(session.dispatched, []);
+      assert.deepEqual(session.notifications, [
+        `Reserved ex command: :${name}!`,
+      ]);
+      assert.equal(session.editor.getText(), "draft");
+      assert.deepEqual(session.editor.getCursor(), cursor);
+      assert.equal(session.editor.getMode(), "normal");
+    }
   });
 
   it("reserves a name even when a pi command of that name exists", () => {
@@ -3317,6 +3346,50 @@ describe("cursor shape lifecycle", () => {
     assert.deepEqual(operations, ["set:true", `write:${RESET_CURSOR_SHAPE}`]);
   });
 
+  for (const previousOwner of [false, true]) {
+    it(`leaves the host cursor alone in degraded mode (previous Vim owner=${previousOwner})`, async (t) => {
+      t.after(setPiVimSettingsReaderForTests(() => ({})));
+      const extension = await installExtensionWithEditorFactory();
+      const tui = createCursorShapeTui();
+      if (previousOwner) {
+        const previous = extension.editorFactory(
+          tui,
+          stubTheme,
+          stubKeybindings,
+        );
+        focusEditor(previous);
+        previous.render(80);
+      }
+      assert.equal(Object.hasOwn(ModalEditor.prototype, "undo"), false);
+      Object.defineProperty(ModalEditor.prototype, "undo", {
+        value: undefined,
+        configurable: true,
+      });
+      t.after(() => {
+        Reflect.deleteProperty(ModalEditor.prototype, "undo");
+      });
+
+      const editor = extension.editorFactory(tui, stubTheme, stubKeybindings);
+      focusEditor(editor);
+      // Input-first detection must also bypass Vim without first rendering.
+      editor.handleInput("abc");
+      assert.equal(editor.getText(), "abc");
+      assert.doesNotMatch(editor.render(80).join("\n"), /INSERT|NORMAL/);
+      assert.equal(extension.notificationCalls, 1);
+      assert.deepEqual(extension.eventBusEmissions(), []);
+      const expectedWrites = previousOwner
+        ? [INSERT_CURSOR_SHAPE, RESET_CURSOR_SHAPE]
+        : [];
+      assert.deepEqual(tui.terminalWrites, expectedWrites);
+      assert.deepEqual(
+        tui.hardwareCursorValues,
+        previousOwner ? [true, false] : [],
+      );
+      await extension.emitShutdown();
+      assert.deepEqual(tui.terminalWrites, expectedWrites);
+    });
+  }
+
   it("skips startup enablement and cleanup cursor writes on unsupported runtimes", async () => {
     const extension = await installExtensionWithEditorFactory();
     const tui = createCursorShapeTui({ setShowHardwareCursor: false });
@@ -3429,7 +3502,7 @@ describe("cursor shape rendering", () => {
     const markerLine = findCursorMarkerLine(lines);
 
     assert.deepEqual(tui.terminalWrites, []);
-    assert.equal(markerLine.includes(SOFTWARE_CURSOR_SPACE), true);
+    assert.equal(markerLine.includes(hostFakeCursor(" ")), true);
     assertNoCursorShapeSequences(lines);
   });
 
@@ -3470,7 +3543,7 @@ describe("cursor shape rendering", () => {
     assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
   });
 
-  it("keeps the software cursor when focused render has no cursor marker", () => {
+  it("follows the host cursor marker policy during autocomplete", () => {
     const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
     const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
     const internal = editor as unknown as { autocompleteState?: string | null };
@@ -3479,15 +3552,19 @@ describe("cursor shape rendering", () => {
 
     const lines = editor.render(20);
 
+    // 0.78 suppresses the marker during autocomplete; 1.4 keeps it for IME.
     assert.equal(
       lines.some((line) => line.includes(CURSOR_MARKER)),
-      false,
+      hostUsesFakeCursor,
     );
     assert.equal(
-      lines.some((line) => line.includes(SOFTWARE_CURSOR_SPACE)),
+      lines.some((line) => line.includes(hostFakeCursor(" "))),
       true,
     );
-    assert.deepEqual(tui.terminalWrites, []);
+    assert.deepEqual(
+      tui.terminalWrites,
+      hostUsesFakeCursor ? [INSERT_CURSOR_SHAPE] : [],
+    );
     assertNoCursorShapeSequences(lines);
   });
 });
@@ -3579,6 +3656,78 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.signal, null);
     assert.equal(result.stdout, "");
+  });
+
+  it("only reuses process.execPath for an ordinary Node runtime", () => {
+    assert.equal(
+      canSpawnJavaScriptHelper({}, () => ({ isSea: () => false })),
+      true,
+    );
+    assert.equal(
+      canSpawnJavaScriptHelper({ bun: "1.3.14" }, () => undefined),
+      false,
+    );
+    assert.equal(
+      canSpawnJavaScriptHelper({}, () => ({ isSea: () => true })),
+      false,
+    );
+  });
+
+  it("selects standalone clipboard readers by platform", () => {
+    assert.deepEqual(getClipboardReadCommands("darwin", {}), [
+      { command: "/usr/bin/pbpaste", args: [] },
+    ]);
+    assert.deepEqual(
+      getClipboardReadCommands("linux", { TERMUX_VERSION: "1" }),
+      [{ command: "termux-clipboard-get", args: [] }],
+    );
+    assert.equal(
+      getClipboardReadCommands("win32", {})[0]?.command,
+      "powershell.exe",
+    );
+  });
+
+  it("standalone unavailable commands preserve best-effort editing and the unnamed register", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    editor.setClipboardFn((text, signal) =>
+      writeClipboardInChildProcess(
+        text,
+        signal ?? new AbortController().signal,
+        {
+          canSpawnHelper: () => false,
+          platform: "linux",
+          env: {},
+          spawn: () => assert.fail("headless environment has no commands"),
+        },
+      ),
+    );
+    sendKeys(editor, ["d", "w"]);
+    await nextImmediate();
+    assert.equal(editor.getText(), "bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    editor.setClipboardReadFn(() =>
+      assert.fail("failed mirror must use shadow"),
+    );
+    sendKeys(editor, ["P"]);
+    assert.equal(editor.getText(), "foo bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "bar");
+  });
+
+  it("standalone clipboard writes reject an already-aborted signal without spawning", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("copy cancelled"));
+    await assert.rejects(
+      writeClipboardInChildProcess("payload", controller.signal, {
+        canSpawnHelper: () => false,
+        spawn: () => assert.fail("aborted writes never spawn"),
+      }),
+      /copy cancelled/,
+    );
   });
 
   it("active clipboard write receives no abort event when superseded", async () => {
@@ -8225,8 +8374,8 @@ describe("undo / redo — u / ctrl+r", () => {
     assert.equal(editor.getRegister(), "keep");
   });
 
-  it("ctrl+k still cancels pending delete and clears stale redo history", () => {
-    const { editor } = createEditorWithSpy("abcd");
+  it("ctrl+k consumes pending delete without a host edit or losing redo", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("abcd");
 
     sendKeys(editor, ["x", "u"]);
     assert.equal(editor.getText(), "abcd");
@@ -8234,14 +8383,16 @@ describe("undo / redo — u / ctrl+r", () => {
 
     sendKeys(editor, ["d", "\x0b"]);
 
-    assert.equal(editor.getText(), "");
+    assert.equal(editor.getText(), "abcd");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
     assert.equal(editor.getRegister(), "a");
+    assert.equal(editor.getMode(), "normal");
 
     sendKeys(editor, ["\x12"]);
-    assert.equal(editor.getText(), "");
+    assert.equal(editor.getText(), "bcd");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
     assert.equal(editor.getRegister(), "a");
+    assert.deepEqual(clipboardWrites, ["a"]);
   });
 
   it("redo does not stomp a newer unnamed register value", () => {
@@ -9188,15 +9339,18 @@ describe("operator cancellation", () => {
     assert.equal(editor.getRegister(), "");
   });
 
-  it("non-printable invalid motion is passed through after cancel", () => {
+  it("unsupported motion cancels and is consumed (intentional host policy)", () => {
     const { editor } = createEditorWithSpy("abc");
 
-    // d + RightArrow should cancel d and still move right.
-    // Then x should delete 'b' (not 'a').
-    sendKeys(editor, ["d", "\x1b[C", "x"]);
+    // Normal owns unsupported keys, including arrows; cancelling d cannot
+    // dispatch a host motion or shortcut. The following x deletes 'a'.
+    sendKeys(editor, ["d", "\x1b[C"]);
+    assert.equal(editor.getText(), "abc");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    sendKeys(editor, ["x"]);
 
-    assert.equal(editor.getText(), "ac");
-    assert.equal(editor.getRegister(), "b");
+    assert.equal(editor.getText(), "bc");
+    assert.equal(editor.getRegister(), "a");
   });
 });
 
@@ -9639,6 +9793,7 @@ describe("visual mode — entering and leaving", () => {
     // manager claims the key as app.interrupt, so the stub must say so for
     // this assertion to mean anything.
     const interruptKeybindings = {
+      getKeys: () => [],
       matches: (data: string, action: string) =>
         data === "\x1b" && action === "app.interrupt",
     } as unknown as ConstructorParameters<typeof ModalEditor>[2];
@@ -9687,6 +9842,59 @@ describe("visual mode — footer label", () => {
     assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL 2_ "));
     sendKeys(editor, ["l", "f"]);
     assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL f_ "));
+  });
+});
+
+describe("visual mode — selection rendering", () => {
+  function highlightedEditor(text: string): ModalEditor {
+    const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
+    const editor = new ModalEditor(tui, stubTheme, stubKeybindings, {
+      selectionColorizer: (selected) => `<selected>${selected}</selected>`,
+    });
+    for (const char of text) editor.handleInput(char);
+    editor.handleInput("\x1b");
+    setInternalCursor(editor, 0, 0);
+    focusEditor(editor);
+    return editor;
+  }
+
+  it("highlights the inclusive character-wise selection", () => {
+    const editor = highlightedEditor("hello");
+    sendKeys(editor, ["v", "l", "l"]);
+
+    const line = removeCursorMarker(findCursorMarkerLine(editor.render(20)));
+
+    assert.ok(
+      line.startsWith("<selected>he</selected><selected>l</selected>lo"),
+    );
+  });
+
+  it("highlights whole lines and their EOL cells", () => {
+    const editor = highlightedEditor("first\nsecond");
+    sendKeys(editor, ["V", "j"]);
+
+    const lines = editor.render(20).map(removeCursorMarker);
+
+    assert.ok(lines[1]?.startsWith("<selected>first </selected>"));
+    assert.ok(
+      lines[2]
+        ?.replaceAll("</selected><selected>", "")
+        .startsWith("<selected>second </selected>"),
+    );
+  });
+
+  it("keeps line-wise highlighting aligned across wrapped rows", () => {
+    const editor = highlightedEditor("alpha beta");
+    sendKeys(editor, ["V"]);
+
+    const lines = editor.render(8).map(removeCursorMarker);
+
+    assert.ok(
+      lines[1]
+        ?.replaceAll("</selected><selected>", "")
+        .startsWith("<selected>alpha </selected>"),
+    );
+    assert.ok(lines[2]?.startsWith("<selected>beta </selected>"));
   });
 });
 

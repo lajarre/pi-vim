@@ -1,3 +1,10 @@
+/**
+ * The oracle defaults to nvim_feedkeys(..., 'x'): mapped input. Its undo
+ * grouping can differ from typed input around dot-repeat (2P.u can retain
+ * four copies instead of two). Opt into 'xt' with typedInput for checkpoints
+ * that must observe each typed undo boundary; do not silently change all
+ * existing cases. Always compare text, cursor, mode and the unnamed register.
+ */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { ModalEditor } from "../index.js";
@@ -24,6 +31,12 @@ export type NvimParityCase = {
   name: string;
   initial: NvimParityInitialState;
   keys: string[];
+  /** Preserve typed-key undo boundaries for scenarios that include dot. */
+  typedInput?: boolean;
+  /** Exercise paint between inputs; the oracle still compares semantic state. */
+  renderWidths?: readonly number[];
+  /** Fixed text width on both hosts, with nvim wrap enabled (no gutters). */
+  displayWidth?: number;
 };
 
 export type NvimParitySnapshot = {
@@ -73,16 +86,20 @@ const NVIM_MODE_MAP: Record<string, NvimParityMode> = {
 
 const NVIM_DRIVER_LUA = [
   "local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
+  "if input.displayWidth then vim.o.columns = input.displayWidth; vim.wo.wrap = true; vim.wo.linebreak = false; vim.wo.number = false; vim.wo.relativenumber = false; vim.wo.signcolumn = 'no'; vim.wo.foldcolumn = '0'; vim.wo.showbreak = ''; vim.wo.breakindent = false; assert(vim.api.nvim_win_get_width(0) == input.displayWidth, 'fixture window width mismatch') end",
   "local lines = vim.split(input.text, '\\n', { plain = true })",
   "if #lines == 0 then lines = { '' } end",
+  "local undo_levels = vim.bo.undolevels",
+  "vim.bo.undolevels = -1",
   "vim.api.nvim_buf_set_lines(0, 0, -1, true, lines)",
+  "vim.bo.undolevels = undo_levels",
   "vim.fn.setreg('\"', input.register or '')",
   "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
   "if input.mode == 'insert' then vim.cmd('startinsert') else vim.cmd('stopinsert') end",
   "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
   "local keys = table.concat(input.keys, '')",
   "local term = vim.api.nvim_replace_termcodes(keys, true, false, true)",
-  "vim.api.nvim_feedkeys(term, 'x', false)",
+  "vim.api.nvim_feedkeys(term, input.typedInput and 'xt' or 'x', false)",
   "local out_lines = vim.api.nvim_buf_get_lines(0, 0, -1, true)",
   "local cursor = vim.api.nvim_win_get_cursor(0)",
   "local snapshot = { text = table.concat(out_lines, '\\n'), cursor = { line = cursor[1] - 1, col = cursor[2] }, mode = vim.api.nvim_get_mode().mode, register = vim.fn.getreg('\"') }",
@@ -157,8 +174,11 @@ function takePiSnapshot(editor: ModalEditor): NvimParitySnapshot {
   };
 }
 
-export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
-  const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+export function runPiParityCase(
+  testCase: NvimParityCase,
+  keybindings: ConstructorParameters<typeof ModalEditor>[2] = stubKeybindings,
+): NvimParitySnapshot {
+  const editor = new ModalEditor(stubTui, stubTheme, keybindings);
   editor.setClipboardFn(() => undefined);
   editor.setClipboardReadFn(() => null);
   editor.setText(testCase.initial.text);
@@ -169,9 +189,19 @@ export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
   }
 
   setPiCursor(editor, testCase.initial.cursor);
+  // Match nvim's undo-disabled fixture load: exhausted undo must stop at the
+  // initial text, not undo the harness's programmatic setText back to empty.
+  const { undoStack } = editor as unknown as { undoStack: { clear(): void } };
+  undoStack.clear();
 
+  // With no padding Pi reserves one cursor cell outside its layout width.
+  if (testCase.displayWidth !== undefined)
+    editor.render(testCase.displayWidth + 1);
   for (const key of testCase.keys) {
     editor.handleInput(key);
+    if (testCase.displayWidth !== undefined)
+      editor.render(testCase.displayWidth + 1);
+    for (const width of testCase.renderWidths ?? []) editor.render(width);
   }
 
   return takePiSnapshot(editor);
@@ -182,10 +212,19 @@ export async function runNvimParityCase(
 ): Promise<NvimParitySnapshot> {
   const scenario = {
     text: testCase.initial.text,
-    cursor: testCase.initial.cursor,
+    cursor: {
+      line: testCase.initial.cursor.line,
+      col: Buffer.byteLength(
+        (
+          testCase.initial.text.split("\n")[testCase.initial.cursor.line] ?? ""
+        ).slice(0, testCase.initial.cursor.col),
+      ),
+    },
     mode: testCase.initial.mode ?? "normal",
     register: testCase.initial.register ?? "",
     keys: testCase.keys.map(toNvimKey),
+    typedInput: testCase.typedInput ?? false,
+    displayWidth: testCase.displayWidth,
   };
 
   const child = spawn(
@@ -238,7 +277,7 @@ export async function runNvimParityCase(
   const combinedOutput = `${stdout}\n${stderr}`;
   const resultLine = combinedOutput
     .split(/\r?\n/)
-    .find((line) => line.startsWith(NVIM_RESULT_PREFIX));
+    .find((line) => line.includes(NVIM_RESULT_PREFIX));
 
   if (!resultLine) {
     throw new Error(
@@ -247,13 +286,20 @@ export async function runNvimParityCase(
   }
 
   const parsed = JSON.parse(
-    resultLine.slice(NVIM_RESULT_PREFIX.length),
+    resultLine.slice(
+      resultLine.indexOf(NVIM_RESULT_PREFIX) + NVIM_RESULT_PREFIX.length,
+    ),
   ) as unknown;
   assertSnapshot(parsed);
 
   return {
     text: parsed.text,
-    cursor: parsed.cursor,
+    cursor: {
+      line: parsed.cursor.line,
+      col: Buffer.from(parsed.text.split("\n")[parsed.cursor.line] ?? "")
+        .subarray(0, parsed.cursor.col)
+        .toString().length,
+    },
     mode: normalizeNvimMode(parsed.mode),
     register: parsed.register,
   };
