@@ -412,9 +412,18 @@ const THRESHOLDS = {
   // unpacked / 20 files. Limits become 80700 / 305500 / 20 (previously
   // 80200 / 303800 / 20), leaving 587 B / 748 B headroom. No dependency
   // or packed file added; tests, hot-path evidence and QA remain excluded.
+  //
+  // 2026-11-09: Default Normal/Visual scroll ownership removes the unused
+  // opt-in configuration, excludes implemented Vim controls from cursor
+  // aliases, and resets half-page counts on rendered height changes. README
+  // now documents the default motions and Pi-owned Insert bindings. Measured
+  // 80553 B packed / 304991 B unpacked / 20 files (+440 B / +239 B).
+  // Limits become 81100 / 305700 / 20 (previously 80700 / 305500 / 20),
+  // leaving 547 B / 709 B headroom. No dependency or packed file added;
+  // ownership/parity coverage, benchmark evidence and QA remain excluded.
   maxFiles: 20,
-  maxSize: 80700,
-  maxUnpackedSize: 305500,
+  maxSize: 81100,
+  maxUnpackedSize: 305700,
 } as const;
 
 function compareStrings(a: string, b: string): number {
