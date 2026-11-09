@@ -101,7 +101,19 @@ describe("cursor binding boundaries", () => {
       f.editor.handleInput(UP);
       assert.deepEqual(f.editor.getCursor(), { line: 1, col: 2 });
       assert.deepEqual(f.fired, []);
-      assert.deepEqual(f.forwarded, []);
+      // The extension probe declines; cursor ownership still beats the app.
+      assert.deepEqual(f.forwarded, [UP]);
+      const claimed = fixture(["3", "d"], config);
+      const claimBefore = claimed.snapshot();
+      claimed.editor.onExtensionShortcut = (data) => {
+        claimed.forwarded.push(data);
+        return true;
+      };
+      claimed.editor.handleInput(UP);
+      assert.deepEqual(claimed.forwarded, [UP]);
+      assert.deepEqual(claimed.fired, []);
+      assert.deepEqual(claimed.snapshot(), claimBefore);
+      assertNoPending(claimed.state);
       f.editor.handleInput("i");
       const before = f.snapshot();
       f.editor.handleInput(UP);

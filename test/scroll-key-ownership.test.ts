@@ -56,7 +56,14 @@ describe("scroll-key ownership matrix (host-only policy)", () => {
                   ? { line: key.direction > 0 ? 4 : 0, col: 2 }
                   : before.cursor,
               });
-              assert.deepEqual(f.forwarded, []);
+              // The fixture tracks app-key probes too: nonempty Ctrl-D is
+              // offered to extensions in Normal, but never runs app.exit.
+              assert.deepEqual(
+                f.forwarded,
+                key.name === "d" && f.editor.getMode() === "normal"
+                  ? [key[encoding]]
+                  : [],
+              );
               assertNoPending(f.state);
             } else {
               const expected = fixture(setup);

@@ -1440,6 +1440,7 @@ export class ModalEditor extends CustomEditor {
       data = filtered;
     }
 
+    const shortcutInput = data;
     const vimHistoryControl =
       data === CTRL_R ||
       data === CTRL_UNDERSCORE ||
@@ -1542,16 +1543,19 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      // Offer the original chord, not its canonical cursor alias. A claimed
+      // host shortcut beats Normal scrolling/motions; a miss changes nothing.
+      // DEL is legacy Backspace. Admitted app chords already probe once above.
       if (
-        data.charCodeAt(0) < 32 &&
+        (shortcutInput.charCodeAt(0) < 32 || shortcutInput === "\x7f") &&
         this.mode === "normal" &&
         this.pendingExCommand === null &&
-        !cursorMotion &&
         !exPaste &&
         !vimHistoryControl &&
-        !this.appKeybindings.matches(data, "tui.input.submit") &&
-        this.onExtensionShortcut?.(data)
+        !this.appKeybindings.matches(shortcutInput, "tui.input.submit") &&
+        this.onExtensionShortcut?.(shortcutInput)
       ) {
+        this.displayWantedColumn = null;
         this.clearPendingState();
         this.cancelRepeatableCommand();
         return;

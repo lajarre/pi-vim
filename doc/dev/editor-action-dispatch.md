@@ -105,9 +105,38 @@ default/remapped bindings in `test/control-key-ownership.test.ts`.
 
 Application callbacks may intentionally change text (clear, external editor,
 clipboard paste, dequeue); blocking readline fallthrough does not suppress these
-app effects. Arbitrary extension shortcuts do not run in non-Insert modes unless
-the key is admitted as an app chord (or explicit idle-Normal submit/Escape). No changes to the
-pre-existing k/j logical-line history route, motion algorithms or paste policy.
+app effects. Normal also probes extension-only control/Alt and Backspace chords,
+as described below. EX and Visual/V-Line still require an admitted app chord
+(or explicit submit/Escape route) to reach extension interception. No changes
+to the pre-existing k/j logical-line history route, motion algorithms or paste policy.
+
+### Normal extension shortcuts — 2026-11-09
+
+Decision: retain the raw input through cursor-alias translation and offer it to
+`onExtensionShortcut` after app routing, before scroll/pending-command dispatch.
+The first-byte guard includes DEL for legacy Backspace. Admitted app chords
+already offer the raw key once; they return before this probe, whether claimed
+or declined. A claimed extension-only chord clears pending state, display-column
+intent and active repeat recording, but preserves the completed dot command,
+undo/redo, register and buffer unless the callback edits them. A synchronous
+claim consumes counts even when the host's asynchronous handler does nothing.
+
+This supersedes the cursor-alias exclusion in PR #62: extensions own registered
+chords in the host, so a claim must also beat Ctrl-H/Backspace and the opt-in
+scroll family in Normal. An absent or declining handler preserves alias/scroll
+behavior. Existing app-vs-cursor precedence stays unchanged. The alternative of
+moving all extension dispatch ahead of modal routing would change Escape,
+EX/Visual, printable keys and app-callback cancellation timing; it is not needed
+for this host-policy fix. Calling the unrestricted host editor on a miss would
+reintroduce editing controls outside Insert, so only the hook is invoked.
+
+Paste filtering runs first. Bare Escape, Vim undo/redo and configured submit
+remain modal; Insert's existing dispatcher is untouched. EX and Visual/V-Line
+are intentionally excluded from the new route, not a claim of uniform behavior
+in every non-Insert mode. Tests cover legacy/Kitty input, no-op claims, raw
+custom cursor bindings, harmless-input history, dot replay, sticky columns,
+stock misses, app collisions and split paste frames. This is an intentional
+nvim divergence documented in the README, not a new Vim motion.
 
 ## Cursor-binding aliases — 2026-11-04
 

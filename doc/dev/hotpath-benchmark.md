@@ -526,3 +526,60 @@ PIVIM_ENTRY=.tmp/cursorbind-base/index.ts node --import tsx/esm script/hotpath-c
 node --import tsx/esm script/hotpath-compare.ts
 # Repeat in head/base then base/head order; aggregate per-run median and p95.
 ```
+
+## Normal extension shortcuts — 2026-11-09
+
+### contributor evidence (PR #62)
+
+Moved from the PR's per-feature developer note. Contributor baseline `500929e`
+versus `e9e77c7`, Node v26.13.0, Linux x64, installed peers from `npm ci`.
+Three serial `script/hotpath-compare.ts` rounds in base/head, head/base,
+base/head order; eight samples per operation per run. Median of the three
+run medians/p95s in µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 4.088 | 4.556 | 3.919 | 4.418 |
+| `motion_h_4k` | 800.623 | 813.970 | 766.159 | 842.064 |
+| `motion_w_50` | 4.609 | 5.812 | 4.758 | 5.443 |
+| `insert_type` | 17.495 | 18.344 | 18.241 | 18.434 |
+| `insert_edit` | 31.250 | 32.490 | 31.459 | 32.481 |
+
+The first-byte guard avoids key decoding/grapheme segmentation for plain
+printable inputs. No speedup is claimed: wide-line p95 increased about 3.5%
+and Insert typing median about 4.3%, despite Insert returning before the new
+branch. These are contributor batch measurements, not terminal latency bounds
+or a benchmark of real extension callbacks.
+
+### 0.16 integration and alias precedence
+
+Baseline `a7ef7f5` versus the PR plus the raw-input/Backspace and sticky-column
+fix-up. Node v24.15.0, darwin-arm64, installed coding-agent/pi-tui 1.4.0 on both
+builds; no dependency changes. Same five-operation harness, three serial
+base/head, head/base, base/head rounds, eight samples per operation. Median
+of the three per-run medians/p95s, µs/op:
+
+| operation | base median | base p95 | head median | head p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `noop_key` | 2.847 | 3.050 | 2.846 | 3.010 |
+| `motion_h_4k` | 552.879 | 562.928 | 554.273 | 564.144 |
+| `motion_w_50` | 3.668 | 4.231 | 3.582 | 3.909 |
+| `insert_type` | 11.868 | 12.238 | 11.558 | 11.774 |
+| `insert_edit` | 19.051 | 19.624 | 19.172 | 19.543 |
+
+The largest positive median delta is 1.394 µs (+0.3%) on the wide-line control;
+Insert lifecycle rises 0.121 µs (+0.6%). These samples do not prove statistical
+non-regression. The harness uses stub app matches and public default cursor
+bindings, with no extension callback installed. It measures dispatch guards,
+not a user's shortcut scan, asynchronous handler, terminal, rendering, startup
+or memory. No cache, timer, dependency or persistent state was added.
+
+Reproduce without installs, branch switches or another worktree:
+
+```sh
+mkdir -p .tmp/pr62-base
+git archive a7ef7f5 '*.ts' | tar -xf - -C .tmp/pr62-base
+PIVIM_ENTRY=.tmp/pr62-base/index.ts node --import tsx/esm script/hotpath-compare.ts
+node --import tsx/esm script/hotpath-compare.ts
+# Repeat in head/base, then base/head order; aggregate run medians and p95s.
+```

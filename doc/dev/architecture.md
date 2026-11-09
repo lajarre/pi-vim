@@ -182,7 +182,13 @@ reach their host callbacks. EX is
 retained unless the app action is interrupt/clear. Paste payload and Vim undo/redo
 controls do not take this route. Pending state then precedes normal-mode keys,
 which is why `f.`, `r.`, and `d.` take `.` as their argument rather than as
-a repeat. Unsupported Normal/Visual editor input is consumed, including
+a repeat. Between app routing and pending commands, Normal offers control/Alt
+and Backspace input to `onExtensionShortcut`, preserving raw bytes through
+cursor-alias translation. A claim beats aliases/scrolling and cancels pending
+state and active repeat recording; a miss leaves Vim ownership unchanged.
+EX/Visual, modal Escape, undo/redo, printable/submit keys and paste are excluded
+from that extension-only route. App chords already invoke the hook once.
+Unsupported Normal/Visual editor input is consumed, including
 pending-argument cancellation. EX ignores unsupported editing controls in place.
 Only explicit idle-Normal Enter/Escape and Insert (or stock compatibility
 fallback) use the unrestricted host dispatcher; app routing excludes editor
@@ -208,7 +214,9 @@ flowchart TD
     exhist -- yes --> browse["recall EX history / restore draft"]
     exhist -- no --> app{"registered app chord?"}
     app -- yes --> doApp["cancel pending state<br/>invoke host app callback, no editor fallback"]
-    app -- no --> rep{"pendingReplace?"}
+    app -- no --> ext{"Normal extension-only chord claimed?"}
+    ext -- yes --> doExt["cancel pending state and active repeat recording<br/>no editor fallback"]
+    ext -- no --> rep{"pendingReplace?"}
     rep -- yes --> doRep["r{char}"]
     rep -- no --> exd{"pendingExCommand?"}
     exd -- yes --> doEx["handlePendingExCommand"]
