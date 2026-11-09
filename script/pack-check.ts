@@ -405,9 +405,16 @@ const THRESHOLDS = {
   // +1411 B from scroll keys). Limits become 80200 / 303800 / 20, leaving
   // 563 B / 714 B headroom. No dependency or packed file added; tests,
   // benchmark evidence, ownership docs and manual QA remain excluded.
+  //
+  // 2026-11-09: PR #62 plus raw-input shortcut precedence over Normal
+  // cursor aliases/scroll keys adds the extension-only probe and README
+  // ownership/divergence contracts. Measured 80113 B packed / 304752 B
+  // unpacked / 20 files. Limits become 80700 / 305500 / 20 (previously
+  // 80200 / 303800 / 20), leaving 587 B / 748 B headroom. No dependency
+  // or packed file added; tests, hot-path evidence and QA remain excluded.
   maxFiles: 20,
-  maxSize: 80200,
-  maxUnpackedSize: 303800,
+  maxSize: 80700,
+  maxUnpackedSize: 305500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
