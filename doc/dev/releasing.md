@@ -20,6 +20,14 @@ manual and ordered.
   ids on `main`. No thanks boilerplate; the maintainer adds the personal
   note by hand.
 
+## version numbers
+
+Until 1.0: a patch release carries regression fixes only; a minor release
+carries features or any behavior change, including breaking ones (a raised
+Pi floor, a changed default). From 1.0 on, semantic versioning applies as
+written. 0.15.1 shipped features under a patch number before this rule
+was set; it is recorded, not rewritten.
+
 ## steps
 
 1. Bump on the release branch: `npm version <x.y.z> --no-git-tag-version`,
