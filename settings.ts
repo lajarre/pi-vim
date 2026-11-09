@@ -52,7 +52,6 @@ export type PiVimSettings = {
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
   historyNavigation?: unknown;
-  scrollKeys?: unknown;
   labelPosition?: unknown;
   cursorShape?: unknown;
   modeChange?: ModeChangeSettings;
@@ -307,25 +306,6 @@ export function resolveHistoryNavigation(value: unknown): {
   };
 }
 
-export function readPiVimScrollKeys(g: unknown, p: unknown) {
-  const v = get(p, "scrollKeys");
-  const value = v === M ? get(g, "scrollKeys") : v;
-  return value === M ? undefined : value;
-}
-
-export function resolveScrollKeys(value: unknown): {
-  enabled: boolean;
-  warning?: string;
-} {
-  if (typeof value === "boolean") return { enabled: value };
-  return {
-    enabled: false,
-    ...(value !== undefined && {
-      warning: "Invalid piVim.scrollKeys; expected a boolean.",
-    }),
-  };
-}
-
 export function readPiVimModeChange(g: unknown, p: unknown) {
   void p;
   // modeChange executes a shell command, so only the user-global settings file
@@ -403,7 +383,6 @@ function disk(cwd: string): PiVimSettings {
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     historyNavigation: readPiVimHistoryNavigation(g, p),
-    scrollKeys: readPiVimScrollKeys(g, p),
     labelPosition: readPiVimLabelPositionSetting(g, p),
     cursorShape: readPiVimCursorShapeSetting(g, p),
     modeChange: readPiVimModeChange(g, p),

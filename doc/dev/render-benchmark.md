@@ -275,8 +275,8 @@ Base `500929e` (0.15.1), head: `6344ac5` plus the runtime in
 these measurements include both features. Node v24.15.0, darwin-arm64,
 coding-agent/pi-tui 1.4.0. Three serial rounds, base/head/enabled,
 enabled/head/base, base/head/enabled, with no concurrent gates.
-`head` uses the default `scrollKeys: false`; `enabled` sets it true once
-at construction. No render optimization, cache or new private seam is added.
+`head` uses the then-default disabled scrolling; `enabled` opts in once
+at construction. This historical configuration was removed on 2026-11-09. No render optimization, cache or new private seam is added.
 
 The existing render harness runs all eleven fixtures at 100 warmups,
 30 batches of 20 renders. Values are medians of per-run medians and batch
@@ -331,19 +331,11 @@ motions build and validate one map, then jump by row index; a large count
 never loops over intermediate movements. The O(buffer-size) host layout cost
 remains (about 2 ms at 16K here). No idle short-circuit is justified.
 
-Reproduce the before/after tables with the archive commands above, using
-`500929e` as base and this feature commit as head. For the enabled variant,
-point `PIVIM_ENTRY` at this scratch wrapper instead of the ordinary entry:
-
-```ts
-import { ModalEditor as Base } from "../index.js";
-export class ModalEditor extends Base {
-  constructor(...args: ConstructorParameters<typeof Base>) {
-    super(...args);
-    this.setScrollKeys(true);
-  }
-}
-```
+Reproduce the historical before/after tables with the archive commands above,
+using `500929e` as base and the opt-in feature commit as head. The historical
+`enabled` variant used a scratch subclass to call that revision's scroll-enabling
+setter after construction. That setter no longer exists: current builds always
+scroll, and the default-on evidence below supersedes this configuration.
 
 Use `script/render-compare.ts` with the counts above and
 `script/hotpath-compare.ts` with its defaults; alternate the three variants
@@ -352,3 +344,62 @@ set the buffer to `"x".repeat(size)`, enable scrolling, enter Normal, render
 at `width + 1`, reset with `0` before each timed command, and assert the
 cursor column is `min(distance, ceil(size / width) - 1) * width`.
 Half/full-page distances are 6/10; counted distances are 9999/99990.
+
+## default Normal control keys — 2026-11-09
+
+Base `379133f`; head: the runtime in `feat(motion): make vim scroll keys the default`.
+Node v24.15.0, darwin-arm64, coding-agent/pi-tui 1.4.0, unchanged dependencies.
+Three serial alternating base/head, head/base, base/head rounds with no concurrent
+gates. Each build runs the existing input harness, then the render harness.
+The base uses its released-branch defaults (scrolling disabled); head always
+classifies scroll keys and measures rendered text height. No cache or motion
+algorithm optimization is included.
+
+The same five-operation input set, eight samples per run, median of the three
+per-run medians/p95s in µs/op:
+
+| fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| noop_key | 2.854 | 3.034 | 3.455 | 3.618 | +21.0% |
+| motion_h_4k | 556.637 | 562.707 | 562.131 | 567.421 | +1.0% |
+| motion_w_50 | 3.623 | 3.959 | 4.384 | 4.598 | +21.0% |
+| insert_type | 11.786 | 12.186 | 12.240 | 12.458 | +3.9% |
+| insert_edit | 19.866 | 20.404 | 20.757 | 21.188 | +4.5% |
+
+The same eleven render fixtures, 100 warmups and 30 batches of 20 renders per
+run, aggregated identically in µs/render (batch p95, not frame latency tails):
+
+| fixture | base median | base p95 | head median | head p95 | median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| insert_80_long | 352.654 | 370.769 | 354.298 | 375.142 | +0.5% |
+| visual_5_lines | 14.067 | 16.321 | 14.194 | 17.667 | +0.9% |
+| visual_line_400_words | 727.358 | 740.454 | 724.338 | 744.302 | -0.4% |
+| normal_80_long | 353.733 | 366.250 | 357.383 | 373.229 | +1.0% |
+| ex_80_long | 353.006 | 370.671 | 355.529 | 369.383 | +0.7% |
+| insert_resize_79_80 | 381.431 | 412.256 | 375.227 | 396.717 | -1.6% |
+| visual_unicode_20 | 139.485 | 159.244 | 137.223 | 155.088 | -1.6% |
+| visual_one_4096 | 1189.935 | 1310.808 | 1182.852 | 1254.827 | -0.6% |
+| normal_4096 | 476.348 | 496.685 | 483.619 | 506.933 | +1.5% |
+| visual_one_16384 | 4765.419 | 4887.052 | 4776.796 | 4934.998 | +0.2% |
+| normal_16384 | 1951.819 | 2004.408 | 1940.590 | 2012.338 | -0.6% |
+
+The default path now pays the existing four-key decoder cost: no-op and short
+word medians rise 0.601 / 0.761 µs. Accept that measured cost for the requested
+Normal ownership policy instead of introducing a second decoder or speculative
+cache. The 4K motion median rises 5.494 µs; render medians range from -1.6% to
++1.5%. Insert controls remain host-owned, but these samples do not establish zero
+Insert overhead. No terminal transport, wrapper/fullscreen, idle frequency or
+memory claim follows from these measurements; no render optimization is justified.
+
+Reproduce within a checkout with installed peers, without another worktree:
+
+```sh
+mkdir -p .tmp/ctrlfix-base
+git archive 379133f '*.ts' | tar -x -C .tmp/ctrlfix-base
+PIVIM_ENTRY=.tmp/ctrlfix-base/index.ts node --import tsx/esm script/hotpath-compare.ts
+PIVIM_ENTRY=.tmp/ctrlfix-base/index.ts PIVIM_WARMUP=100 PIVIM_SAMPLES=30 PIVIM_ITERATIONS=20 node --import tsx/esm script/render-compare.ts
+node --import tsx/esm script/hotpath-compare.ts
+PIVIM_WARMUP=100 PIVIM_SAMPLES=30 PIVIM_ITERATIONS=20 node --import tsx/esm script/render-compare.ts
+```
+
+Repeat in head/base, then base/head order; aggregate the three run medians/p95s.

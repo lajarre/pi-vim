@@ -11,6 +11,16 @@ import { getLineGraphemes } from "./motions.js";
 export function createCursorBindingResolver(
   keybindings: Pick<KeybindingsManager, "getKeys">,
 ): (data: string) => "h" | "j" | "k" | "l" | undefined {
+  // Implemented Vim controls keep their modal meanings, not host cursor remaps.
+  // Ctrl-H still takes the fixed Backspace/h path below. Keep this list explicit.
+  const vimControls = new Set([
+    "ctrl+b",
+    "ctrl+d",
+    "ctrl+f",
+    "ctrl+u",
+    "ctrl+h",
+    "ctrl+r",
+  ]);
   const bindings = (
     [
       ["tui.editor.cursorUp", "k"],
@@ -19,7 +29,10 @@ export function createCursorBindingResolver(
       ["tui.editor.cursorLeft", "h"],
     ] as const
   ).flatMap(([action, motion]) =>
-    keybindings.getKeys(action).map((key) => ({ key, motion })),
+    keybindings
+      .getKeys(action)
+      .filter((key) => !vimControls.has(key))
+      .map((key) => ({ key, motion })),
   );
   return (data) =>
     isBackspaceLikeInput(data)

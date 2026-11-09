@@ -79,7 +79,7 @@ Decision: invoke the resolved host callback rather than call the unrestricted
 exit to delete-forward, and explicit editor-history remaps precede app handlers.
 Either would reintroduce editing outside Insert. The app-only route retains
 extension-shortcut precedence on admitted chords, dynamic `onEscape`/`onCtrlD`,
-the empty-prompt exit guard, the interrupt autocomplete guard, and `onPasteImage`.
+the empty-prompt exit guard (EX or non-scroll exit remaps), the interrupt autocomplete guard, and `onPasteImage`.
 It deliberately omits the host's editor fallback, including autocomplete
 cancellation by an interrupt when autocomplete is showing. It never fabricates
 editing keys, mutates the binding manager or snapshots/restores around callbacks.
@@ -99,6 +99,7 @@ default/remapped bindings in `test/control-key-ownership.test.ts`.
 | Typed EX `<Up>` / `<Down>` | EX history filtered by the saved draft, sharing position with `<C-p>` / `<C-n>`; fixed keys even with remapped/disabled host cursor bindings, never motion aliases or pasted navigation |
 | Escape / control-left-bracket | Existing modal cancellation or Visual exit first; idle Normal forwards canonical Escape through `super.handleInput`, while EX cancellation invokes Pi's interrupt callback |
 | Vim undo / redo controls | pi-vim's undo/redo; never contextual app actions, even if a remap shares the key |
+| Normal/Visual `<C-d>` / `<C-u>` / `<C-f>` / `<C-b>` | Display-row half/full-page motions by default, ahead of host cursor aliases; skip `app.exit` even on empty input, but other registered app chords and Normal extension claims still win |
 | Bracketed paste | Insert passes through to Pi; Normal/Visual strip and discard it; EX takes only its first line and waits for typed Enter. Payload is never an app shortcut |
 | Mouse reports | Unsupported non-Insert reports are consumed, not forwarded. Insert and any upstream fullscreen mouse routing remain Pi-owned |
 | Compatibility fallback | Failed required-action preflight still forwards all input unchanged to stock Pi |
@@ -122,7 +123,7 @@ undo/redo, register and buffer unless the callback edits them. A synchronous
 claim consumes counts even when the host's asynchronous handler does nothing.
 
 This supersedes the cursor-alias exclusion in PR #62: extensions own registered
-chords in the host, so a claim must also beat Ctrl-H/Backspace and the opt-in
+chords in the host, so a claim must also beat Ctrl-H/Backspace and the
 scroll family in Normal. An absent or declining handler preserves alias/scroll
 behavior. Existing app-vs-cursor precedence stays unchanged. The alternative of
 moving all extension dispatch ahead of modal routing would change Escape,
@@ -162,7 +163,8 @@ The installed 1.4 manager does **not** enforce one action per key. Reassigning
 place; `matches` returns true for both. Explicit duplicates are reported by
 `getConflicts`, not removed, and implicit collisions with defaults are not even
 reported. The public 1.5 reference likewise describes overlapping action
-precedence. Left/right defaults also include `ctrl+b`/`ctrl+f`.
+precedence. Left/right defaults also include `ctrl+b`/`ctrl+f`, but pi-vim
+excludes them from cursor aliases in favor of paging (see the decision below).
 
 Cursor bindings take precedence over app callbacks outside Insert. Alternatives:
 app-first would prevent the requested Ctrl-P alias; modifying the manager would
@@ -181,6 +183,48 @@ including these gaps; curated nvim cases cover supported motions, linewise
 operators, Visual, Unicode, wrapping, undo/redo and dot. Existing skipped
 line-motion cases are unchanged for that reason. Edge prompt recall and app
 conflicts are intentional Pi behavior, tested without an nvim equivalent.
+
+## Normal control ownership — 2026-11-09
+
+Decision: implemented Vim Normal controls keep their meanings by default.
+The cursor-binding snapshot explicitly excludes `ctrl+b`, `ctrl+d`, `ctrl+f`,
+`ctrl+u`, `ctrl+h` and `ctrl+r`; there is no inferred category of reserved keys.
+Ctrl-H/Backspace still resolve through the fixed `h` alias before the snapshot.
+Arrows and custom Ctrl-P/Ctrl-N cursor-up/down bindings remain `hjkl` aliases;
+unremapped Ctrl-P remains Pi's model-cycle app chord. A registered app chord
+still beats scrolling, and PR #62's Normal extension claim still beats both
+scrolling and cursor aliases. Vim undo/redo retain their earlier exclusions.
+
+The four scroll keys now always use the existing display-row motion path in
+Normal/Visual/V-Line. The never-released opt-in, its reader, resolver and setter
+are removed rather than deprecated. `app.exit` alone is skipped on these keys,
+regardless of prompt contents, so empty-prompt Ctrl-D is an edge no-op rather
+than an exit. Other app registrations sharing that key are still considered.
+Insert remains entirely on the host path; EX and non-scroll exit remaps keep
+their prior empty-prompt guard. Normal quitting uses `ZZ` / `ZQ` (or EX quit).
+
+Rendered text height is measured on every supported render, excluding borders
+and autocomplete. A changed height clears the remembered half-page count;
+unchanged heights preserve it, including width changes that leave the height
+unchanged. Before the first render, the whole buffer remains the fallback page.
+Reload creates a fresh instance. No new host-private layout seam is introduced.
+
+Alternatives: keeping the opt-in would retain readline character motion in
+Normal despite the maintainer's Vim-ownership policy; reserving every Vim key
+would exceed the implemented subset; suppressing all app actions would break
+host commands and PR #62. Resetting on every render or terminal size change
+would discard explicit counts without an actual editor-height change.
+
+Insert deliberately keeps Pi's readline bindings, not Vim Insert controls.
+The README list was checked against pi-tui 1.4.0 `dist/keybindings.js` and
+coding-agent's `dist/modes/interactive/components/custom-editor.js` exit guard.
+Legacy Ctrl-H encodes Backspace; a distinct Kitty Ctrl-H is not a host default,
+so this is documented as an encoding-dependent coincidence, not a new shim.
+Focused matrices compare Insert directly with the stock dispatcher and test
+both exit callback forms, empty/nonempty prompts, extension claims, app
+collisions, literal cancellation, count consumption and state preservation.
+Curated nvim cases cover default-key paging and resize-reset semantics; native
+viewport-dependent Ctrl-B remains an explicit display-row divergence.
 
 ## Cursor render preflight — 2026-11-02
 

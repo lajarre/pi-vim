@@ -10,8 +10,8 @@ const OWNED_CONTROLS = [
   { binding: "backspace", keys: ["\x7f", "\x1b[127u"], motion: "h" },
   { binding: "ctrl+d", keys: ["\x04", "\x1b[100;5u"] },
   { binding: "ctrl+u", keys: ["\x15", "\x1b[117;5u"] },
-  { binding: "ctrl+f", keys: ["\x06", "\x1b[102;5u"], motion: "l" },
-  { binding: "ctrl+b", keys: ["\x02", "\x1b[98;5u"], motion: "h" },
+  { binding: "ctrl+f", keys: ["\x06", "\x1b[102;5u"] },
+  { binding: "ctrl+b", keys: ["\x02", "\x1b[98;5u"] },
   { binding: "left", keys: ["\x1b[D", "\x1b[1;1D"], motion: "h" },
 ] as const;
 
@@ -85,76 +85,66 @@ describe("Normal-mode extension shortcuts", () => {
     }
   });
 
-  for (const scrollKeys of [false, true]) {
-    for (const control of OWNED_CONTROLS) {
-      const { binding, keys } = control;
-      for (const key of keys) {
-        for (const setup of [
-          [],
-          ["3"],
-          ["3", "d", "2"],
-          ["f"],
-          ["r"],
-          ["d", "i"],
-          ["g"],
-          ["Z"],
-        ]) {
-          it(`claims ${binding} ${JSON.stringify(key)} before aliases/scroll (scrollKeys=${scrollKeys}, ${setup.join("") || "Normal"})`, () => {
-            const f = fixture(setup);
-            f.editor.setScrollKeys(scrollKeys);
-            const before = f.snapshot();
-            const calls: string[] = [];
-            f.editor.onExtensionShortcut = (data) => {
-              if (!matchesKey(data, binding)) return false;
-              calls.push(data);
-              // A host handler may return true before its async work starts.
-              // No buffer edit is needed to consume the pending Vim command.
-              return true;
-            };
-            f.editor.handleInput(key);
-            assert.deepEqual(calls, [key]);
-            assert.deepEqual(f.fired, []);
-            assert.deepEqual(f.submitted, []);
-            assert.deepEqual(f.snapshot(), before);
-            assertNoPending(f.state);
-            f.editor.handleInput("l");
-            assert.deepEqual(f.editor.getCursor(), { line: 2, col: 3 });
-          });
-        }
+  for (const control of OWNED_CONTROLS) {
+    const { binding, keys } = control;
+    for (const key of keys) {
+      for (const setup of [
+        [],
+        ["3"],
+        ["3", "d", "2"],
+        ["f"],
+        ["r"],
+        ["d", "i"],
+        ["g"],
+        ["Z"],
+      ]) {
+        it(`claims ${binding} ${JSON.stringify(key)} before aliases/scroll (${setup.join("") || "Normal"})`, () => {
+          const f = fixture(setup);
+          const before = f.snapshot();
+          const calls: string[] = [];
+          f.editor.onExtensionShortcut = (data) => {
+            if (!matchesKey(data, binding)) return false;
+            calls.push(data);
+            // A host handler may return true before its async work starts.
+            // No buffer edit is needed to consume the pending Vim command.
+            return true;
+          };
+          f.editor.handleInput(key);
+          assert.deepEqual(calls, [key]);
+          assert.deepEqual(f.fired, []);
+          assert.deepEqual(f.submitted, []);
+          assert.deepEqual(f.snapshot(), before);
+          assertNoPending(f.state);
+          f.editor.handleInput("l");
+          assert.deepEqual(f.editor.getCursor(), { line: 2, col: 3 });
+        });
+      }
 
-        for (const handler of ["absent", "declines"] as const) {
-          it(`${handler} ${binding} preserves Vim ownership (scrollKeys=${scrollKeys}, ${JSON.stringify(key)})`, () => {
-            const f = fixture(["2"]);
-            const expected = fixture(["2"]);
-            f.editor.setScrollKeys(scrollKeys);
-            expected.editor.setScrollKeys(scrollKeys);
-            f.editor.render(8);
-            expected.editor.render(8);
-            f.editor.onExtensionShortcut =
-              handler === "absent" ? undefined : () => false;
-            f.editor.handleInput(key);
-            // Canonical motions provide an independent no-extension oracle.
-            const motion = "motion" in control ? control.motion : undefined;
-            const scrolling =
-              scrollKeys &&
-              ["ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b"].includes(binding);
-            expected.editor.handleInput(motion && !scrolling ? motion : key);
-            assert.deepEqual(f.snapshot(), expected.snapshot());
-            assert.deepEqual(f.fired, expected.fired);
-            assert.deepEqual(f.submitted, []);
-            assertNoPending(f.state);
-          });
-        }
+      for (const handler of ["absent", "declines"] as const) {
+        it(`${handler} ${binding} preserves Vim ownership (${JSON.stringify(key)})`, () => {
+          const f = fixture(["2"]);
+          const expected = fixture(["2"]);
+          f.editor.render(8);
+          expected.editor.render(8);
+          f.editor.onExtensionShortcut =
+            handler === "absent" ? undefined : () => false;
+          f.editor.handleInput(key);
+          // Canonical motions provide an independent no-extension oracle.
+          const motion = "motion" in control ? control.motion : undefined;
+          expected.editor.handleInput(motion ?? key);
+          assert.deepEqual(f.snapshot(), expected.snapshot());
+          assert.deepEqual(f.fired, expected.fired);
+          assert.deepEqual(f.submitted, []);
+          assertNoPending(f.state);
+        });
       }
     }
   }
-
-  it("lets extension claims beat app chords exactly once, including empty-prompt exit", () => {
+  it("lets extension claims beat app chords and empty-prompt scrolling exactly once", () => {
     for (const text of ["", "draft"]) {
       for (const key of ["\x04", "\x1b[100;5u", ...ALT_U]) {
         const f = fixture([], { "app.model.cycleForward": "alt+u" });
         f.editor.setText(text);
-        f.editor.setScrollKeys(true);
         sendKeys(f.editor, ["3", "d"]);
         const before = f.snapshot();
         const calls: string[] = [];
@@ -206,8 +196,6 @@ describe("Normal-mode extension shortcuts", () => {
     for (const key of [ALT_U[0], "\x08", "\x15"]) {
       const f = fixture([]);
       const expected = fixture([]);
-      f.editor.setScrollKeys(true);
-      expected.editor.setScrollKeys(true);
       let claims = 0;
       f.editor.onExtensionShortcut = (data) => {
         if (data !== key) return false;
@@ -241,7 +229,6 @@ describe("Normal-mode extension shortcuts", () => {
   it("resets sticky display-column intent when a scroll shortcut is claimed", () => {
     const f = fixture([]);
     f.editor.setText("abcdefghij\nx\nabcdefghij");
-    f.editor.setScrollKeys(true);
     setInternalCursor(f.editor, 8, 0);
     f.editor.render(80);
     sendKeys(f.editor, ["g", "j"]);
@@ -336,7 +323,7 @@ describe("Normal-mode extension shortcuts", () => {
     const f = fixture([]);
     const before = f.snapshot();
     f.editor.onExtensionShortcut = () => false;
-    f.editor.handleInput("\x15");
+    f.editor.handleInput("\x0b");
     assert.deepEqual(f.snapshot(), before);
 
     for (const key of ALT_U) {

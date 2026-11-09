@@ -80,7 +80,6 @@ import {
   resolveExCommandSettings,
   resolveHistoryNavigation,
   resolveLabelPosition,
-  resolveScrollKeys,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
 } from "./settings.js";
@@ -288,7 +287,6 @@ export class ModalEditor extends CustomEditor {
   private pendingGCount: string = "";
   private displayLineWidth: number | null = null;
   private displayWantedColumn: number | null = null;
-  private scrollKeys = false;
   private displayPageRows: number | null = null;
   private halfPageRows: number | null = null;
   private pendingReplace: boolean = false;
@@ -452,11 +450,6 @@ export class ModalEditor extends CustomEditor {
     this.historyNavigation = enabled;
   }
 
-  setScrollKeys(enabled: boolean): void {
-    this.scrollKeys = enabled;
-    this.halfPageRows = null;
-    this.displayPageRows = null;
-  }
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
   }
@@ -1451,9 +1444,7 @@ export class ModalEditor extends CustomEditor {
     // Record canonical hjkl so dot neither re-reads bindings nor re-translates
     // a printable alias. Insert, paste, Escape and Vim undo/redo stay untouched.
     const scrollKey =
-      this.scrollKeys &&
-      this.mode !== "insert" &&
-      this.pendingExCommand === null
+      this.mode !== "insert" && this.pendingExCommand === null
         ? (["d", "u", "f", "b"] as const).find((key) =>
             matchesKey(data, `ctrl+${key}`),
           )
@@ -1696,9 +1687,8 @@ export class ModalEditor extends CustomEditor {
 
   private handleAppAction(data: string, scrolling = false): boolean {
     const kb = this.appKeybindings;
-    // app.exit owns Ctrl-D only on an empty prompt. Let nonempty scrolling
-    // through, but still check other app bindings sharing that chord.
-    const skipExit = scrolling && this.getText().length > 0;
+    // Scroll keys never exit Normal/Visual, even on an empty prompt. Other
+    // registered app chords sharing the key still take precedence over motion.
     let action: Parameters<CustomEditor["onAction"]>[0] | undefined;
     for (const special of [
       "app.clipboard.pasteImage",
@@ -1706,7 +1696,7 @@ export class ModalEditor extends CustomEditor {
       "app.exit",
       "app.suspend",
     ] as const) {
-      if (special === "app.exit" && skipExit) continue;
+      if (special === "app.exit" && scrolling) continue;
       if (kb.matches(data, special)) {
         action = special;
         break;
@@ -1714,7 +1704,7 @@ export class ModalEditor extends CustomEditor {
     }
     if (!action) {
       for (const registered of this.actionHandlers.keys()) {
-        if (registered === "app.exit" && skipExit) continue;
+        if (registered === "app.exit" && scrolling) continue;
         if (registered.startsWith("app.") && kb.matches(data, registered)) {
           action = registered;
           break;
@@ -4726,30 +4716,28 @@ export class ModalEditor extends CustomEditor {
       this.displayLineWidth = layoutWidth;
     }
     if (!vim) return lines;
-    if (this.scrollKeys) {
-      // Host output is top border + text rows + bottom border, then optional
-      // completions. Use the same viewport cap/offset as Visual paint, not a
-      // new private seam. Only completions need a map to exclude their rows.
-      let visible = Math.min(
-        lines.length - 2,
-        Math.max(5, Math.floor(this.tui.terminal.rows * 0.3)),
-      );
-      if (this.isShowingAutocomplete()) {
-        const editor = this as unknown as ModalEditorInternals;
-        try {
-          const rows = editor.buildVisualLineMap?.(layoutWidth ?? 1);
-          if (Array.isArray(rows))
-            visible = Math.min(
-              visible,
-              rows.length - (editor.scrollOffset ?? 0),
-            );
-        } catch {
-          // Motion validates the optional map and reports incompatibility.
-          visible = 1;
-        }
+    // Host output is top border + text rows + bottom border, then optional
+    // completions. Use the same viewport cap/offset as Visual paint, not a
+    // new private seam. Only completions need a map to exclude their rows.
+    let visible = Math.min(
+      lines.length - 2,
+      Math.max(5, Math.floor(this.tui.terminal.rows * 0.3)),
+    );
+    if (this.isShowingAutocomplete()) {
+      const editor = this as unknown as ModalEditorInternals;
+      try {
+        const rows = editor.buildVisualLineMap?.(layoutWidth ?? 1);
+        if (Array.isArray(rows))
+          visible = Math.min(visible, rows.length - (editor.scrollOffset ?? 0));
+      } catch {
+        // Motion validates the optional map and reports incompatibility.
+        visible = 1;
       }
-      this.displayPageRows = Math.max(1, visible);
     }
+    const pageRows = Math.max(1, visible);
+    // Like Vim's 'scroll', an explicit half-page count lasts until resize.
+    if (this.displayPageRows !== pageRows) this.halfPageRows = null;
+    this.displayPageRows = pageRows;
     this.syncCursorShapeForRender(lines);
     if (this.visualPaintAvailable && isVisualMode(this.mode)) {
       this.renderVisualSelection(lines, width, this.mode);
@@ -4867,10 +4855,6 @@ export default function (pi: ExtensionAPI) {
     const historyNavigation = resolveHistoryNavigation(
       piVimSettings.historyNavigation,
     );
-    const scrollKeys = resolveScrollKeys(piVimSettings.scrollKeys);
-    if (scrollKeys.warning && ctx.hasUI) {
-      ctx.ui.notify(scrollKeys.warning, "warning");
-    }
     if (historyNavigation.warning && ctx.hasUI) {
       ctx.ui.notify(historyNavigation.warning, "warning");
     }
@@ -4937,7 +4921,6 @@ export default function (pi: ExtensionAPI) {
       editor.setModeChangeFn(modeChangeHandler);
       editor.setCursorShapeSettings(cursorShape.settings);
       editor.setHistoryNavigation(historyNavigation.enabled);
-      editor.setScrollKeys(scrollKeys.enabled);
       editor.setExCommandSettings(exCommand.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.

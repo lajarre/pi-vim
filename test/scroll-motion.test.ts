@@ -24,7 +24,6 @@ function fixture(text = long, height = 7, width: number | null = 20) {
     terminal: { ...stubTui.terminal, rows: Math.ceil(height / 0.3) },
   };
   const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
-  editor.setScrollKeys(true);
   editor.setClipboardFn(() => assert.fail("motion must not mirror clipboard"));
   editor.setText(text);
   editor.setRegister("keep");
@@ -39,7 +38,7 @@ function cursor(editor: ModalEditor, col: number, line = 0) {
   assert.equal(editor.getRegister(), "keep");
 }
 
-describe("opt-in display-row scroll motions", () => {
+describe("default display-row scroll motions", () => {
   it("uses ceil(visible/2), page minus two, and sticky screen cells on wrapped rows", () => {
     const { editor } = fixture();
     editor.handleInput(D);
@@ -70,10 +69,45 @@ describe("opt-in display-row scroll motions", () => {
     cursor(editor, 184);
     editor.handleInput(U);
     cursor(editor, 144);
-    editor.setScrollKeys(true); // New installation resets the per-editor scroll preference.
-    editor.render(21);
+    editor.render(21); // An unchanged height preserves the preference.
     editor.handleInput(D);
-    cursor(editor, 224);
+    cursor(editor, 184);
+  });
+
+  it("resets remembered half-page rows only when the rendered text height changes", () => {
+    const text = Array(80).fill("abcdefghij").join("\n");
+    for (const key of [D, U]) {
+      const { editor, tui } = fixture(text, 7);
+      setInternalCursor(editor, 3, 30);
+      sendKeys(editor, ["5", D]);
+      cursor(editor, 3, 35);
+      tui.terminal.rows = 40; // Twelve text rows after the next render.
+      editor.handleInput(D);
+      cursor(editor, 3, 40); // Still remembers five before rendering.
+      editor.render(21);
+      editor.handleInput(key);
+      cursor(editor, 3, key === D ? 46 : 34);
+      assert.equal(editor.getText(), text);
+      assert.equal(editor.getMode(), "normal");
+      editor.handleInput("l");
+      cursor(editor, 4, key === D ? 46 : 34); // No leaked count.
+    }
+    const { editor, tui } = fixture(text, 7);
+    sendKeys(editor, ["5", D]);
+    tui.terminal.rows = 25; // Same seven text rows after rounding.
+    editor.render(31); // Width-only change with unwrapped text.
+    editor.handleInput(D);
+    cursor(editor, 3, 10);
+
+    // A width change can also change the actual editor height without a
+    // terminal-height change: ten buffer rows become twelve visible rows.
+    const wrapped = fixture(long, 12, 20).editor;
+    sendKeys(wrapped, ["5", D]);
+    cursor(wrapped, 103);
+    wrapped.render(11);
+    wrapped.handleInput(U);
+    cursor(wrapped, 43); // Six new rows, not the remembered five.
+    assert.equal(wrapped.getText(), long);
   });
 
   it("uses actual rendered height, not the cap, and updates only after a render", () => {
@@ -162,16 +196,15 @@ describe("opt-in display-row scroll motions", () => {
     setInternalCursor(editor, 1);
     editor.render(21);
     editor.handleInput(D);
-    cursor(editor, 21);
+    cursor(editor, 21); // Same seven-row height preserves the remembered one.
     editor.render(11);
     editor.handleInput(D);
-    cursor(editor, 31);
+    cursor(editor, 31); // Only the wanted column resets.
   });
 
   it("clamps huge counts without history recall, consumes them at edges and preserves undo/redo/dot", () => {
     for (const key of [D, U, F, B]) {
       const f = ownershipFixture([]);
-      f.editor.setScrollKeys(true);
       f.editor.render(21);
       const before = f.snapshot();
       sendKeys(f.editor, [..."999999", key]);
@@ -209,7 +242,6 @@ describe("opt-in display-row scroll motions", () => {
   it("extends charwise and linewise selections without editing or changing their anchors", () => {
     for (const visual of ["v", "V"]) {
       const f = ownershipFixture([]);
-      f.editor.setScrollKeys(true);
       f.editor.render(21);
       sendKeys(f.editor, [visual, "1", D]);
       assert.deepEqual(f.editor.getCursor(), { line: 3, col: 2 });
@@ -226,17 +258,6 @@ describe("opt-in display-row scroll motions", () => {
     }
   });
 
-  it("setting off retains cursor aliases and consumes d/u without editing", () => {
-    const f = ownershipFixture([]);
-    f.editor.handleInput(F);
-    assert.deepEqual(f.editor.getCursor(), { line: 2, col: 3 });
-    f.editor.handleInput(B);
-    assert.deepEqual(f.editor.getCursor(), { line: 2, col: 2 });
-    const before = f.snapshot();
-    sendKeys(f.editor, [D, U]);
-    assert.deepEqual(f.snapshot(), before);
-  });
-
   it("fails closed on changed host layout, cancels counts and preserves text/register/history", () => {
     for (const buildVisualLineMap of [
       undefined,
@@ -248,7 +269,6 @@ describe("opt-in display-row scroll motions", () => {
       const f = ownershipFixture([]);
       const notices: string[] = [];
       f.editor.setNotifyFn((s) => notices.push(s));
-      f.editor.setScrollKeys(true);
       f.editor.render(21);
       Object.assign(f.editor, { buildVisualLineMap });
       const before = f.snapshot();

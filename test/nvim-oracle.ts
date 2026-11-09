@@ -39,7 +39,6 @@ export type NvimParityCase = {
   displayWidth?: number;
   /** Fixed text viewport height; scroll fixtures use nostartofline. */
   displayHeight?: number;
-  scrollKeys?: boolean;
 };
 
 export type NvimParitySnapshot = {
@@ -193,7 +192,6 @@ export function runPiParityCase(
           },
         };
   const editor = new ModalEditor(tui, stubTheme, keybindings);
-  editor.setScrollKeys(testCase.scrollKeys ?? false);
   editor.setClipboardFn(() => undefined);
   editor.setClipboardReadFn(() => null);
   editor.setText(testCase.initial.text);

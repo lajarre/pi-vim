@@ -7,7 +7,6 @@ import { sendKeys, setInternalCursor } from "./harness.js";
 const ESC = "\x1b";
 const EDITOR_KEYS = [
   { name: "Ctrl-K", raw: "\x0b", kitty: "\x1b[107;5u" },
-  { name: "Ctrl-U", raw: "\x15", kitty: "\x1b[117;5u" },
   { name: "Ctrl-A", raw: "\x01", kitty: "\x1b[97;5u" },
   { name: "Ctrl-E", raw: "\x05", kitty: "\x1b[101;5u" },
   { name: "Ctrl-W", raw: "\x17", kitty: "\x1b[119;5u" },
@@ -49,8 +48,6 @@ const CURSOR_KEYS = [
   { name: "Down", raw: "\x1b[B", kitty: "\x1b[1;1B", motion: "j" },
   { name: "Left", raw: "\x1b[D", kitty: "\x1b[1;1D", motion: "h" },
   { name: "Right", raw: "\x1b[C", kitty: "\x1b[1;1C", motion: "l" },
-  { name: "Ctrl-B", raw: "\x02", kitty: "\x1b[98;5u", motion: "h" },
-  { name: "Ctrl-F", raw: "\x06", kitty: "\x1b[102;5u", motion: "l" },
   { name: "Ctrl-H", raw: "\x08", kitty: "\x1b[104;5u", motion: "h" },
   { name: "Backspace", raw: "\x7f", kitty: "\x1b[127u", motion: "h" },
 ] as const;
@@ -202,7 +199,14 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
         });
       }
     }
-    for (const key of [...APP_KEYS, ...EDITOR_KEYS]) {
+    for (const key of [
+      ...APP_KEYS,
+      ...EDITOR_KEYS,
+      { name: "Ctrl-U", raw: "\x15", kitty: "\x1b[117;5u" },
+      { name: "Ctrl-D", raw: "\x04", kitty: "\x1b[100;5u" },
+      { name: "Ctrl-B", raw: "\x02", kitty: "\x1b[98;5u" },
+      { name: "Ctrl-F", raw: "\x06", kitty: "\x1b[102;5u" },
+    ]) {
       it(`${encoding} / Insert / ${key.name} retains stock dispatch`, () => {
         const f = fixture(["i"]);
         const stock = fixture(["i"]);
@@ -353,11 +357,11 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
     }
   });
 
-  it("nonempty exit and handlerless specials cannot fall into editor deletion", () => {
+  it("nonempty remapped exit and handlerless specials cannot fall into editor deletion", () => {
     for (const setup of [[], ["f"], [":", "q"], ["v"]]) {
-      const f = fixture(setup);
+      const f = fixture(setup, { "app.exit": "ctrl+o" });
       const before = f.snapshot();
-      f.editor.handleInput("\x04");
+      f.editor.handleInput("\x0f");
       assert.deepEqual(f.snapshot(), before);
       assert.deepEqual(f.fired, []);
       f.kb.setUserBindings({ "app.suspend": "ctrl+k" });
@@ -371,24 +375,32 @@ describe("control-key ownership with real Pi defaults (host-only policy)", () =>
     ["\x04", "\x1a"],
     ["\x1b[100;5u", "\x1b[122;5u"],
   ] as const) {
-    it(`default exit/suspend specials ${JSON.stringify(exit)} retain host guards`, () => {
+    it(`default Ctrl-D scrolls while EX exit and suspend ${JSON.stringify(exit)} retain host guards`, () => {
       for (const mode of STATES) {
         const f = fixture(mode.setup);
         const before = f.snapshot();
         f.editor.handleInput(exit);
         assert.deepEqual(f.fired, []);
-        assert.deepEqual(f.snapshot(), before);
+        const expected = {
+          ...before,
+          cursor: ["normal", "visual", "v-line", "count pending"].includes(
+            mode.name,
+          )
+            ? { line: 4, col: 2 }
+            : before.cursor,
+        };
+        assert.deepEqual(f.snapshot(), expected);
         assertNoPending(f.state);
         f.editor.handleInput(suspend);
         assert.deepEqual(
           f.fired,
           f.kb.matches(suspend, "app.suspend") ? ["app.suspend"] : [],
         );
-        assert.deepEqual(f.snapshot(), before);
+        assert.deepEqual(f.snapshot(), expected);
         f.fired.length = 0;
         f.editor.setText("");
         f.editor.handleInput(exit);
-        assert.deepEqual(f.fired, ["app.exit"]);
+        assert.deepEqual(f.fired, mode.name === "ex" ? ["app.exit"] : []);
         assert.equal(f.editor.getText(), "");
       }
     });

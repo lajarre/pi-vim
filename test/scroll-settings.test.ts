@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import vim, { type ModalEditor } from "../index.js";
-import {
-  readPiVimScrollKeys,
-  resolveScrollKeys,
-  setPiVimSettingsReaderForTests,
-} from "../settings.js";
+import { setPiVimSettingsReaderForTests } from "../settings.js";
 import {
   createExtensionApiHarness,
   sendKeys,
@@ -15,44 +11,12 @@ import {
   stubTui,
 } from "./harness.js";
 
-const warning = "Invalid piVim.scrollKeys; expected a boolean.";
-describe("scrollKeys setting (host-only configuration)", () => {
-  it("defaults off, accepts only booleans, and never echoes invalid input", () => {
-    assert.deepEqual(resolveScrollKeys(undefined), { enabled: false });
-    for (const enabled of [true, false])
-      assert.deepEqual(resolveScrollKeys(enabled), { enabled });
-    for (const value of [null, 0, "true", {}, [], "\x1b[31m"]) {
-      assert.deepEqual(resolveScrollKeys(value), { enabled: false, warning });
-      assert.equal(
-        readPiVimScrollKeys(
-          { piVim: { scrollKeys: true } },
-          { piVim: { scrollKeys: value } },
-        ),
-        value,
-      );
-    }
-    assert.equal(readPiVimScrollKeys({}, {}), undefined);
-    for (const enabled of [true, false]) {
-      assert.equal(
-        readPiVimScrollKeys({ piVim: { scrollKeys: enabled } }, {}),
-        enabled,
-      );
-      assert.equal(
-        readPiVimScrollKeys(
-          { piVim: { scrollKeys: !enabled } },
-          { piVim: { scrollKeys: enabled } },
-        ),
-        enabled,
-      );
-    }
-  });
-
+// Host installation policy, not a configurable motion: every fresh editor
+// starts with scrolling and the default half-page distance.
+describe("scroll installation and reload", () => {
   for (const hasUI of [true, false]) {
-    it(`installation/reload rereads settings and resets remembered rows, UI=${hasUI}`, async () => {
-      let value: unknown = true;
-      const restore = setPiVimSettingsReaderForTests(() => ({
-        scrollKeys: value,
-      }));
+    it(`installation/reload resets remembered rows without configuration, UI=${hasUI}`, async () => {
+      const restore = setPiVimSettingsReaderForTests(() => ({}));
       const pi = createExtensionApiHarness();
       type Factory = (
         ...args: ConstructorParameters<typeof ModalEditor>
@@ -72,23 +36,24 @@ describe("scrollKeys setting (host-only configuration)", () => {
       };
       try {
         vim(pi);
-        for (value of [true, false, true, undefined, "true"]) {
+        for (let installation = 0; installation < 2; installation++) {
           await pi.emit("session_start", {}, ctx);
           assert.ok(factory);
           const editor = factory(stubTui, stubTheme, stubKeybindings);
-          editor.setText(Array(30).fill("abcdefgh").join("\n"));
+          const text = Array(30).fill("abcdefgh").join("\n");
+          editor.setText(text);
           editor.handleInput("\x1b");
           setInternalCursor(editor, 2);
           editor.render(21); // Twelve visible rows.
           editor.handleInput("\x04");
-          assert.deepEqual(editor.getCursor(), {
-            line: value === true ? 6 : 0,
-            col: 2,
-          });
-          if (value === true) sendKeys(editor, ["1", "\x04"]);
+          assert.deepEqual(editor.getCursor(), { line: 6, col: 2 });
+          sendKeys(editor, ["1", "\x04", "\x04"]);
+          assert.deepEqual(editor.getCursor(), { line: 8, col: 2 });
+          assert.equal(editor.getText(), text);
+          assert.equal(editor.getMode(), "normal");
           await pi.emit("session_shutdown");
         }
-        assert.deepEqual(warnings, hasUI ? [warning] : []);
+        assert.deepEqual(warnings, []);
       } finally {
         restore();
       }

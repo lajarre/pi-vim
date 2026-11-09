@@ -75,9 +75,6 @@ Common quick wins:
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
 | `Enter` | Submit the prompt through Pi from idle Normal mode |
 | Unsupported editing keys / controls | Consumed in Normal/Visual; cancel pending arguments/counts without editing |
-| `<C-h>` / `<BS>` | Alias `h` in Normal/Visual, including counts and supported operators; Insert keeps delete-backward |
-| `<C-d>` / `<C-u>` | With `scrollKeys: true`, move down/up `ceil(visible rows / 2)` display rows; a count sets remembered rows |
-| `<C-f>` / `<C-b>` | With `scrollKeys: true`, move down/up `max(1, visible rows - 2)` display rows per count; otherwise host right/left aliases |
 | `:` | Normal → EX mini-mode |
 | `ZZ` | Normal → quit only if the prompt is empty or whitespace-only (same guard as `:q`; no write) |
 | `ZQ` | Normal → force quit, discarding the prompt (same as `:q!`) |
@@ -93,21 +90,45 @@ Common quick wins:
 
 `Z` is a Normal-only pending prefix: the footer shows ` NORMAL Z_ `. `Esc` / `Ctrl+[` cancels it without reaching Pi; any suffix other than `Z` or `Q` cancels and is dropped, except a Pi app chord, which cancels the prefix and runs its app action. Counts before `Z` are discarded. A pending operator, character-find, replace, or `g` command keeps precedence; `Z` does not start a quit prefix there. In Insert it is ordinary text; in Visual/V-Line it is ignored.
 
+### normal-mode control keys
+
+pi-vim owns Normal mode: implemented Vim control keys keep their Vim meanings by default, rather than Pi's readline meanings. These motions also work in Visual/V-Line.
+
+| key | action |
+|---|---|
+| `<C-d>` / `<C-u>` | Move down/up `ceil(visible rows / 2)` display rows; a count sets remembered rows until the rendered editor height changes or `/reload` |
+| `<C-f>` / `<C-b>` | Move down/up `max(1, visible rows - 2)` display rows per count, not one character |
+| `<C-h>` / `<BS>` | Alias `h`, including counts and supported operators; always available even with remapped/disabled host cursor bindings |
+| `<C-r>` | Redo the last undone change (Normal only) |
+| `<C-e>` / `<C-y>` | No Vim viewport-only scrolling: Pi exposes no public viewport control independent of the cursor; unsupported editor controls are consumed, app bindings still pass through |
+
+Half-page counts are remembered for both directions; full-page counts affect only that press. Counts cap at 9999. All four scroll keys keep the wanted screen column across short rows, share `gj` / `gk` wrapping, clamp at buffer edges and never recall prompt history. Horizontal motion, edits and width changes reset the wanted column. Before the first render the whole buffer is one page, one row per logical line; afterward the page is the text rows the host rendered last, excluding borders and completions. A render with the same text height preserves the remembered half-page count, even after a width change.
+
+Scrolling is intentionally **display-row cursor movement**, not Vim's exact viewport scroll: native scrolling depends on window position and logical lines, so even `<C-f><C-b>` on unwrapped text need not return to the starting cursor. Column preservation is like Vim's `nostartofline`, rather than its default `startofline`. Scroll keys are not operator motions: pending operators, `g`, `Z` or literal arguments cancel without editing. Insert and EX keep their existing dispatch.
+
+`<C-d>` never exits Pi from Normal or Visual/V-Line, even on an empty prompt: scrolling at the edge is a no-op. Use `ZZ` / `ZQ` to quit from Normal, or enter Insert for Pi's empty-prompt `<C-d>` exit.
+
 Vim commands call Pi's editor operations directly, so remapping or disabling Pi's movement, deletion, newline, or undo bindings does not break them. Register puts insert each filtered copy through Pi's public `insertTextAtCursor` API without triggering shortcuts; counted linewise puts keep each register copy intact and each put remains one Vim undo unit. Unlike nvim, puts normalize CRLF/CR to newlines, expand tabs to four spaces, and discard other C0, DEL, and C1 control characters so clipboard text cannot execute terminal escapes. The original register is unchanged. Actual Insert-mode input follows Pi's configured bindings.
 
-Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt, exit) work in every mode except EX's `<C-p>` / `<C-n>` / `<Up>` / `<Down>` history keys and cursor-binding conflicts below; other Pi text-editing shortcuts apply only in Insert.
+Pi's application shortcuts (model cycling with `<C-p>`, thinking cycling, external editor, interrupt) work in every mode except EX's `<C-p>` / `<C-n>` / `<Up>` / `<Down>` history keys and cursor-binding conflicts below. Registered app chords still beat scrolling, except `app.exit` on a scroll key in Normal/Visual. Other Pi text-editing shortcuts apply only in Insert.
 
-Unlike nvim, Normal also accepts Pi control/Alt extension shortcuts (e.g. `Alt+u`) and Backspace shortcuts. A claimed shortcut clears pending counts/operators and takes precedence over cursor aliases (including `<C-h>` / Backspace) and [scroll keys](#scrollkeys), without Pi's text-editing fallback; an unclaimed key keeps its existing behavior. This extension-only route excludes EX, Visual/V-Line, modal Escape, Vim undo/redo and printable/submit keys. Existing app-chord interception and Insert dispatch are unchanged.
+Unlike nvim, Normal also accepts Pi control/Alt extension shortcuts (e.g. `Alt+u`) and Backspace shortcuts. A claimed shortcut clears pending counts/operators and takes precedence over cursor aliases (including `<C-h>` / Backspace) and scroll keys, without Pi's text-editing fallback; an unclaimed key keeps its existing behavior. This extension-only route excludes EX, Visual/V-Line, modal Escape, Vim undo/redo and printable/submit keys. Existing app-chord interception and Insert dispatch are unchanged.
 
-Cursor bindings follow your Pi keybindings in Normal mode and Visual/V-Line: `tui.editor.cursorUp` / `cursorDown` / `cursorLeft` / `cursorRight` alias `k` / `j` / `h` / `l`, including counts, supported operators, sticky columns, dot-repeat and Normal-mode edge history recall. Defaults include the arrows and `<C-b>` / `<C-f>` for left/right (unless [scrollKeys](#scrollkeys) is enabled). Bindings are read when the editor is installed; use `/reload` after editing Pi's `keybindings.json`. Insert is unchanged; EX and literal arguments (`f`/`t`/`r`, text objects, `Z`) are not motion contexts, and Escape/undo/redo retain their modal meaning. Pi can retain multiple actions on one key: cursor aliases beat app actions outside Insert (claimed Normal extension shortcuts still win), but to use `<C-p>` for cursor-up in Insert too, also rebind or disable `app.model.cycleForward` (set it to `[]`). `<C-h>` and Backspace alias `h` through this same path even if the host cursor bindings are disabled or remapped, unless an extension claims the key in Normal. `d/c/y` followed by `h`, `<C-h>` or Backspace uses an exclusive, grapheme-safe leftward range; prefix and operator counts multiply and clamp at the logical line start. These are aliases of pi-vim's existing motions, including their known differences below, not a second motion implementation.
+Cursor bindings follow your Pi keybindings in Normal mode and Visual/V-Line: `tui.editor.cursorUp` / `cursorDown` / `cursorLeft` / `cursorRight` alias `k` / `j` / `h` / `l`, including counts, supported operators, sticky columns, dot-repeat and Normal-mode edge history recall. The explicit exclusions are `ctrl+b`, `ctrl+d`, `ctrl+f`, `ctrl+u`, `ctrl+h` and `ctrl+r`: pi-vim implements their Vim meanings, so host cursor remaps cannot replace them. `<C-b>` / `<C-f>` page despite Pi's default left/right bindings; `<C-h>` still takes its fixed `h` alias. Arrows keep their aliases, and custom `<C-p>` / `<C-n>` cursor-up/down bindings alias `k` / `j`. With Pi's defaults, `<C-p>` still cycles models.
 
-App chords cancel pending arguments/counts without changing the Vim mode or selection; the app callback may itself change the prompt. Unsupported editing controls are consumed in Normal/Visual. Idle-Normal `Enter` still submits; `Esc` aborts from idle Normal, but cancels pending Vim commands or leaves Visual first. Exit only fires on an empty prompt; it never falls through to deletion outside Insert. Vim undo/redo controls keep their own meaning.
+Bindings are read when the editor is installed; use `/reload` after editing Pi's `keybindings.json`. Insert is unchanged; EX and literal arguments (`f`/`t`/`r`, text objects, `Z`) are not motion contexts, and Escape/undo/redo retain their modal meaning. Pi can retain multiple actions on one key: cursor aliases beat app actions outside Insert (claimed Normal extension shortcuts still win), but to use `<C-p>` for cursor-up in Insert too, also rebind or disable `app.model.cycleForward` (set it to `[]`). `d/c/y` followed by `h`, `<C-h>` or Backspace uses an exclusive, grapheme-safe leftward range; prefix and operator counts multiply and clamp at the logical line start. These are aliases of pi-vim's existing motions, including their known differences below, not a second motion implementation.
+
+App chords cancel pending arguments/counts without changing the Vim mode or selection; the app callback may itself change the prompt. Unsupported editing controls are consumed in Normal/Visual. Idle-Normal `Enter` still submits; `Esc` aborts from idle Normal, but cancels pending Vim commands or leaves Visual first. EX and non-scroll remaps of `app.exit` retain the host's empty-prompt guard; they never fall through to deletion outside Insert. Vim undo/redo controls keep their own meaning.
 
 This uses runtime-checked Pi internals. Before input or rendering, pi-vim checks all required operations; if one is missing, it warns once and uses Pi's stock input, keybindings and rendering for that instance, without Vim labels, border colors or cursor shaping. Preflight leaves the buffer, cursor, registers and history untouched. Typing, submission, `/reload` and `/quit` remain available through Pi; no synthetic fallback keys are sent.
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
-Insert-mode shortcuts (stay in Insert mode):
+### insert-mode keys
+
+Insert mode keeps Pi's configured bindings, whose defaults are readline-style: `<C-a>` / `<C-e>` move to line start/end, `<C-b>` / `<C-f>` move one character, `<C-d>` deletes forward (or exits on an empty prompt), `<C-u>` / `<C-k>` kill to line start/end, `<C-w>` deletes a word backward, and Backspace deletes backward. Vim's Insert-mode control keys are not implemented. `<C-h>` (when encoded as Backspace), `<C-w>` and roughly `<C-u>` coincide; Vim's `<C-d>` unindent, `<C-t>` indent, `<C-e>` / `<C-y>` copy from the line below/above, `<C-r>` insert register and `<C-o>` execute one Normal command do not. Pi app chords and extension shortcuts retain their host precedence.
+
+Additional pi-vim shortcuts (stay in Insert mode):
 
 | key | action |
 |---|---|
@@ -390,7 +411,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `scrollKeys`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -399,7 +420,6 @@ Default-equivalent `settings.json`:
   "piVim": {
     "clipboardMirror": "all",
     "historyNavigation": true,
-    "scrollKeys": false,
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
@@ -442,18 +462,6 @@ Default-equivalent `settings.json`:
 Edges are logical lines, not wrapped screen rows. Recalled history entries place the cursor on the last grapheme of the last line (column zero for an empty line), without changing mode or the label. Returning to the saved draft instead keeps Pi's restored cursor position. Insert-mode arrows retain Pi's own behavior.
 
 Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX input, pending `g`/`Z`, and dot replay never recall history through `j` / `k`. Recall does not replace the last `.` change or open a Vim undo unit. Pi captures one undo snapshot when browsing begins: before any edit, `u` restores that pre-browse draft and leaves browsing; `<C-r>` restores the recalled text and cursor as a non-browsing draft. Successful recall clears stale redo; exhausted-history and buffer-local no-ops preserve it. Editing a recalled prompt ends browsing and is a separate undoable change.
-
-### scrollKeys
-
-| setting | default | scope / effect |
-|---|---|---|
-| `piVim.scrollKeys` | `false` | Global or project boolean; opt into display-row scrolling in Normal/Visual/V-Line; read at install and `/reload` |
-
-With `true`, `<C-d>` / `<C-u>` move down/up `ceil(visible rows / 2)` wrapped display rows. An explicit count sets the number of rows for this and later half-page presses in either direction, until reload. `<C-f>` / `<C-b>` move down/up `max(1, visible rows - 2)` rows; their count multiplies the distance for that press only and does not change the half-page preference. Counts cap at 9999. All four keep the wanted screen column across short rows, share `gj` / `gk` wrapping, clamp at buffer edges and never recall prompt history. Horizontal motion, edits and width changes reset the wanted column. Before the first render the whole buffer is one page, one row per logical line; afterward the page is the text rows the host rendered last, excluding borders and completions.
-
-Scrolling wins over cursor aliases for these keys, but registered Pi app chords still win over scrolling; in Normal, a claiming extension shortcut wins over both. Empty-prompt `<C-d>` remains Pi's `app.exit`; a nonempty prompt can scroll. Insert and EX are unchanged. Scrolling is not an operator motion: pending operators, `g`, `Z` or literal arguments cancel without editing. With the setting off, `<C-b>` / `<C-f>` retain host cursor aliases and `<C-d>` / `<C-u>` are consumed no-ops on nonempty prompts under Pi's defaults. Project settings override global even if invalid; non-booleans warn and default off.
-
-This is intentionally **display-row cursor movement**, not Vim's exact viewport scroll: Vim's native commands depend on window position and logical lines, and can move differently on wrapped text. Column preservation is like Vim's `nostartofline`, rather than its default `startofline`. `<C-e>` / `<C-y>` are **not implemented**: scrolling the window without moving the cursor requires host viewport control that Pi does not publicly expose. They retain existing ownership (unsupported editor controls are consumed; app bindings still pass through).
 
 ### exCommand
 
@@ -611,7 +619,8 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | `ZZ` / `ZQ` | Normal-only: `ZZ` uses the `:q` prompt guard, following Vim's own no-file rule (a modified buffer with no file name refuses with E32 and stays), while `ZQ` forces quit | `ZZ` writes a modified file then quits; `ZQ` quits without writing; both are Normal-mode commands |
 | Ex history | `<C-p>` / `<C-n>` recall up to 100 distinct submitted lines; `<Up>` / `<Down>` filter by the saved prefix; edits reset browsing; no persistence; canceled lines excluded | Vim retains the browse position after edits, records canceled lines and supports additional history-key variants |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
-| Scroll family | Opt-in `scrollKeys`: half/full-page display-row cursor moves, sticky screen column, remembered half-page count, buffer-edge clamp; empty-prompt `<C-d>` exits Pi; no `<C-e>` / `<C-y>` viewport-only scrolling | Native viewport scrolling depends on window position and logical lines; `startofline` controls column preservation; `<C-e>` / `<C-y>` scroll without moving the cursor |
+| Scroll family | Default half/full-page display-row cursor moves, sticky screen column, half-page count remembered until rendered height change/reload, buffer-edge clamp; `<C-d>` never exits Normal/Visual; no `<C-e>` / `<C-y>` viewport-only scrolling | Native viewport scrolling depends on window position and logical lines; `startofline` controls column preservation; `<C-e>` / `<C-y>` scroll without moving the cursor |
+| Insert control keys | Pi's configured readline-style bindings, not Vim's Insert controls; Backspace-encoded `<C-h>`, `<C-w>` and roughly `<C-u>` coincide | `<C-d>` / `<C-t>` change indent, `<C-e>` / `<C-y>` copy below/above, `<C-r>` inserts a register, `<C-o>` executes one Normal command |
 | Display rows | `gj` / `gk` follow Pi's word-aware wrapping and host-expanded tabs, not Vim's hard-wrap/tabstop layout; no wrapping before first render; resizing resets the wanted row column | Vim's configured window wrapping and tabstop rules |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, `gj/gk`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 | Cursor aliases / inherited motion gaps | Host cursor bindings reuse `hjkl`: rightward operator suffix `l` remains unsupported; `dk` lands at column zero, `yk` keeps the starting cursor, and dual-count vertical deletes retain pi-vim's line-count rule. Horizontal/short-line motions can reach the EOL space. | Full operator matrix, last-character Normal clamp, Vim cursor placement and count multiplication |

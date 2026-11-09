@@ -66,6 +66,33 @@ describe("cursor binding boundaries", () => {
     assert.equal(resolve("\x1b[113u"), "l");
   });
 
+  it("excludes implemented Vim controls from every host cursor direction", () => {
+    const controls = ["b", "d", "f", "u", "h", "r"];
+    for (const action of [
+      "cursorUp",
+      "cursorDown",
+      "cursorLeft",
+      "cursorRight",
+    ]) {
+      const resolve = createCursorBindingResolver(
+        new KeybindingsManager({
+          [`tui.editor.${action}`]: controls.map((key) => `ctrl+${key}`),
+        }),
+      );
+      for (const key of controls) {
+        const code = key.charCodeAt(0);
+        for (const raw of [
+          String.fromCharCode(code - 96),
+          `\x1b[${code};5u`,
+          `\x1b[27;5;${code}~`,
+        ]) {
+          // Ctrl-H is a fixed h alias, never a user-configured direction.
+          assert.equal(resolve(raw), key === "h" ? "h" : undefined);
+        }
+      }
+    }
+  });
+
   it("uses host direction order for duplicate cursor claims", () => {
     const resolve = createCursorBindingResolver(
       new KeybindingsManager({
