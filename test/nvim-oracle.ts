@@ -39,6 +39,11 @@ export type NvimParityCase = {
   displayWidth?: number;
   /** Fixed text viewport height; scroll fixtures use nostartofline. */
   displayHeight?: number;
+  /**
+   * Insert-escape sequence: Pi arms it with every key inside the window, nvim
+   * gets the equivalent `inoremap <sequence> <Esc>`.
+   */
+  insertEscape?: string;
 };
 
 export type NvimParitySnapshot = {
@@ -90,6 +95,7 @@ const NVIM_DRIVER_LUA = [
   "local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
   "if input.displayWidth then vim.o.columns = input.displayWidth; vim.wo.wrap = true; vim.wo.linebreak = false; vim.wo.number = false; vim.wo.relativenumber = false; vim.wo.signcolumn = 'no'; vim.wo.foldcolumn = '0'; vim.wo.showbreak = ''; vim.wo.breakindent = false; assert(vim.api.nvim_win_get_width(0) == input.displayWidth, 'fixture window width mismatch') end",
   "if input.displayHeight then vim.o.laststatus = 0; vim.o.cmdheight = 1; vim.o.lines = input.displayHeight + 1; vim.o.startofline = false; vim.wo.scroll = math.ceil(input.displayHeight / 2); assert(vim.api.nvim_win_get_height(0) == input.displayHeight, 'fixture window height mismatch') end",
+  "if input.insertEscape then vim.keymap.set('i', input.insertEscape, '<Esc>') end",
   "local lines = vim.split(input.text, '\\n', { plain = true })",
   "if #lines == 0 then lines = { '' } end",
   "local undo_levels = vim.bo.undolevels",
@@ -192,6 +198,14 @@ export function runPiParityCase(
           },
         };
   const editor = new ModalEditor(tui, stubTheme, keybindings);
+  if (testCase.insertEscape !== undefined) {
+    editor.setInsertEscapeSettings({
+      enabled: true,
+      sequence: testCase.insertEscape,
+      timeoutMs: 300,
+    });
+    editor.setInsertEscapeClock(() => 0);
+  }
   editor.setClipboardFn(() => undefined);
   editor.setClipboardReadFn(() => null);
   editor.setText(testCase.initial.text);
@@ -239,6 +253,7 @@ export async function runNvimParityCase(
     typedInput: testCase.typedInput ?? false,
     displayWidth: testCase.displayWidth,
     displayHeight: testCase.displayHeight,
+    insertEscape: testCase.insertEscape,
   };
 
   const child = spawn(
