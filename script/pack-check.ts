@@ -421,9 +421,18 @@ const THRESHOLDS = {
   // Limits become 81100 / 305700 / 20 (previously 80700 / 305500 / 20),
   // leaving 547 B / 709 B headroom. No dependency or packed file added;
   // ownership/parity coverage, benchmark evidence and QA remain excluded.
+  //
+  // 2026-11-11: Opt-in insert-escape sequence (off by default, e.g. `jk`):
+  // index.ts adds the rollback-style matcher, undo/redo/dot-repeat
+  // restoration and session wiring; settings.ts adds layered
+  // project/global/env resolution with validation; README documents how to
+  // configure it. Measured 85140 B packed / 319518 B unpacked / 20 files
+  // (+4587 B / +14527 B). Limits become 85600 / 320200 / 20 (previously
+  // 81100 / 305700 / 20), leaving 460 B / 682 B headroom. No dependency or
+  // packed file added; tests and parity coverage remain excluded.
   maxFiles: 20,
-  maxSize: 81100,
-  maxUnpackedSize: 305700,
+  maxSize: 85600,
+  maxUnpackedSize: 320200,
 } as const;
 
 function compareStrings(a: string, b: string): number {

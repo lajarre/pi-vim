@@ -74,11 +74,13 @@ import {
   DEFAULT_CURSOR_SHAPE_SETTINGS,
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
+  type InsertEscapeSettings,
   type LabelPosition,
   readPiVimSettings,
   resolveCursorShapeSettings,
   resolveExCommandSettings,
   resolveHistoryNavigation,
+  resolveInsertEscapeSettings,
   resolveLabelPosition,
   resolveSurfaceSyncMaps,
   type SurfaceSyncMap,
@@ -237,6 +239,12 @@ type RepeatableCommand = Pick<RepeatRecording, "keys" | "countOverrideKeys">;
 
 type TransitionState = "none" | "undo" | "redo" | "restore";
 
+type InsertEscapeMark = {
+  undoDepth: number;
+  version: number;
+  redo: EditorSnapshot[];
+};
+
 type ModalEditorInternals = {
   state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
   preferredVisualCol?: number | null;
@@ -316,6 +324,23 @@ export class ModalEditor extends CustomEditor {
    */
   private undoWindow: { floor: number; openVersion: number } | null = null;
   private currentTransition: TransitionState = "none";
+  // Off unless session wiring applies a configured sequence (there is no
+  // default), so a bare ModalEditor keeps every printable key as plain text.
+  private insertEscapeSettings: InsertEscapeSettings = {
+    enabled: false,
+    sequence: "",
+    timeoutMs: 0,
+  };
+  // Progress through the insert-escape sequence: `index` keys matched, the
+  // last at `at`. `marks[i]` is the editor state before matched key i (host
+  // undo depth, buffer change version, redo stack), so a restart on an
+  // overlapping suffix keeps the right baseline and a rollback can restore it.
+  private pendingInsertEscape: {
+    index: number;
+    at: number;
+    marks: InsertEscapeMark[];
+  } | null = null;
+  private insertEscapeNow: () => number = () => Date.now();
   private onChangeHooked: boolean = false;
   private editorActionsAvailable: boolean | null = null;
   private cursorMarkerProbe: (() => boolean) | null;
@@ -453,6 +478,13 @@ export class ModalEditor extends CustomEditor {
   setExCommandSettings(settings: ExCommandSettings): void {
     this.exCommandSettings = settings;
   }
+  setInsertEscapeSettings(settings: InsertEscapeSettings): void {
+    this.insertEscapeSettings = { ...settings };
+    this.pendingInsertEscape = null;
+  }
+  setInsertEscapeClock(now: () => number): void {
+    this.insertEscapeNow = now;
+  }
   getRegister(): string {
     return this.unnamedRegister;
   }
@@ -566,6 +598,7 @@ export class ModalEditor extends CustomEditor {
   private setMode(mode: Mode = "insert"): void {
     const prev = this.mode;
     this.mode = mode;
+    if (prev !== mode) this.pendingInsertEscape = null;
     // Leaving insert ends any host-tainted session, so the next implicit
     // insert (post-submit or a re-entry) records normally again.
     if (prev === "insert" && mode !== "insert") {
@@ -585,6 +618,7 @@ export class ModalEditor extends CustomEditor {
     this.discardUndoWindow();
     this.clearRedoStack();
     this.clearRepeatState();
+    this.pendingInsertEscape = null;
     // A full host buffer reset starts a fresh session: later typing is a new
     // implicit insert, not a continuation of a host-tainted one.
     this.implicitInsertSuppressed = false;
@@ -595,6 +629,7 @@ export class ModalEditor extends CustomEditor {
   override insertTextAtCursor(text: string): void {
     this.discardUndoWindow();
     this.cancelRepeatableCommand();
+    this.pendingInsertEscape = null;
     // A host injection mid-insert taints the session: the injected text is not
     // ours to replay, and neither is any typing that continues around it.
     this.implicitInsertSuppressed = true;
@@ -830,6 +865,9 @@ export class ModalEditor extends CustomEditor {
     if (this.mode === "insert") {
       if (this.shouldCancelInsertRepeatInput(key)) {
         this.clearRepeatState();
+        // A submit or a completion replaces the buffer context the pending
+        // sequence belonged to.
+        this.pendingInsertEscape = null;
         // A submit clears the host undo stack and an autocomplete accept injects
         // host text; either way `floor` no longer indexes a valid snapshot, so
         // discard the window. There is no cross-submit undo.
@@ -1492,6 +1530,7 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (this.tryInsertEscape(data)) return;
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           runPiEditorAction(this, "moveToLineEnd");
           return;
@@ -1667,6 +1706,123 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private isHostPasteActive(): boolean {
+    return (this as unknown as { isInPaste?: boolean }).isInPaste === true;
+  }
+
+  private hostUndoDepth(): number {
+    const stack = (this as unknown as ModalEditorInternals).undoStack?.stack;
+    return stack ? stack.length : 0;
+  }
+
+  /**
+   * Rollback-style insert escape (opt-in, e.g. `jk`). Every key of the sequence
+   * inserts immediately, with no input delay; when its last key arrives with
+   * each gap within `timeoutMs`, the typed sequence is deleted and the editor
+   * lands exactly as `Esc` would. The transient buffer state is never painted
+   * (`requestRender` only schedules). Only bare single-character chunks count:
+   * a paste arrives as one longer chunk (or while the host tracks `isInPaste`)
+   * and a `.` replay feeds recorded keys, so neither ever escapes.
+   *
+   * Returns true only when the escape fired and fully handled `data`.
+   */
+  private tryInsertEscape(data: string): boolean {
+    const { enabled, sequence, timeoutMs } = this.insertEscapeSettings;
+    if (
+      data.length !== 1 ||
+      !enabled ||
+      this.replayingRepeat ||
+      this.isHostPasteActive()
+    ) {
+      this.pendingInsertEscape = null;
+      return false;
+    }
+    let pending = this.pendingInsertEscape;
+    // Ordinary typing stops here: no pending sequence and not its first key.
+    if (pending === null && data !== sequence[0]) return false;
+    const now = this.insertEscapeNow();
+    if (pending !== null && now - pending.at > timeoutMs) pending = null;
+    const mark: InsertEscapeMark = {
+      undoDepth: this.hostUndoDepth(),
+      version: this.bufferChangeVersion,
+      redo: [...this.redoStack],
+    };
+    let index = 0,
+      marks: InsertEscapeMark[] = [];
+    if (pending !== null) {
+      // Longest suffix of the matched keys plus `data` that still prefixes the
+      // sequence: `jjk` escapes for `jk`, `aaab` for `aab`.
+      const typed = sequence.slice(0, pending.index) + data;
+      for (let k = Math.min(typed.length, sequence.length); k > 0; k--) {
+        if (!typed.endsWith(sequence.slice(0, k))) continue;
+        const drop = typed.length - k;
+        index = k;
+        marks = [...pending.marks, mark].slice(drop);
+        break;
+      }
+    } else if (data === sequence[0]) {
+      index = 1;
+      marks = [mark];
+    }
+    if (index === 0) {
+      this.pendingInsertEscape = null;
+      return false;
+    }
+    if (index < sequence.length) {
+      this.pendingInsertEscape = { index, at: now, marks };
+      return false;
+    }
+    this.pendingInsertEscape = null;
+    super.handleInput(data);
+    this.rollbackInsertEscape(marks[0] ?? mark);
+    return true;
+  }
+
+  private rollbackInsertEscape(mark: InsertEscapeMark): void {
+    const { sequence } = this.insertEscapeSettings;
+    // The whole sequence sits immediately before the cursor. Verify before
+    // cutting so a surprising host rewrite (an extension swallowing a key, say)
+    // degrades to typed text in insert mode, never to a wrong deletion.
+    const text = this.getText();
+    const cursorAbs = this.getAbsoluteIndexFromCursor();
+    const start = cursorAbs - sequence.length;
+    if (start < 0 || text.slice(start, cursorAbs) !== sequence) return;
+    // Bypass the register: this deletes escape letters, not a user edit, so
+    // the unnamed register must keep whatever the session last yanked.
+    this.replaceTextInBuffer(
+      text.slice(0, start) + text.slice(cursorAbs),
+      start,
+    );
+    this.rewriteInsertEscapeInRecording();
+    // Only the sequence's own keys ran since `mark` (anything else resets the
+    // pending state), so the buffer is back to that state: an escape-only
+    // insert is no change at all, exactly like `i<Esc>`, and keeps redo.
+    this.bufferChangeVersion = mark.version;
+    this.redoStack.splice(0, this.redoStack.length, ...mark.redo);
+    // The open insert window collapses these pushes on close; a windowless
+    // session (host-tainted, no recording) trims them back to the depth before
+    // the first key instead, so `u` can never resurrect the escape letters.
+    if (this.undoWindow === null) this.collapseUndoStackTo(mark.undoDepth);
+    // Same landing as `handleEscape`: normal mode, cursor back one character.
+    this.setMode("normal");
+    if (this.getCursor().col > 0) this.moveCursorBy(-1);
+  }
+
+  private rewriteInsertEscapeInRecording(): void {
+    const recording = this.repeatRecording;
+    if (!recording) return;
+    // The recorder captured the sequence as typed text. Swap the trailing
+    // sequence for the single Escape an `Esc` exit would have recorded, so `.`
+    // replays the insert text without the escape letters.
+    const keys = [...this.insertEscapeSettings.sequence];
+    for (const stream of [recording.keys, recording.countOverrideKeys]) {
+      const start = stream.length - keys.length;
+      if (start >= 0 && keys.every((key, i) => stream[start + i] === key)) {
+        stream.splice(start, keys.length, "\x1b");
+      }
+    }
+  }
+
   private clearUnderlyingPasteStateIfActive(): void {
     const editor = this as unknown as {
       isInPaste?: boolean;
@@ -1736,6 +1892,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handleEscape(): void {
+    this.pendingInsertEscape = null;
     if (this.pendingExCommand !== null) {
       this.clearPendingExCommand();
       this.handleAppAction("\x1b");
@@ -4852,6 +5009,13 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
 
+    const insertEscape = resolveInsertEscapeSettings(
+      piVimSettings.insertEscape,
+    );
+    if (insertEscape.warning && ctx.hasUI) {
+      ctx.ui.notify(insertEscape.warning, "warning");
+    }
+
     const historyNavigation = resolveHistoryNavigation(
       piVimSettings.historyNavigation,
     );
@@ -4922,6 +5086,7 @@ export default function (pi: ExtensionAPI) {
       editor.setCursorShapeSettings(cursorShape.settings);
       editor.setHistoryNavigation(historyNavigation.enabled);
       editor.setExCommandSettings(exCommand.settings);
+      editor.setInsertEscapeSettings(insertEscape.settings);
       // Resolved at submit time so commands registered or reloaded mid-session
       // are dispatchable without restarting.
       editor.setCommandNamesFn(

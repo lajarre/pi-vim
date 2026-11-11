@@ -31,6 +31,12 @@ export type ExCommandSettings = {
   copyInputToClipboard: boolean;
 };
 
+export type InsertEscapeSettings = {
+  enabled: boolean;
+  sequence: string;
+  timeoutMs: number;
+};
+
 export type BorderSyncMode = boolean | "inherit";
 
 // Per-surface paint policy for a single mode:
@@ -50,6 +56,7 @@ export type PiVimSettings = {
   clipboardMirror?: unknown;
   exCommand?: unknown;
   globalExCommand?: unknown;
+  insertEscape?: unknown;
   modeColors?: ModeColorSettings;
   historyNavigation?: unknown;
   labelPosition?: unknown;
@@ -74,6 +81,14 @@ export const DEFAULT_CURSOR_SHAPE_SETTINGS: CursorShapeSettings = {
 export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
   piDispatch: true,
   copyInputToClipboard: false,
+};
+
+// No sequence ships by default: the escape stays off until one is set (for
+// example `jk`). `enabled` is the resolved on/off state.
+export const DEFAULT_INSERT_ESCAPE_SETTINGS: InsertEscapeSettings = {
+  enabled: false,
+  sequence: "",
+  timeoutMs: 300,
 };
 
 const M = Symbol(),
@@ -203,6 +218,52 @@ export function resolveExCommandSettings(
   return {
     settings,
     warning: `Invalid piVim.exCommand ${invalid.join(", ")}; expected a boolean.`,
+  };
+}
+
+export function readPiVimInsertEscapeSetting(g: unknown, p: unknown) {
+  // The escape only deletes text the user just typed, so a project file may
+  // override it. Whole-setting override, like cursorShape.
+  const v = get(p, "insertEscape");
+  if (v !== M) return v;
+  const w = get(g, "insertEscape");
+  return w === M ? undefined : w;
+}
+
+const validSequence = (v: unknown): v is string =>
+  typeof v === "string" && /^[\x20-\x7e]{2,32}$/.test(v);
+const validTimeout = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 60000;
+
+// The escape is on exactly when a valid sequence is set. Invalid fields fall
+// back to their defaults and are named, never echoed, in one warning.
+export function resolveInsertEscapeSettings(value: unknown): {
+  settings: InsertEscapeSettings;
+  warning?: string;
+} {
+  const settings = { ...DEFAULT_INSERT_ESCAPE_SETTINGS };
+  if (value === undefined) return { settings };
+  if (!rec(value)) {
+    return {
+      settings,
+      warning: "Invalid piVim.insertEscape; expected an object.",
+    };
+  }
+  const invalid: string[] = [];
+  if (Object.hasOwn(value, "sequence")) {
+    if (validSequence(value.sequence)) settings.sequence = value.sequence;
+    else invalid.push("sequence");
+  }
+  if (Object.hasOwn(value, "timeoutMs")) {
+    if (validTimeout(value.timeoutMs)) settings.timeoutMs = value.timeoutMs;
+    else invalid.push("timeoutMs");
+  }
+  settings.enabled = settings.sequence !== "";
+  return {
+    settings,
+    ...(invalid.length > 0 && {
+      warning: `Invalid piVim.insertEscape ${invalid.join(", ")}; expected sequence as 2-32 printable ASCII characters and timeoutMs as a whole number from 1 to 60000.`,
+    }),
   };
 }
 
@@ -381,6 +442,7 @@ function disk(cwd: string): PiVimSettings {
     clipboardMirror: readPiVimClipboardMirrorSetting(g, p),
     exCommand: readPiVimExCommandSetting(g, p),
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
+    insertEscape: readPiVimInsertEscapeSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     historyNavigation: readPiVimHistoryNavigation(g, p),
     labelPosition: readPiVimLabelPositionSetting(g, p),

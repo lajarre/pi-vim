@@ -411,7 +411,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `historyNavigation`, `exCommand.piDispatch`, `insertEscape`, `modeColors`, `cursorShape`, `labelPosition`, `borderSync`, and `labelSync` (maps are replaced as whole objects, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -423,6 +423,9 @@ Default-equivalent `settings.json`:
     "exCommand": {
       "piDispatch": true,
       "copyInputToClipboard": false
+    },
+    "insertEscape": {
+      "timeoutMs": 300
     },
     "cursorShape": {
       "insert": "bar",
@@ -468,6 +471,27 @@ Any count (including `1k`), an operator (`dk`, `yj`, `ck`), Visual/V-Line, EX in
 `exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [pi-command bridge](#pi-command-bridge)); `false` restores a quit-only ex line. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
 
 `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the non-empty composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
+
+### insertEscape
+
+An opt-in escape sequence: typing `sequence` (for example `jk`) fast in Insert mode leaves Insert for Normal, so you never have to reach for `Esc`. **No sequence is set by default**, so out of the box every key is plain text, like Vim with no `inoremap`. To turn it on, set a sequence:
+
+```json
+{
+  "piVim": {
+    "insertEscape": { "sequence": "jk" }
+  }
+}
+```
+
+It works by rollback, so typing never lags: each key inserts as soon as you press it. When the last key arrives and each key came within `timeoutMs` of the one before it, pi-vim deletes the typed sequence and lands exactly where `Esc` would. The cursor ends up in the same place, the letters never come back with `u`, and `.` replays the inserted text without them. The unnamed register is left alone. `Esc` / `Ctrl+[` work as before.
+
+- `sequence`: unset by default. Setting it turns the escape on. It must be 2–32 printable ASCII characters and is case-sensitive. Letters may repeat: `jj`, `jk`, `kj`, `;;` and `jkl` are all valid. Overlaps resolve the way Vim's mappings do, so with `jk`, a fast `jjk` leaves one `j` and escapes.
+- `timeoutMs`: a whole number from 1 to 60000 (default `300`). It is the **maximum gap between two consecutive keys**, not a limit on the whole sequence, so a 3-key sequence typed at 250 ms per key still escapes with the default.
+
+Only individual keypresses count. A paste that contains the sequence inserts it as text, and so does a `.` replay. To type the sequence literally, pause longer than `timeoutMs` between its keys. Pi has no `<C-v>` quoted insert, so timing is the only way.
+
+A project `piVim.insertEscape` replaces the global one as a whole, so a project can turn off your global `jk` with `"insertEscape": {}`. An invalid field falls back to its default, and a single warning at session start names each rejected field without echoing its value.
 
 ### labelPosition
 
@@ -620,6 +644,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Ex history | `<C-p>` / `<C-n>` recall up to 100 distinct submitted lines; `<Up>` / `<Down>` filter by the saved prefix; edits reset browsing; no persistence; canceled lines excluded | Vim retains the browse position after edits, records canceled lines and supports additional history-key variants |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Scroll family | Default half/full-page display-row cursor moves, sticky screen column, half-page count remembered until rendered height change/reload, buffer-edge clamp; `<C-d>` never exits Normal/Visual; no `<C-e>` / `<C-y>` viewport-only scrolling | Native viewport scrolling depends on window position and logical lines; `startofline` controls column preservation; `<C-e>` / `<C-y>` scroll without moving the cursor |
+| Insert escape sequence | Off by default, like Vim. An opt-in sequence (`piVim.insertEscape.sequence`, e.g. `jk`) leaves Insert like `Esc`, using rollback with a per-key timeout, so the first key shows immediately | `inoremap jk <Esc>` waits for `timeoutlen` before showing the first key |
 | Insert control keys | Pi's configured readline-style bindings, not Vim's Insert controls; Backspace-encoded `<C-h>`, `<C-w>` and roughly `<C-u>` coincide | `<C-d>` / `<C-t>` change indent, `<C-e>` / `<C-y>` copy below/above, `<C-r>` inserts a register, `<C-o>` executes one Normal command |
 | Display rows | `gj` / `gk` follow Pi's word-aware wrapping and host-expanded tabs, not Vim's hard-wrap/tabstop layout; no wrapping before first render; resizing resets the wanted row column | Vim's configured window wrapping and tabstop rules |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, `gj/gk`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
