@@ -554,7 +554,7 @@ Editor reconstruction releases the previous cursor ownership before taking it ag
 
 ### modeColors
 
-`piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
+`piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above. INSERT defaults to panel colors.
 
 `visual` colors both VISUAL and V-LINE (the mode label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
 
