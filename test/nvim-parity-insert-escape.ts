@@ -1,10 +1,18 @@
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assertMatchesNvim, type NvimParityCase } from "./nvim-oracle.js";
+import {
+  type NvimParityCase,
+  runNvimParityCase,
+  runPiParityCase,
+} from "./nvim-oracle.js";
 
 // pi-vim's insert escape matches nvim's `inoremap {sequence} <Esc>` when each
 // key lands inside the timeout (the oracle feeds nvim the whole key string).
 // Pi's implicit startup insert has no nvim counterpart (`startinsert` records
 // no `i`), so its dot-repeat is covered in test/insert-escape.test.ts instead.
+// Prompt-history browsing and Ctrl+] jump-to-char are Pi-only; their
+// interaction with the sequence is covered there too. Count-insert repeat
+// (`3i…<Esc>`) is out of scope (README): unit-tested against Esc only.
 const INSERT_ESCAPE_CASES: NvimParityCase[] = [
   {
     name: "jk leaves insert mid-line like Esc",
@@ -96,12 +104,57 @@ const INSERT_ESCAPE_CASES: NvimParityCase[] = [
     insertEscape: "jk",
     typedInput: true,
   },
+  {
+    name: "cw plus the sequence, then . elsewhere",
+    initial: { text: "one two three", cursor: { line: 0, col: 0 } },
+    keys: ["c", "w", "n", "e", "w", "j", "k", "w", "."],
+    insertEscape: "jk",
+    typedInput: true,
+  },
+  {
+    name: "cw on whitespace plus the sequence, then . elsewhere",
+    initial: { text: "foo bar baz", cursor: { line: 0, col: 3 } },
+    keys: ["c", "w", "-", "j", "k", "w", "e", "l", "."],
+    insertEscape: "jk",
+    typedInput: true,
+  },
+  {
+    name: "a no-op Backspace before the sequence adds no undo step",
+    initial: { text: "", cursor: { line: 0, col: 0 } },
+    keys: ["i", "a", "b", "c", "\x1b", "0", "i", "\x7f", "j", "k", "u"],
+    insertEscape: "jk",
+    typedInput: true,
+  },
+  {
+    name: "the sequence at column 0 of a second line",
+    initial: { text: "one\ntwo", cursor: { line: 1, col: 0 } },
+    keys: ["i", "j", "k"],
+    insertEscape: "jk",
+  },
+  {
+    name: "a multi-byte character before the cursor",
+    initial: { text: "x", cursor: { line: 0, col: 0 } },
+    keys: ["A", "é", "j", "k"],
+    insertEscape: "jk",
+  },
+  {
+    name: "a skin-tone emoji before the cursor",
+    initial: { text: "x", cursor: { line: 0, col: 0 } },
+    keys: ["A", "👍🏽", "j", "k"],
+    insertEscape: "jk",
+  },
 ];
 
-// Pre-existing undo gap, identical with a plain Esc (`A foo<Esc>u`): Pi
-// restores the cursor one column right of nvim. Not insert-escape behavior.
+// Pi receives Backspace as DEL; nvim's feedkeys needs the `<BS>` keycode.
+const NVIM_KEYS: Record<string, string> = { "\x7f": "<BS>" };
+
+// Pre-existing gaps, identical with a plain Esc, so not insert-escape
+// behavior. Undo (`A foo<Esc>u`): Pi restores the cursor one column right of
+// nvim. `cw` on a word (`cwnew<Esc>`): Pi changes like `dw` and eats the
+// trailing space, where Vim changes like `ce`.
 const KNOWN_NVIM_PARITY_GAPS = new Set([
   "u undoes the insert without resurrecting the letters",
+  "cw plus the sequence, then . elsewhere",
 ]);
 
 describe("nvim parity: insert escape sequence", () => {
@@ -111,7 +164,13 @@ describe("nvim parity: insert escape sequence", () => {
       continue;
     }
     it(testCase.name, async () => {
-      await assertMatchesNvim(testCase);
+      assert.deepEqual(
+        runPiParityCase(testCase),
+        await runNvimParityCase({
+          ...testCase,
+          keys: testCase.keys.map((key) => NVIM_KEYS[key] ?? key),
+        }),
+      );
     });
   }
 });

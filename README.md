@@ -484,7 +484,7 @@ An opt-in escape sequence: typing `sequence` (for example `jk`) fast in Insert m
 }
 ```
 
-It works by rollback, so typing never lags: each key inserts as soon as you press it. When the last key arrives and each key came within `timeoutMs` of the one before it, pi-vim deletes the typed sequence and lands exactly where `Esc` would. The cursor ends up in the same place, the letters never come back with `u`, and `.` replays the inserted text without them. The unnamed register is left alone. `Esc` / `Ctrl+[` work as before.
+It works by rollback, so typing never lags: each key inserts as soon as you press it. When the last key arrives and each key came within `timeoutMs` of the one before it, pi-vim deletes the typed sequence and lands exactly where `Esc` would. The cursor ends up in the same place, the letters never come back with `u`, and `.` replays the inserted text without them. The unnamed register is left alone. Prompt-history browsing is left as `Esc` leaves it, so after recalling an entry Normal `j` still returns to your draft. `Esc` / `Ctrl+[` work as before.
 
 - `sequence`: unset by default. Setting it turns the escape on. It must be 2–32 printable ASCII characters and is case-sensitive. Letters may repeat: `jj`, `jk`, `kj`, `;;` and `jkl` are all valid. Overlaps resolve the way Vim's mappings do, so with `jk`, a fast `jjk` leaves one `j` and escapes.
 - `timeoutMs`: a whole number from 1 to 60000 (default `300`). It is the **maximum gap between two consecutive keys**, not a limit on the whole sequence, so a 3-key sequence typed at 250 ms per key still escapes with the default.

@@ -243,6 +243,14 @@ type InsertEscapeMark = {
   undoDepth: number;
   version: number;
   redo: EditorSnapshot[];
+  /** Cursor and line shape before the key, to prove the keys inserted it. */
+  line: number;
+  col: number;
+  lineLength: number;
+  lineCount: number;
+  /** Host prompt-history browse state, which the key's edit resets. */
+  historyIndex: number;
+  historyDraft: unknown;
 };
 
 type ModalEditorInternals = {
@@ -250,6 +258,7 @@ type ModalEditorInternals = {
   preferredVisualCol?: number | null;
   lastAction?: string | null;
   historyIndex?: number;
+  historyDraft?: unknown;
   onChange?: (text: string) => void;
   tui?: { requestRender?: () => void };
   pushUndoSnapshot?: () => void;
@@ -1741,11 +1750,23 @@ export class ModalEditor extends CustomEditor {
     // Ordinary typing stops here: no pending sequence and not its first key.
     if (pending === null && data !== sequence[0]) return false;
     const now = this.insertEscapeNow();
-    if (pending !== null && now - pending.at > timeoutMs) pending = null;
+    // A wall clock stepped backwards makes the gap negative: treat as expired.
+    const gap = pending === null ? 0 : now - pending.at;
+    if (gap < 0 || gap > timeoutMs) pending = null;
+    const host = this as unknown as ModalEditorInternals;
+    const cursor = this.getCursor();
+    // Read the host lines in place: `getLines()` copies on every key.
+    const lines = host.state?.lines ?? this.getLines();
     const mark: InsertEscapeMark = {
       undoDepth: this.hostUndoDepth(),
       version: this.bufferChangeVersion,
       redo: [...this.redoStack],
+      line: cursor.line,
+      col: cursor.col,
+      lineLength: (lines[cursor.line] ?? "").length,
+      lineCount: lines.length,
+      historyIndex: host.historyIndex ?? -1,
+      historyDraft: host.historyDraft ?? null,
     };
     let index = 0,
       marks: InsertEscapeMark[] = [];
@@ -1787,6 +1808,19 @@ export class ModalEditor extends CustomEditor {
     const cursorAbs = this.getAbsoluteIndexFromCursor();
     const start = cursorAbs - sequence.length;
     if (start < 0 || text.slice(start, cursorAbs) !== sequence) return;
+    // Each key must have inserted exactly one character at the cursor: a key
+    // the host consumed (Ctrl+] jump-to-char target) can leave pre-existing
+    // text that only looks like the sequence.
+    const cursor = this.getCursor();
+    const lines =
+      (this as unknown as ModalEditorInternals).state?.lines ?? this.getLines();
+    if (
+      cursor.line !== mark.line ||
+      cursor.col !== mark.col + sequence.length ||
+      lines.length !== mark.lineCount ||
+      (lines[cursor.line] ?? "").length !== mark.lineLength + sequence.length
+    )
+      return;
     // Bypass the register: this deletes escape letters, not a user edit, so
     // the unnamed register must keep whatever the session last yanked.
     this.replaceTextInBuffer(
@@ -1799,10 +1833,18 @@ export class ModalEditor extends CustomEditor {
     // insert is no change at all, exactly like `i<Esc>`, and keeps redo.
     this.bufferChangeVersion = mark.version;
     this.redoStack.splice(0, this.redoStack.length, ...mark.redo);
-    // The open insert window collapses these pushes on close; a windowless
-    // session (host-tainted, no recording) trims them back to the depth before
-    // the first key instead, so `u` can never resurrect the escape letters.
-    if (this.undoWindow === null) this.collapseUndoStackTo(mark.undoDepth);
+    // Trim the sequence's own host pushes back to the depth before its first
+    // key, so `u` can never resurrect the escape letters. Do it even inside an
+    // open insert window: after a no-op edit (Backspace at column 0) the window
+    // sees a changed version and would keep the first key's push on close,
+    // leaving a phantom undo step that `Esc` never creates.
+    this.collapseUndoStackTo(mark.undoDepth);
+    // The first key's edit ended host history browsing (and the replace above
+    // resets the index again); restore it so Normal `j` still reaches the
+    // saved draft, exactly as after `Esc`.
+    const host = this as unknown as ModalEditorInternals;
+    host.historyIndex = mark.historyIndex;
+    host.historyDraft = mark.historyDraft;
     // Same landing as `handleEscape`: normal mode, cursor back one character.
     this.setMode("normal");
     if (this.getCursor().col > 0) this.moveCursorBy(-1);

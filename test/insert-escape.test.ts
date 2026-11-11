@@ -53,13 +53,60 @@ function createEditor(
   };
 }
 
+type HostState = {
+  undoStack: { stack: unknown[] };
+  redoStack: unknown[];
+  historyIndex: number;
+  historyDraft: unknown;
+};
+
 function snapshot(editor: ModalEditor) {
+  const host = editor as unknown as HostState;
   return {
     text: editor.getText(),
     cursor: editor.getCursor(),
     mode: editor.getMode(),
     register: editor.getRegister(),
+    undoDepth: host.undoStack.stack.length,
+    redoLength: host.redoStack.length,
+    historyIndex: host.historyIndex,
+    hasHistoryDraft: host.historyDraft != null,
   };
+}
+
+const UP = "\x1b[A";
+
+/** Two prompt-history entries and history navigation on, like a Pi session. */
+function withHistory(clocked: Clocked): Clocked {
+  clocked.editor.setHistoryNavigation(true);
+  clocked.editor.addToHistory("older one");
+  clocked.editor.addToHistory("newer one");
+  return clocked;
+}
+
+/**
+ * Runs `before + sequence + after` on an escape-enabled editor and
+ * `before + Esc + after` on an identical twin, then compares full state.
+ */
+function assertEscTwin(
+  keys: { before: string[]; after?: string[] },
+  options: {
+    settings?: Partial<InsertEscapeSettings>;
+    text?: string;
+    setup?: (clocked: Clocked) => Clocked;
+  } = {},
+) {
+  const setup = options.setup ?? ((clocked: Clocked) => clocked);
+  const settings = { ...JK, ...options.settings };
+  const viaSequence = setup(createEditor(settings, options.text));
+  const viaEscape = setup(createEditor(settings, options.text));
+  viaSequence.type([...keys.before, ...settings.sequence]);
+  viaEscape.type([...keys.before, ESC]);
+  assert.deepEqual(snapshot(viaSequence.editor), snapshot(viaEscape.editor));
+  viaSequence.type(keys.after ?? []);
+  viaEscape.type(keys.after ?? []);
+  assert.deepEqual(snapshot(viaSequence.editor), snapshot(viaEscape.editor));
+  return { viaSequence, viaEscape };
 }
 
 describe("insert escape sequence", () => {
@@ -82,12 +129,11 @@ describe("insert escape sequence", () => {
   it("escapes from an empty prompt at column 0", () => {
     const { editor, type } = createEditor();
     type(["j", "k"]);
-    assert.deepEqual(snapshot(editor), {
-      text: "",
-      cursor: { line: 0, col: 0 },
-      mode: "normal",
-      register: "",
-    });
+    const { text, cursor, mode, register } = snapshot(editor);
+    assert.deepEqual(
+      { text, cursor, mode, register },
+      { text: "", cursor: { line: 0, col: 0 }, mode: "normal", register: "" },
+    );
   });
 
   it("keeps jk as text after the per-key timeout", () => {
@@ -321,6 +367,263 @@ describe("insert escape sequence", () => {
     type(["k"]);
     assert.equal(editor.getText(), "xyk");
     assert.equal(editor.getMode(), "insert");
+  });
+});
+
+describe("insert escape matches its Esc twin", () => {
+  it("a no-op Backspace before the sequence leaves no phantom undo step", () => {
+    const { viaSequence } = assertEscTwin({
+      before: ["a", "b", "c", ESC, "0", "i", "\x7f"],
+      after: ["u"],
+    });
+    assert.equal(viaSequence.editor.getText(), "");
+    assertEscTwin({
+      before: ["a", "b", "c", ESC, "0", "i", "\x7f"],
+      after: ["u", "x", "u", "u"],
+    });
+  });
+
+  it("a no-op Ctrl+U on an empty prompt leaves no phantom undo step", () => {
+    assertEscTwin({ before: ["\x15"], after: ["u"] });
+    assertEscTwin({
+      before: ["a", "b", "c", ESC, "o", "\x15"],
+      after: ["u", "x", "u", "u"],
+    });
+  });
+
+  it("Up recall then the sequence keeps the draft reachable with j", () => {
+    const { viaSequence } = assertEscTwin(
+      { before: ["d", "r", "a", "f", "t", UP, UP], after: ["j"] },
+      { setup: withHistory },
+    );
+    assert.equal(viaSequence.editor.getText(), "draft");
+  });
+
+  it("a two-deep recall then the sequence browses back like Esc", () => {
+    const { viaSequence } = assertEscTwin(
+      { before: ["d", "r", "a", "f", "t", UP, UP, UP], after: ["j", "j"] },
+      { setup: withHistory },
+    );
+    assert.equal(viaSequence.editor.getText(), "draft");
+  });
+
+  it("Normal k recall, i, then the sequence keeps browsing", () => {
+    const { viaSequence } = assertEscTwin(
+      { before: ["d", "r", "a", "f", "t", ESC, "k", "i"], after: ["j"] },
+      { setup: withHistory },
+    );
+    assert.equal(viaSequence.editor.getText(), "draft");
+  });
+
+  it("a real edit after a recall still ends history browsing", () => {
+    const timedOut = withHistory(createEditor());
+    timedOut.type(["d", "r", "a", "f", "t", UP, UP, "j"]);
+    timedOut.type(["k"], 301);
+    const timedOutHost = timedOut.editor as unknown as HostState;
+    assert.equal(timedOut.editor.getText(), "jknewer one");
+    assert.equal(timedOutHost.historyIndex, -1);
+    assert.equal(timedOutHost.historyDraft, null);
+    // With `jk`, a fast `jjk` keeps the first `j` as real text.
+    const { viaSequence } = assertEscTwin(
+      { before: ["d", "r", "a", "f", "t", UP, UP, "j"], after: ["j"] },
+      { setup: withHistory },
+    );
+    assert.equal(viaSequence.editor.getText(), "jnewer one");
+    const sequenceHost = viaSequence.editor as unknown as HostState;
+    assert.equal(sequenceHost.historyIndex, -1);
+  });
+
+  it("a key consumed by jump-to-char never deletes existing text", () => {
+    // Pi-only (Ctrl+] jump-to-char): `j` is the jump target, so only `k` is
+    // typed and the `jk` before the cursor is not what these keys inserted.
+    const { editor, type } = createEditor({}, "ajj b");
+    type(["l", "i", "\x1d", "j", "k"]);
+    assert.equal(editor.getText(), "ajkj b");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("a backwards clock step between the keys counts as expired", () => {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    editor.setInsertEscapeSettings(JK);
+    let now = 10_000;
+    editor.setInsertEscapeClock(() => now);
+    editor.handleInput("j");
+    now -= 5_000;
+    editor.handleInput("k");
+    assert.equal(editor.getText(), "jk");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("a counted insert matches Esc", () => {
+    assertEscTwin({ before: ["3", "i", "x"] }, { text: "abc" });
+  });
+
+  it("cw plus text, then . elsewhere, matches Esc", () => {
+    assertEscTwin(
+      { before: ["c", "w", "n", "e", "w"], after: ["w", "."] },
+      { text: "one two three" },
+    );
+  });
+
+  it("A plus text, then 3., matches Esc", () => {
+    assertEscTwin(
+      { before: ["A", "a", "b"], after: ["3", "."] },
+      { text: "x" },
+    );
+  });
+
+  it("lands on a whole grapheme before the cursor like Esc", () => {
+    for (const grapheme of ["👍🏽", "e\u0301"]) {
+      const { viaSequence } = assertEscTwin(
+        { before: ["A", grapheme] },
+        { text: "x" },
+      );
+      assert.deepEqual(viaSequence.editor.getCursor(), { line: 0, col: 1 });
+    }
+  });
+
+  it("at column 0 of a second line matches Esc", () => {
+    assertEscTwin({ before: ["j", "0", "i"] }, { text: "one\ntwo" });
+  });
+});
+
+describe("insert escape equivalence property", () => {
+  const TIMEOUT = 300;
+
+  /** Deterministic LCG so every run replays the same streams. */
+  function lcg(seed: number) {
+    let state = seed;
+    return () => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff;
+      return state / 0x7fffffff;
+    };
+  }
+
+  function twinEditor(sequence: string | null) {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    editor.setClipboardFn(() => undefined);
+    editor.setClipboardReadFn(() => null);
+    editor.setHistoryNavigation(true);
+    if (sequence)
+      editor.setInsertEscapeSettings({
+        enabled: true,
+        sequence,
+        timeoutMs: TIMEOUT,
+      });
+    editor.addToHistory("older one");
+    editor.addToHistory("old jj prompt");
+    return editor;
+  }
+
+  function fullState(editor: ModalEditor) {
+    const internals = editor as unknown as {
+      lastRepeatableCommand: unknown;
+    };
+    return {
+      ...snapshot(editor),
+      lastRepeatable: internals.lastRepeatableCommand,
+    };
+  }
+
+  type Step = { key: string; gap: number };
+
+  /**
+   * Feeds the escape-enabled editor raw keys and a disabled twin the same
+   * keys through an independent lazy Vim-style matcher (held keys flush as
+   * text, a full match sends Esc); compares whenever nothing is held. The
+   * key after Insert-mode Ctrl+] is a jump target the host consumes, so it
+   * never counts toward the sequence.
+   */
+  function firstMismatch(sequence: string, steps: Step[]): string | null {
+    const withEscape = twinEditor(sequence);
+    const twin = twinEditor(null);
+    let now = 1_000;
+    withEscape.setInsertEscapeClock(() => now);
+    let held = "",
+      lastAt = 0,
+      jumpTarget = false;
+    const flush = () => {
+      for (const key of held) twin.handleInput(key);
+      held = "";
+    };
+    for (const [i, { key, gap }] of steps.entries()) {
+      now += gap;
+      withEscape.handleInput(key);
+      const printable =
+        key.length === 1 && key.charCodeAt(0) >= 32 && key !== "\x7f";
+      const inInsert = twin.getMode() === "insert";
+      if (inInsert && printable && !jumpTarget) {
+        if (held && now - lastAt > TIMEOUT) flush();
+        const typed = held + key;
+        let k = Math.min(typed.length, sequence.length);
+        while (k > 0 && !typed.endsWith(sequence.slice(0, k))) k--;
+        for (const c of typed.slice(0, typed.length - k)) twin.handleInput(c);
+        held = sequence.slice(0, k);
+        lastAt = now;
+        if (k === sequence.length) {
+          held = "";
+          twin.handleInput(ESC);
+        }
+      } else {
+        flush();
+        twin.handleInput(key);
+      }
+      jumpTarget = inInsert && key === "\x1d";
+      if (held !== "") continue;
+      const a = JSON.stringify(fullState(withEscape));
+      const b = JSON.stringify(fullState(twin));
+      if (a !== b) return `step ${i}:\n  escape=${a}\n  twin=${b}`;
+    }
+    return null;
+  }
+
+  it("matches a lazy matcher feeding Esc to a disabled twin", () => {
+    const random = lcg(20261111);
+    const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)];
+    for (const sequence of ["jk", "jj", "aab", "kjk"]) {
+      const letters = [...new Set(sequence)];
+      const pool = [
+        ...letters,
+        ...letters,
+        ...letters,
+        "x",
+        " ",
+        ESC,
+        "\x7f",
+        "\x7f",
+        "\x15",
+        "\x1d",
+        UP,
+        "\x1b[B",
+        "\x1b[D",
+        "\r",
+        "i",
+        "A",
+        "o",
+        "c",
+        "w",
+        "0",
+        "3",
+        "u",
+        "u",
+        "\x12",
+        ".",
+        "é",
+      ];
+      for (let stream = 0; stream < 100; stream++) {
+        const steps: Step[] = Array.from({ length: 24 }, () => ({
+          key: pick(pool),
+          gap: random() < 0.12 ? TIMEOUT + 100 : 10,
+        }));
+        const mismatch = firstMismatch(sequence, steps);
+        if (mismatch === null) continue;
+        assert.fail(
+          `sequence ${sequence}, keys ${JSON.stringify(
+            steps.map(({ key, gap }) => (gap > TIMEOUT ? "~" : "") + key),
+          )}\n${mismatch}`,
+        );
+      }
+    }
   });
 });
 
